@@ -1,0 +1,2 @@
+include toksearch/slurm/saga/*.yaml
+include docs/*.ipynb

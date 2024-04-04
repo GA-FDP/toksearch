@@ -1,0 +1,428 @@
+# Copyright 2024 General Atomics
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import unittest
+import sys
+import os
+import tempfile
+import numpy as np
+from abc import ABC, abstractmethod
+import timeit
+import time
+import MDSplus as mds
+import docker
+
+
+from toksearch.signal.mds import (
+    MdsConnectionRegistry,
+    MdsTreeRegistry,
+    MdsTreePath,
+    MdsLocalSignal,
+    MdsRemoteSignal,
+    MdsSignal,
+)
+
+from toksearch.utilities.utilities import set_env, unset_env
+
+this_dir = os.path.dirname(__file__)
+trees_dir = os.path.join(this_dir, "trees")
+
+mds_connection_type = mds.Connection
+mds_tree_type = mds.Tree
+
+DEFAULT_SHOT = 165920
+DEFAULT_TREE = "efit01"
+DEFAULT_TREEPATH = trees_dir
+DEFAULT_EXPRESSION = r"\ipmhd"
+
+
+# The container cache is used to ensure that only one container is running
+# at a time.
+class ContainerCache:
+    _container = None
+    _port = None
+
+    @classmethod
+    def create_and_run_container(
+        cls, treename=DEFAULT_TREE
+    ) -> docker.models.containers.Container:
+        """Run an MDSplus server in a Docker container
+
+        Args:
+            treename (str, optional): The name of the tree to run. Defaults to 'efit01'.
+
+        Returns:
+            docker.models.containers.Container: The Docker container object
+        """
+        if cls._container is not None:
+            return cls._container
+
+        # Get the current user's UID and GID
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+
+        # Initialize a Docker client using the default socket or configuration
+        client = docker.from_env()
+
+        # Define the container environment variables with dynamic UID and GID
+        environment = {
+            "UID": str(current_uid),
+            "GID": str(current_gid),
+            f"{treename}_path": "/trees",
+        }
+
+        # Define the volume mapping
+        volumes = {
+            trees_dir: {"bind": "/trees", "mode": "ro"},
+        }
+
+        # Define the port mapping
+        ports = {
+            "8000/tcp": 0,
+        }
+
+        # Pull the image and run the container
+        container = client.containers.run(
+            "mdsplus/mdsplus:tree-server-stable-7.128.1",
+            detach=True,  # Run in detached mode
+            environment=environment,
+            volumes=volumes,
+            ports=ports,
+        )
+
+        container.reload()
+        port = container.ports["8000/tcp"][0]["HostPort"]
+        max_retries = 10
+        time.sleep(1)
+        for i in range(max_retries):
+            try:
+                conn = mds.Connection(f"localhost:{port}")
+                del conn
+                break
+            except Exception as e:
+                time.sleep(1)
+
+        if i == max_retries - 1:
+            raise Exception("Failed to connect to MDSplus server")
+
+        cls._container = container
+        cls._port = port
+        return container
+
+    @classmethod
+    def stop_container(cls):
+        if cls._container is not None:
+            cls._container.stop()
+            cls._container = None
+            cls._port = None
+
+    @classmethod
+    def port(cls):
+        return cls._port
+
+
+def tearDownModule():
+    ContainerCache.stop_container()
+
+
+class TestMdsTreePath(unittest.TestCase):
+    def test_variable_name(self):
+        varname = MdsTreePath.variable_name("d3d")
+        self.assertEqual(varname, "d3d_path")
+
+    def test_set_env(self):
+        paths = {"d3d": "abcd", "nb": "efg"}
+        tree_path = MdsTreePath(**paths)
+
+        # Clear the variables in they already exist
+        for key, val in paths.items():
+            varname = MdsTreePath.variable_name(key)
+            if varname in os.environ:
+                del os.environ[varname]
+            self.assertNotIn(varname, os.environ)
+
+        # Check if the variables are set inside the context manager
+        with tree_path.set_env():
+            for key, val in paths.items():
+                varname = MdsTreePath.variable_name(key)
+                self.assertEqual(paths[key], os.environ[varname])
+
+        # Now check that they've been cleared when outside the context
+        # manager scope
+        for key, val in paths.items():
+            varname = MdsTreePath.variable_name(key)
+            self.assertNotIn(varname, os.environ)
+
+
+class TestMdsSignal(unittest.TestCase):
+
+    def test_remote_location_grabbed_from_environment(self):
+        server = "fake.gat.com"
+        default_location = f"remote://{server}"
+
+        with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
+            sig = MdsSignal("blah", "efit01")
+        self.assertEqual(sig.sig.server, server)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+
+    def test_local_location_grabbed_from_environment(self):
+        default_location = "/some/fake/path"
+        with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
+            sig = MdsSignal("blah", "efit01")
+        self.assertEqual(sig.sig.treepath, default_location)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+    def test_create_local_mdsignal(self):
+        sig = MdsSignal("blah", "efit01", location="blah")
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+    def test_local_has_correct_treepath(self):
+        sig = MdsSignal("blah", "efit01", location="abc")
+        self.assertEquals(sig.sig.treepath, "abc")
+
+    def test_local_with_double_colons(self):
+        sig = MdsSignal("blah", "efit01", location="abc::")
+        self.assertEquals(sig.sig.treepath, "abc::")
+
+    def test_create_remote_mdsignal(self):
+        sig = MdsSignal("blah", "efit01", location="remote://blah")
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+
+    def test_create_local_mdsignal_with_treepath(self):
+        sig = MdsSignal("blah", "efit01", location=MdsTreePath())
+        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+    def test_create_local_mdsignal_with_location_set_to_none(self):
+        with unset_env("TOKSEARCH_MDS_DEFAULT"):
+            sig = MdsSignal("blah", "efit01", location=None)
+        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+
+class GenericTestMdsSignal(ABC):
+
+    def signal(
+        self,
+        expression=None,
+        dims=("times",),
+        data_order=None,
+        fetch_units=True,
+        tree=None,
+    ):
+        expression = expression or DEFAULT_EXPRESSION
+        tree = tree or DEFAULT_TREE
+        return self._signal(expression, tree, dims, fetch_units, data_order)
+
+    @abstractmethod
+    def _signal(self, expression, tree, dims, fetch_units, data_order):
+        pass
+
+    def test_cleanup_shot(self):
+        """Just see if it runs without throwing exception"""
+        sig = self.signal()
+        shot = DEFAULT_SHOT
+        sig.initialize(shot)
+        sig.cleanup_shot(shot)
+
+    def test_cleanup(self):
+        """Just see if it runs without throwing exception"""
+        sig = self.signal()
+        shot = DEFAULT_SHOT
+        sig.initialize(shot)
+        sig.cleanup()
+
+    def test_fetch_returns_valid_data_times(self):
+        sig = self.signal()
+        shot = DEFAULT_SHOT
+        results = sig.fetch(shot)
+        self.assertGreater(len(results["data"]), 0)
+        self.assertGreater(len(results["times"]), 0)
+
+    def test_fetch_returns_valid_data_no_times(self):
+        sig = self.signal(dims=None)
+        shot = DEFAULT_SHOT
+        results = sig.fetch(shot)
+        self.assertGreater(len(results["data"]), 0)
+        self.assertTrue("times" not in results)
+        self.assertTrue("times" not in results["units"])
+
+    def test_fetch_returns_valid_units(self):
+        sig = self.signal()
+        shot = DEFAULT_SHOT
+        results = sig.fetch(shot)
+        self.assertIsInstance(results["units"]["data"], str)
+        self.assertIsInstance(results["units"]["times"], str)
+        self.assertEqual(results["units"]["times"], "ms")
+        self.assertEqual(results["units"]["data"], "A")
+
+    def test_fetch_without_units(self):
+        sig = self.signal(fetch_units=False)
+        shot = DEFAULT_SHOT
+        results = sig.fetch(shot)
+        self.assertNotIn("units", results)
+
+    def test_multidimensional_fetch(self):
+        sig = self.signal(expression=r"\psirz", dims=("r", "z", "times"))
+        shot = DEFAULT_SHOT
+
+        results = sig.fetch(shot)
+        self.assertIn("data", results)
+        self.assertIn("times", results)
+        self.assertIn("r", results)
+        self.assertIn("z", results)
+
+    def test_multidimensional_fetch_xarray(self):
+        shot = DEFAULT_SHOT
+
+        sig = self.signal(
+            expression=r"\psirz",
+            dims=("r", "z", "times"),
+            data_order=("times", "r", "z"),
+        )
+
+        data_array = sig.fetch_as_xarray(shot)
+
+        self.assertIn("times", data_array.dims)
+        self.assertIn("r", data_array.dims)
+        self.assertIn("z", data_array.dims)
+
+
+class TestMdsRemoteSignal(GenericTestMdsSignal, unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.container = ContainerCache.create_and_run_container()
+        cls.port = ContainerCache.port()
+        cls.server = f"localhost:{cls.port}"
+
+    def _signal(self, expression, tree, dims, fetch_units, data_order):
+        server = self.server
+        return MdsRemoteSignal(
+            expression,
+            tree,
+            server,
+            dims=dims,
+            data_order=data_order,
+            fetch_units=fetch_units,
+        )
+
+    # def test_fetch_returns_units_missing(self):
+    #    expression = DEFAULT_EXPRESSION
+    #    sig = self.signal(tree=expression), expression=expression)
+    #    #shot = self.defaults.unitless_shot() #use shot that doesnt have units defined
+    #    shot = DEFAULT_SHOT
+    #    results = sig.fetch(shot)
+    #    self.assertEquals(results['units']['data']," ")
+    #    self.assertEquals(results['units']['times']," ")
+
+
+class TestMdsLocalSignal(GenericTestMdsSignal, unittest.TestCase):
+    def _signal(self, expression, tree, dims, fetch_units, data_order):
+        return MdsLocalSignal(
+            expression,
+            tree,
+            treepath=DEFAULT_TREEPATH,
+            dims=dims,
+            data_order=data_order,
+            fetch_units=fetch_units,
+        )
+
+
+class TestMdsConnectionRegistry(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.container = ContainerCache.create_and_run_container()
+        cls.port = ContainerCache.port()
+        cls.server = f"localhost:{cls.port}"
+
+    def setUp(self):
+        self.registry = MdsConnectionRegistry()
+
+    def tearDown(self):
+        del self.registry
+
+    def test_registry_is_singleton(self):
+        registry = MdsConnectionRegistry()
+        registry2 = MdsConnectionRegistry()
+        self.assertIs(registry, registry2)
+
+    def test_repeated_connects_give_same_connection_object(self):
+        server = self.server
+        registry = MdsConnectionRegistry()
+        conn = registry.connect(server)
+        conn2 = registry.connect(server)
+        self.assertIs(conn, conn2)
+
+    def test_connect_returns_valid_mds_connection(self):
+        server = self.server
+        registry = MdsConnectionRegistry()
+        conn = registry.connect(server)
+        self.assertIsInstance(conn, mds_connection_type)
+
+    def test_disconnect_deletes_connection(self):
+        server = self.server
+        registry = MdsConnectionRegistry()
+        conn = registry.connect(server)
+        registry.disconnect(server)
+        self.assertTrue(server not in registry._connection_map)
+        conn2 = registry.connect(server)
+        self.assertIsNot(conn, conn2)
+
+
+class TestMdsTreeRegistry(unittest.TestCase):
+    def test_get_tree_returns_none_with_empty_map(self):
+        registry = MdsTreeRegistry()
+        registry._tree_map = {}
+
+        self.assertIs(registry._get_tree("blah", 123), None)
+
+    def test_open_tree(self):
+        registry = MdsTreeRegistry()
+        registry.reset()
+
+        treename = DEFAULT_TREE
+        treepath = DEFAULT_TREEPATH
+        shot = DEFAULT_SHOT
+
+        tree = registry.open_tree(treename, shot, treepath=treepath)
+        self.assertTrue(treename in registry._tree_map)
+        self.assertTrue(shot in registry._tree_map[treename])
+        self.assertIsInstance(tree, mds_tree_type)
+
+        tree2 = registry.open_tree(treename, shot, treepath=treepath)
+        self.assertIs(tree, tree2)
+
+    def test_open_tree_with_empty_treepath(self):
+        registry = MdsTreeRegistry()
+        registry.reset()
+
+        treename = DEFAULT_TREE
+        treepath = DEFAULT_TREEPATH
+        shot = DEFAULT_SHOT
+
+        print("TREENAME: {}, TREEPATH: {}".format(treename, treepath))
+
+        varname = MdsTreePath.variable_name(treename)
+        if varname in os.environ:
+            del os.environ[varname]
+        with self.assertRaises(mds.TreeNOPATH):
+            tree2 = registry.open_tree(treename, shot, treepath=None)
+
+        try:
+            with set_env("{}_path".format(treename), treepath):
+                tree = registry.open_tree(treename, shot, treepath=None)
+        except mds.TreeNOPATH:
+            self.fail("open_tree failed to open tree using environment")

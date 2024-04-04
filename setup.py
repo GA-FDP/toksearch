@@ -1,0 +1,62 @@
+# Copyright 2024 General Atomics
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from setuptools import setup
+from setuptools import Extension
+from setuptools import find_packages
+import os
+import numpy as np
+
+
+def ell1_extension():
+    # Check if the user has specified an include dir for cblas.h. 
+    # If not, then check whether we're using a conda env
+    # (presumably with openblas installed)
+    # Failing that, do nothing and hope for the best.
+    conda_prefix = os.getenv('CONDA_PREFIX', None)
+    user_blas_dir = os.getenv('ELL1_BLAS_INCLUDE_DIR', None)
+
+    if user_blas_dir:
+        include_dirs = [user_blas_dir]
+    elif conda_prefix:
+        blas_include_dir = os.path.join(conda_prefix, 'include')
+        include_dirs = [blas_include_dir]
+    else:
+        include_dirs = []
+
+    include_dirs += [np.get_include(), 'src',]
+
+    return Extension(
+        'toksearch.library.ell1module',
+        sources=['src/ell1_python.c', 'src/ell1lib.c'],
+        libraries=[
+            'm',
+            'rt',
+            'pthread',
+            'gfortran',
+            'openblas',
+        ],
+        extra_compile_args=['-Wno-unused-variable', '-O0', '-g', '-std=c99'],
+        include_dirs=include_dirs,
+    )
+
+
+packages = [os.path.join('toksearch', package) for package in find_packages('toksearch')]
+
+setup(name = 'toksearch',
+      ext_modules = [ell1_extension(),],
+      include_package_data=True,
+      packages=packages,
+      scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
+)

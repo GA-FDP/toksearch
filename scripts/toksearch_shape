@@ -1,0 +1,281 @@
+#!/usr/bin/env python
+
+# Copyright 2024 General Atomics
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import sys
+import yaml
+import argparse
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import random
+import pprint
+import numpy as np
+import sqlite3
+from scipy import interpolate
+from toksearch import Pipeline, MdsSignal
+from toksearch.sql.mssql import connect_d3drdb
+from toksearch.slurm.ray_cluster import SlurmRayCluster 
+from toksearch.slurm import inside_slurm_job
+from toksearch.slurm.runner import SlurmRunner
+from toksearch.library.shape import BoundarySimilarityPipeline
+
+
+def make_ordinal(n):
+    '''
+    Convert an integer into its ordinal representation::
+
+        make_ordinal(0)   => '0th'
+        make_ordinal(3)   => '3rd'
+        make_ordinal(122) => '122nd'
+        make_ordinal(213) => '213th'
+
+    Taken from here:
+    https://stackoverflow.com/a/50992575
+    '''
+    n = int(n)
+    suffix = ['th', 'st', 'nd', 'rd', 'th'][min(n % 10, 4)]
+    if 11 <= (n % 100) <= 13:
+        suffix = 'th'
+    return str(n) + suffix
+
+
+def plot_boundary_comparison(ax, rec, baseline_shot, baseline_bdry):
+    bdry_slice = rec['closest_match']
+
+    x = 1000.*bdry_slice[:, 0]
+    y = 1000.*bdry_slice[:, 1]
+
+    x_baseline = 1000.*baseline_bdry[:,0]
+    y_baseline = 1000.*baseline_bdry[:,1]
+
+    ax.plot(x_baseline, y_baseline, label=f'shot {baseline_shot} (baseline)')
+    ax.plot(x, y, label=f'shot {rec["shot"]}')
+    ax.set_ylabel('z (mm)')
+    ax.set_xlabel('r (mm)')
+    ax.legend()
+
+def plot_dist(ax, rec):
+    ax.plot(rec['dist']['times'], 1000*rec['dist']['data'], label='Similarity metric')
+    ax.axvline(rec['t_min_dist'], color='r')
+
+    title = (
+        f'Similarity metric vs time.\n'
+        f'Closest match: {1000.*rec["min_dist"]:.1f} mm\n'
+        f'at t = {rec["t_min_dist"]:.1f} ms'
+        )
+    ax.set_title(title)
+    ax.set_ylabel('Dist (mm)')
+
+
+def _create_db(filename,
+               baseline_shot,
+               baseline_time, 
+               translate,
+               efit_tree,
+               results):
+
+    with open(filename, 'w'):
+        pass
+
+    conn = sqlite3.connect(filename)
+
+    c = conn.cursor()
+    c.execute("""
+        create table run_info (
+            baseline_shot INTEGER,
+            baseline_time FLOAT,
+            translate INTEFER,
+            efit_tree TEXT
+        )
+    """)
+
+
+    c.execute("""
+        create table minimum_distances (
+            shot INTGER,
+            distance FLOAT,
+            time FLOAT
+        )
+    """)
+
+    c.execute("insert into run_info (baseline_shot, baseline_time, translate, efit_tree) values (?,?,?,?)",
+              (baseline_shot, baseline_time, translate, efit_tree))
+
+    c.executemany("insert into minimum_distances (shot, distance, time) values (?,?,?)", results)
+
+    conn.commit()
+    conn.close()
+
+def find(args):
+    if inside_slurm_job() or args.local:
+        _do_find(args)
+    else:
+        script = sys.argv[0]
+        script_args = sys.argv[1:]
+        slurm_runner = SlurmRunner(args.num_nodes, config_file=args.config_file)
+
+        print(f'Passing through to Slurm: {script} {script_args}')
+        if args.batch:
+            sys.exit(slurm_runner.run_batch(script, *script_args).returncode)
+        else:
+            sys.exit(slurm_runner.run_interactive(script, *script_args).returncode)
+
+def _do_find(args):
+
+    query = """
+        select shot from shots_type 
+        where 
+            shot_type = 'plasma' and 
+            shot > %d and 
+            shot < %d 
+        order by newid()
+        """
+
+    with connect_d3drdb() as conn:
+        initial_pipe = Pipeline.from_sql(conn, query, args.minshot, args.maxshot)
+
+    pipe = BoundarySimilarityPipeline(initial_pipe,
+                                      args.baseline_shot,
+                                      args.baseline_time,
+                                      translate=not args.no_translate,
+                                      efit_tree=args.efit_tree)
+
+    if args.num_nodes > 1 :
+        cluster = SlurmRayCluster.from_config()
+        cluster.start()
+        cluster.ray_init()
+
+    results = pipe.compute_ray(numparts=10000)
+    results = list(results)
+
+    # Sort by minimum distance
+    results.sort(key=lambda rec: rec['min_dist'])
+
+    results_dict = [dict(rec) for rec in results]
+
+    results_list = [{'shot': int(rec['shot']),
+                     'min_dist': float(rec['min_dist']),
+                     't_min_dist': float(rec['t_min_dist'])}
+                     for rec in results]
+
+    results_tuples = [(int(rec['shot']), float(rec['min_dist']), float(rec['t_min_dist']))
+                      for rec in results]
+
+
+    _create_db(args.results_file,
+               args.baseline_shot,
+               args.baseline_time,
+               int(not args.no_translate),
+               args.efit_tree,
+               results_tuples)
+
+    print(f'{len(results_tuples)} results written to {args.results_file}')
+
+
+def plot(args):
+
+
+    conn = sqlite3.connect(args.results_file)
+
+    run_info_query = """
+        select baseline_shot, baseline_time, translate, efit_tree
+        from run_info
+    """
+
+    c = conn.cursor()
+    c.execute(run_info_query)
+    baseline_shot, baseline_time, translate, efit_tree = c.fetchone()
+
+
+    c.execute("select min(shot), max(shot) from minimum_distances")
+    earliest_shot, last_shot = c.fetchone()
+    minshot = max(int(args.minshot), earliest_shot)
+    maxshot = min(int(args.maxshot), last_shot)
+
+    dist_query = """
+        select shot from (
+            select shot, distance
+            from minimum_distances
+            where
+                shot != ? and
+                shot >= ? and
+                shot <= ?
+            order by distance asc
+            limit ?)
+        order by distance desc
+        limit 1       
+    """
+
+    ith = int(args.ith)
+    initial_pipeline = Pipeline.from_sql(conn,
+                                         dist_query, 
+                                         baseline_shot, 
+                                         minshot,
+                                         maxshot,
+                                         ith)
+
+    pipe = BoundarySimilarityPipeline(initial_pipeline,
+                                      baseline_shot,
+                                      baseline_time,
+                                      translate=translate,
+                                      efit_tree=efit_tree)
+
+
+    rec = pipe.compute_serial()[0]
+
+    fig = plt.figure()
+
+    gs = GridSpec(2, 2, figure=fig)
+    ax1 = fig.add_subplot(gs[:,0])
+    ax2 = fig.add_subplot(gs[:,1])
+
+
+    plot_boundary_comparison(ax1, rec, baseline_shot, pipe.baseline_bdry)
+    plot_dist(ax2, rec)
+    fig.suptitle(f'{make_ordinal(ith)} best result in {args.results_file}\nbetween shot {minshot} and {maxshot}')
+    plt.tight_layout()
+
+    plt.show()
+
+if __name__ == '__main__':
+
+    default_results_file = 'similarity_results.db'
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+
+    find_parser = subparsers.add_parser('find')
+    find_parser.add_argument('baseline_shot', type=int)
+    find_parser.add_argument('baseline_time', type=float)
+    find_parser.add_argument('--maxshot', default=1000000)
+    find_parser.add_argument('--minshot', default=0)
+    find_parser.add_argument('--local', action='store_true')
+    find_parser.add_argument('--efit-tree', '-e', default='efit01')
+    find_parser.add_argument('--results-file', '-f', default=default_results_file)
+    find_parser.add_argument('--no-translate', action='store_true')
+    
+    SlurmRunner.update_parser(find_parser)
+    find_parser.set_defaults(func=find)
+
+    plot_parser = subparsers.add_parser('plot')
+    plot_parser.add_argument('--maxshot', default=1000000)
+    plot_parser.add_argument('--minshot', default=0)
+    plot_parser.add_argument('--results-file', default=default_results_file)
+    plot_parser.add_argument('--ith', '-i', default=1)
+    plot_parser.set_defaults(func=plot)
+
+    args = parser.parse_args()
+
+    args.func(args)

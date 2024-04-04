@@ -1,0 +1,62 @@
+# Copyright 2024 General Atomics
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+job:
+    - --gres=gpu:volta:1
+    - --x11=all
+
+interactive:
+    - --gres=gpu:volta:0
+    - --overlap
+
+host_resolution:
+    module: toksearch.slurm.saga.common
+    func: saga_ip_address
+
+spark:
+    master:
+        srun:
+            - --gres=gpu:volta:0
+            - --overlap
+
+    worker:
+        srun:
+            - --gres=gpu:volta:1
+            - --overlap
+        start:
+            - -c
+            - 48
+            - -m
+            - 149G
+
+
+ray:
+    master:
+        srun:
+            - --gres=gpu:volta:1
+            - --overlap
+            - --propagate
+
+        start:
+            - --object-store-memory=95000000000
+            - --memory=80000000000
+
+    worker:
+        srun:
+            - --gres=gpu:volta:1
+            - --overlap
+            - --propagate
+
+        start:
+            - --object-store-memory=95000000000
+            - --memory=80000000000
