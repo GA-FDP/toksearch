@@ -34,7 +34,6 @@ nav:
     - "Distributed computing": distributed_computing.md
     - "Creating pipelines from SQL": sql.md
     - "Combining data after pipeline computation": Aggregating_Data.ipynb
-  - Installation: installation.md
   - API:
     - "Pipeline": pipeline.md
     - "Signal": signal.md
