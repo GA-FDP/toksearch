@@ -36,14 +36,16 @@ nav:
     - "Combining data after pipeline computation": Aggregating_Data.ipynb
   - API:
     - "Pipeline": pipeline.md
-    - "Signal": signal.md
     - "Record": record.md
-    - "RecordSet": record_set.md
+    - "MDSplus Data Access": mds.md 
     - Backend:
       - Ray: backend_ray.md
       - Spark: backend_spark.md
       - Serial: backend_serial.md
       - Multiprocessing: backend_multiprocessing.md
+    - Abstract Interfaces:
+      - "Signal": signal.md
+      - "RecordSet": record_set.md
 
 theme:
   name: material

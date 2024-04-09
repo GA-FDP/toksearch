@@ -42,6 +42,7 @@ import contextlib
 from urllib.parse import urlparse
 import numpy as np
 import psutil
+from typing import Union, Iterable, Optional
 
 from .signal import Signal
 
@@ -74,17 +75,51 @@ def set_env(var: str, val: str):
         os.environ.clear()
         os.environ.update(old_environ)
 
+class MdsTreePath(object):
+    def __init__(self, **paths):
+        """Create an object to manage the paths to MDSplus trees
+
+        Keyword Arguments:
+            Accepts keyword arguments of the form
+            treename=/some/mds/tree/path
+        """
+        self.paths = paths
+
+    @contextlib.contextmanager
+    def set_env(self):
+        """Temporarily set mds treepath environment variables"""
+        old_environ = dict(os.environ)
+        for key, val in self.paths.items():
+            os.environ[self.variable_name(key)] = val
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(old_environ)
+
+    @classmethod
+    def variable_name(cls, treename):
+        """Return the name of the environment variable for the given treename"""
+        return "{}_path".format(treename)
+
 
 class MdsLocalSignal(Signal):
-    def __init__(self, expression, treename, **kwargs):
+    def __init__(
+        self, 
+        expression: str,
+        treename: str,
+        treepath: Union[str, MdsTreePath] = None,
+        dims: Iterable[str] = ("times",),
+        data_order: Optional[Iterable[str]] = None,
+        fetch_units: bool = True,
+    ):
         """Create a signal object that fetches data from an MDSplus tree
 
         Arguments:
-            expression (string): The tdi expression to fetch data from
-            treename (string): The name of the tree to fetch from
+            expression: The tdi expression to fetch data from
+            treename: The name of the tree to fetch from
 
-        Keyword Arguments:
-            treepath (string or MdsTreePath): If not set, MDSplus will just use the
+            treepath: If not set, MDSplus will just use the
                 environment variable of the form ${treename}_path. This
                 kwarg can be either
                 1) A string. In this case the environment variable
@@ -95,41 +130,22 @@ class MdsLocalSignal(Signal):
 
                 2) An MdsTreePath object
 
-            fetch_units (boolean): Whether or not to fetch the dimensions. Defaults
+            dims: See documentation for the Signal class. Defaults to ('times',)
+            data_order: See documentation for the Signal class. Defaults to the same
+                as dims.
+            fetch_units: See documentation for the Signal class. Defaults 
                 to True.
-
-            dims (iterable of strings): A list or other iterable of the labels
-                for each dimension of the signals data. Most typically, this
-                is just time, so the default is ('times',). If, for example,
-                you have a time varying profile with, say, a radial dimension,
-                you could pass ('times', 'radius'). The order is significant
-                since, and in the case of MDSplus, it needs to match the way
-                dim_of(0), dim_of(1),... are stored.
-
-            data_order(iterable of strings): A list or other iterable of the labels for each dimension of
-                the signals data. This is to be used when the dimension order fetched in
-                MDSplus, dim(0),dim(1)... does not match the shape of the data stored.
-                This list should match the order that the dimensions are stored in the actual data,
-                and should be complementary of the dims parameter.
-                Ex) MDSplus storage -> dim(0) = 'rho', dim(1) = 'time'
-                    dims = ('rho','time')
-                Data shape -> (time X rho)
-                    data_order = (1,0) or ("time","rho")
         """
         super().__init__()
 
         self.expression = expression
         self.treename = treename
-        self.treepath = kwargs.pop("treepath", None)
+        self.treepath = treepath
 
-        dims = kwargs.pop("dims", ("times",))
-        data_order = kwargs.pop("data_order", dims)
-        self.with_units = kwargs.pop("fetch_units", True)
+        data_order = data_order or dims
+        self.with_units = fetch_units
 
         self._shot_state = {}
-
-        if kwargs:
-            raise ValueError(f"Unrecognized keyword arguments: {kwargs.keys()}")
 
         self.set_dims(dims, data_order)
 
@@ -237,15 +253,22 @@ class MdsLocalSignal(Signal):
 
 class MdsSignal(Signal):
 
-    def __init__(self, expression, treename, location=None, **kwargs):
+    def __init__(
+        self,
+        expression: str,
+        treename: str,
+        location: Optional[Union[str, MdsTreePath]] = None,
+        dims: Iterable[str] = ("times",),
+        data_order: Optional[Iterable[str]] = None,
+        fetch_units: bool = True,
+    ):
         """Create a signal object that fetches data from an MDSplus tree
 
         Arguments:
-            expression (string): The tdi expression to fetch data from
-            treename (string): The name of the tree to fetch from
+            expression: The tdi expression to fetch data from
+            treename: The name of the tree to fetch from
+            location: The location of the tree.
 
-        Keyword Arguments:
-            location (None, string, or MdsTreePath):
                 - If None, check if the environment variable TOKSEARCH_MDS_DEFAULT is
                 set and use it, otherwise assume that the tree is on a local disk
                 and that the treepath is available in the environment.
@@ -258,34 +281,17 @@ class MdsSignal(Signal):
                 - If an MdsTreePath object is provided, then the signal data is
                 fetched from a local disk according to the path specifications in
                 the MdsTreePath object.
-
-            fetch_units (boolean): Whether or not to fetch the dimensions. Defaults
+            dims: See documentation for the Signal class. Defaults to ('times',)
+            data_order: See documentation for the Signal class. Defaults to the same
+                as dims.
+            fetch_units: See documentation for the Signal class. Defaults 
                 to True.
-
-            dims (iterable of strings): A list or other iterable of the labels
-                for each dimension of the signals data. Most typically, this
-                is just time, so the default is ('times',). If, for example,
-                you have a time varying profile with, say, a radial dimension,
-                you could pass ('times', 'radius'). The order is significant
-                since it needs to match the way dim_of(0), dim_of(1),...
-                are stored.
-
-
-            data_order(iterable of strings): A list or other iterable of the labels for each dimension of
-                the signals data. This is to be used when the dimension order fetched in
-                MDSplus, dim(0),dim(1)... does not match the shape of the data stored.
-                This list should match the order that the dimensions are stored in the actual data,
-                and should be complementary of the dims parameter.
-                Ex) MDSplus storage -> dim(0) = 'rho', dim(1) = 'time'
-                    dims = ('rho','time')
-                Data shape -> (time X rho)
-                    data_order = (1,0) or ("time","rho")
         """
         super().__init__()
 
         self.location = location
         self.sig = self.create_local_or_remote_signal(
-            expression, treename, location, **kwargs
+            expression, treename, location, dims=dims, data_order=data_order, fetch_units=fetch_units
         )
         self.dims = self.sig.dims
         self.data_order = self.sig.data_order
@@ -416,25 +422,26 @@ class MdsConnectionRegistry(object):
 
 
 class MdsRemoteSignal(Signal):
-    def __init__(self, expression, treename, server, **kwargs):
-        """Create a signal object that fetches data from an MDSplus tree
+    def __init__(
+        self,
+        expression: str,
+        treename: str,
+        server: str,
+        dims: Iterable[str] = ("times",),
+        data_order: Optional[Iterable[str]] = None,
+        fetch_units: bool = True,
+    ):
+        """Create a signal object that fetches data from a remote MDSplus tree
 
         Arguments:
-            expression (string): The tdi expression to fetch data from
-            treename (string): The name of the tree to fetch from
-            server (string): The name of the remote server (e.g. atlas.gat.com)
-
-        Keyword Arguments:
-            fetch_units (boolean): Whether or not to fetch the dimensions. Defaults
+            expression: The tdi expression to fetch data from
+            treename: The name of the tree to fetch from
+            server: The name of the remote server (e.g. atlas.gat.com)
+            dims: See documentation for the Signal class. Defaults to ('times',)
+            data_order: See documentation for the Signal class. Defaults to the same
+                as dims.
+            fetch_units: See documentation for the Signal class. Defaults 
                 to True.
-
-            dims (iterable of strings): A list or other iterable of the labels
-                for each dimension of the signals data. Most typically, this
-                is just time, so the default is ('times',). If, for example,
-                you have a time varying profile with, say, a radial dimension,
-                you could pass ('times', 'radius'). The order is significant
-                since it needs to match the way dim_of(0), dim_of(1),...
-                are stored.
         """
         super().__init__()
 
@@ -442,14 +449,10 @@ class MdsRemoteSignal(Signal):
         self.treename = treename
         self.server = server
 
-        dims = kwargs.pop("dims", ("times",))
-        data_order = kwargs.pop("data_order", dims)
-        self.with_units = kwargs.pop("fetch_units", True)
+        data_order = data_order or dims
+        self.with_units = fetch_units
 
         self._shot_state = {}
-
-        if kwargs:
-            raise ValueError(f"Unrecognized keyword arguments: {kwargs.keys()}")
 
         self.set_dims(dims, data_order)
 
@@ -626,29 +629,3 @@ class MdsTreeRegistry(object):
                 self.close_tree(treename, shot)
 
 
-class MdsTreePath(object):
-    def __init__(self, **paths):
-        """Create an object to manage the paths to MDSplus trees
-
-        Keyword Arguments:
-            Accepts keyword arguments of the form
-            treename=/some/mds/tree/path
-        """
-        self.paths = paths
-
-    @contextlib.contextmanager
-    def set_env(self):
-        """Temporarily set mds treepath environment variables"""
-        old_environ = dict(os.environ)
-        for key, val in self.paths.items():
-            os.environ[self.variable_name(key)] = val
-        try:
-            yield
-        finally:
-            os.environ.clear()
-            os.environ.update(old_environ)
-
-    @classmethod
-    def variable_name(cls, treename):
-        """Return the name of the environment variable for the given treename"""
-        return "{}_path".format(treename)

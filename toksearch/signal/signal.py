@@ -76,7 +76,7 @@ class Signal(ABC):
         by subclasses.
 
     Attributes:
-        dims (iterable of strings): A list or other iterable of the labels
+        dims: A list or other iterable of the labels
             for each dimension of the signals data. Most typically, this
             is just time, so the default is ('times',). If, for example,
             you have a time varying profile with, say, a radial dimension,
@@ -85,15 +85,18 @@ class Signal(ABC):
             dim_of(0), dim_of(1),... are stored.
 
 
-        data_order(list): A list or other iterable of the labels for each dimension of
+        data_order: A list or other iterable of the labels for each dimension of
             the signals data. This is to be used when the dimension order fetched in
             MDSplus, dim(0),dim(1)... does not match the shape of the data stored.
             This list should match the order that the dimensions are stored in the actual data,
-            and should be complementary of the dims parameter.
-            Ex) MDSplus storage -> dim(0) = 'rho', dim(1) = 'time'
-                dims = ('rho','time')
-            Data shape -> (time X rho)
-                data_order = (1,0) or ("time","rho")
+            and should be complementary with the dims parameter.
+
+            Ex) If in MDSplus, dim(0) = 'rho', dim(1) = 'times', then the following would be used:
+                dims = ('rho','times')
+
+            But, if the data shape (n_times, n_rho), then the following would be used to
+            match the data shape:
+                data_order = (1,0) or ("times","rho")
 
         with_units (bool): A boolean flag that indicates whether to fetch the units
             of the signal. If True, the fetch_units method will be called to fetch the
@@ -103,9 +106,9 @@ class Signal(ABC):
     def __init__(self):
         self._callback = None
         self._state = {}
-        self.dims = ("times",)
-        self.data_order = self.dims
-        self.with_units = True
+        self.dims: Iterable[str] = ("times",)
+        self.data_order: Iterable[str] = self.dims
+        self.with_units: bool = True
 
     def set_callback(self, func) -> "Signal":
         """Set a callback function to be called after the data is fetched in the fetch method
