@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+from typing import Any, List
 from ..utilities.utilities import capture_exception
 
 
@@ -44,12 +46,16 @@ class Record(object):
         """
         Instantiate a Record object from a dictionary
 
-        Parameters:
-            input_dict (dict): Must contain the key 'shot', and
+        Arguments:
+            input_dict: Must contain the key 'shot', and
                 must NOT contain the keys 'key' or 'errors'
 
         Returns:
             Record: A Record object with the fields from input_dict
+
+        Raises:
+            MissingShotNumber: If the input_dict does not contain the key 'shot'
+            InvalidRecordField: If the input_dict contains the key 'key' or 'errors'
         """
         try:
             shot = input_dict["shot"]
@@ -74,7 +80,10 @@ class Record(object):
         """Create a Record object with a shot number
 
         Parameters:
-            shot (int): The shot number for this record
+            shot: The shot number for this record
+
+        Raises:
+            InvalidShotNumber: If the shot number is not castable to an integer
         """
         try:
             shot = int(shot)
@@ -88,28 +97,36 @@ class Record(object):
         self["errors"] = {}
         self.errors = self["errors"]
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
+        """Get a field from the record"""
         return self.__dict__[key]
 
     def __setitem__(self, key, value):
+        """Set a field in the record"""
         self.__dict__[key] = value
 
     def __delitem__(self, key):
+        """Delete a field from the record"""
         del self.__dict__[key]
 
     def __contains__(self, key):
+        """Check if a field is in the record"""
         return key in self.__dict__
 
     def __len__(self):
+        """Get the number of fields in the record"""
         return len(self.__dict__)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Get a string representation of the record"""
         return repr(self.__dict__)
 
     def get(self, key, default):
+        """Get a field from the record with a default value if the field does not exist"""
         return self.__dict__.get(key, default)
 
     def keys(self):
+        """Get the keys of the record"""
         return self.__dict__.keys()
 
     def set_error(self, field: str, exception: Exception):
@@ -119,8 +136,8 @@ class Record(object):
         to store the exception (including the traceback in a serializable format)
 
         Parameters:
-            field (str): The field name to set the error for
-            exception (Exception): The exception to store
+            field: The field name to set the error for
+            exception: The exception to store
         """
         f = field
         i = 1
@@ -130,28 +147,27 @@ class Record(object):
 
         self.errors[f] = capture_exception(f, exception)
 
-    def pop(self, key):
+    def pop(self, key) -> Any:
+        """Remove a field from the record"""
         if key not in {"key", "shot", "errors"}:
             self.__dict__.pop(key)
 
-    def keep(self, keys: list):
+    def keep(self, keys: List[Any]):
         """Remove all fields from the record that are not in keys
 
         Parameters:
-            keys (list): A list of keys to keep in the record
+            keys: A list of keys to keep in the record
         """
         for existing_key in list(self.keys()):
             if existing_key not in keys:
                 self.pop(existing_key)
 
-    def discard(self, keys: list):
+    def discard(self, keys: List[Any]):
         """Remove all fields in keys from the record
 
         Parameters:
-            keys (list): A list of keys to remove from the record
+            keys: A list of keys to remove from the record
         """
         for key in keys:
             self.pop(key)
 
-    def dataset_keep(self, ds_name, keys):
-        ds = self[ds_name]
