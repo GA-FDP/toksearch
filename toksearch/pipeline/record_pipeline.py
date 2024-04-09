@@ -34,7 +34,7 @@ import numpy as np
 import itertools
 import xarray as xr
 import multiprocessing
-from typing import List, Optional, Callable, Union
+from typing import List, Optional, Callable, Union, Type
 
 
 from ..utilities.utilities import (
@@ -112,10 +112,10 @@ class Pipeline:
 
     @classmethod
     def from_sql(
-        cls, 
-        conn: "Connection", 
-        query: str, 
-        *query_params, 
+        cls,
+        conn: "Connection",
+        query: str,
+        *query_params,
     ) -> "Pipeline":
         '''
         Initialize a Pipeline using the results of an sql query
@@ -175,13 +175,17 @@ class Pipeline:
 
     def __init__(
         self,
-        parent, 
+        parent: Union[
+            Iterable[Union[int, dict, Record]], "Pipeline", RecordSet, PipelineSource
+        ],
     ):
         """
         Instantiate a Pipeline object
 
         Arguments:
-            parent (Iterable or Pipeline or PipelineSource):
+            parent: The parent object. This can be an Iterable, a Pipeline, a
+                RecordSet, or a PipelineSource.
+
                 If parent is an Iterable, then the elements of the Iterable
                 must be one of three types:
                     1) A integer shot number
@@ -195,7 +199,6 @@ class Pipeline:
                 The parent can also be a PipelineSource, although typically this
                 is handled internally.
         """
-
 
         if isinstance(parent, Pipeline):
             self.parent = parent.parent
@@ -213,7 +216,6 @@ class Pipeline:
             self.do_shot_cleanups = False
             self.do_cleanups = False
             self._operations = []
-
 
     def fetch(self, name: str, signal: "Signal"):
         """Add a signal to be fetched by the pipeline
@@ -327,7 +329,21 @@ class Pipeline:
         return _map_single(record, self._operations)
         # return self._map_single_shot(record)
 
-    def compute(self, recordset_cls, config=None):
+    def compute(
+        self, recordset_cls: Type[RecordSet], config: Optional[object] = None
+    ) -> RecordSet:
+        """Apply the pipeline using a backend defined by recordset_cls
+
+        Arguments:
+            recordset_cls: The class of the RecordSet to use. This should be a subclass
+                of RecordSet.
+            config: Configuration object for the backend RecordSet (e.g. RayConfig if
+                using Ray, MultiprocessingConfig if using multiprocessing, etc.)
+
+        Returns:
+            RecordSet: The record set
+        """
+
         if isinstance(self.parent, RecordSet):
             initial_result = self.parent
         else:
@@ -356,7 +372,7 @@ class Pipeline:
         **ray_init_kwargs,
     ) -> RayRecordSet:
         """Apply the pipeline using Ray
-        
+
         Arguments:
             numparts: The number of partitions to use when mapping. If not provided, the
                 number of partitions will equal the number of records in the pipeline.
@@ -383,7 +399,6 @@ class Pipeline:
 
         return self.compute(RayRecordSet, config=config)
 
-
     ####################### SPARK  ######################
     def compute_spark(
         self,
@@ -407,7 +422,7 @@ class Pipeline:
 
     ####################### MULTIPROCESSING  ######################
     def compute_multiprocessing(
-        self, 
+        self,
         num_workers: Optional[int] = None,
         batch_size: Union[str, int] = "auto",
     ) -> MultiprocessingRecordSet:
@@ -418,13 +433,12 @@ class Pipeline:
                 If set to None (the default), half the number of CPUs on the machine will be used.
             batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
                 Defaults to "auto".
-        
+
         Returns:
             MultiprocessingRecordSet: The record set
         """
         config = MultiprocessingConfig(num_workers=num_workers, batch_size=batch_size)
         return self.compute(MultiprocessingRecordSet, config=config)
-        
 
     ####################### Private methods ######################
 
