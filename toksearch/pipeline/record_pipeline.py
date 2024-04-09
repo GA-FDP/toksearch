@@ -276,11 +276,11 @@ class Pipeline:
     def align(
         self,
         ds_name: str,
-        align_with,
-        dim="times",
-        method="pad",
-        extrapolate=True,
-        interp_kwargs=None,
+        align_with: Union[str, List, np.ndarray, Callable, float],
+        dim: str = "times",
+        method: str = "pad",
+        extrapolate: bool = True,
+        interp_kwargs: Optional[dict] = None,
     ):
         """Align an xarray dataset with a specified set of coordinates
 
@@ -292,14 +292,12 @@ class Pipeline:
                 a callable (which will be called with the dataset and the dim
                 as arguments), or a numeric value (which will be interpreted as
                 a sample period).
-
-        Keyword Arguments:
             dim: The dimension to align along. Default is 'times'
             method: The method to use for alignment. Default is 'pad', which
                 zero-order holds the data. Other options include 'linear' and
                 'cubic'.
             extrapolate: Whether to extrapolate data. Default is True.
-            interp_kwargs: Keyword arguments to pass to the interpolation
+            interp_kwargs: Dict of eyword arguments to pass to the interpolation
                 function provided by xarray. Default is None.
 
         """

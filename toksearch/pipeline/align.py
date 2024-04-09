@@ -15,7 +15,7 @@
 from builtins import object
 import numpy as np
 import xarray as xr
-import uuid
+from typing import Union, List, Optional, Callable
 
 
 def _is_numeric(x):
@@ -29,17 +29,28 @@ def _is_numeric(x):
 class XarrayAligner(object):
     def __init__(
         self,
-        align_with,
-        dim="times",
-        method="pad",
-        extrapolate=True,
-        interp_kwargs=None,
+        align_with: Union[str, List, np.ndarray, Callable, float],
+        dim: str = "times",
+        method: str = "pad",
+        extrapolate: bool = True,
+        interp_kwargs: Optional[dict] = None,
     ):
-        """
-        Parameters:
-            align_with: String, numpy-like array
-            method: Default is to zero-order hold. Can also interpolate using ???
-            signals: If none, align everything in the ds
+        """Aligns an xarray dataset along a dimension.
+
+        Arguments:
+            align_with: The coordinates to align with. This can be a string
+                (which will be interpreted as a field in the dataset), a list
+                (which will be interpreted as a list of values), a numpy array,
+                a callable (which will be called with the dataset and the dim
+                as arguments), or a numeric value (which will be interpreted as
+                a sample period).
+            dim: The dimension to align along. Default is 'times'
+            method: The method to use for alignment. Default is 'pad', which
+                zero-order holds the data. Other options include 'linear' and
+                'cubic'.
+            extrapolate: Whether to extrapolate data. Default is True.
+            interp_kwargs: Dict of eyword arguments to pass to the interpolation
+                function provided by xarray. Default is None.
 
         """
         self.align_with = align_with
@@ -69,7 +80,15 @@ class XarrayAligner(object):
             )
             raise (e)
 
-    def __call__(self, ds):
+    def __call__(self, ds: xr.Dataset) -> xr.Dataset:
+        """Aligns the dataset according to the configuration of the aligner.
+
+        Arguments:
+            ds: The dataset to align
+
+        Returns:
+            xr.Dataset: The aligned dataset
+        """
         if self.method == "pad":
             return self._zoh(ds)
         else:
