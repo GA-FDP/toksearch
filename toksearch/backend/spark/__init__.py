@@ -13,7 +13,8 @@
 # limitations under the License.
 
 import os
-from typing import List
+from typing import List, Optional
+from dataclasses import dataclass
 
 import pyspark
 from pyspark.conf import SparkConf
@@ -64,58 +65,43 @@ def is_spark_initialized():
     with SparkContext._lock:
         return SparkContext._active_spark_context is not None
 
+# Note on naming: SparkConf is already in pyspark, so we use ToksearchSparkConfig
+# to avoid confusion.
+@dataclass
+class ToksearchSparkConfig: 
+    """ Configuration for the Spark backend
 
-class SparkBackend:
-    def __init__(self, **kwargs):
-        """Create a SparkBackend.
-
-        The kwargs are passed to the SparkRecordSet.from_records method when initializing.
-
-        Keyword Arguments:
-            sc: SparkContext to use. If not provided, a default SparkContext will be created.
-            numparts: Number of partitions to use. If not provided, the default number of partitions
-                will be used.
-            cache: Whether to cache the RDD. Default is False.
-        """
-        self.kwargs = kwargs
-
-    def initialize(self, records: List[Record]) -> "SparkRecordSet":
-        """Initialize the backend with a list of records.
-
-        Arguments:
-            records: List of records to initialize the backend with.
-
-        Returns:
-            SparkRecordSet initialized with the records.
-        """
-        return SparkRecordSet.from_records(records, **self.kwargs)
+    Arguments:
+        sc: SparkContext to use. If not provided, a default SparkContext will be created.
+        numparts: Number of partitions to use. If not provided, the default number of partitions
+            will be used.
+        cache: Whether to cache the RDD. Default is False.
+    """
+    sc: Optional[SparkContext] = None
+    numparts: Optional[int] = None
+    cache: bool = False
 
 
 class SparkRecordSet(RecordSet):
 
     @classmethod
-    def from_records(cls, records: List[Record], **kwargs):
+    def from_records(cls, records: List[Record], config: Optional[ToksearchSparkConfig] = None) -> "SparkRecordSet":
         """Create a SparkRecordSet from a list of records.
 
         Arguments:
             records: List of records to create the RecordSet from.
+            config: Configuration for the Spark backend.
 
-        Keyword Arguments:
-            sc: SparkContext to use. If not provided, a default SparkContext will be created.
-            numparts: Number of partitions to use. If not provided, the default number of partitions
-                will be used.
-            cache: Whether to cache the RDD. Default is False.
+        Returns:
+            SparkRecordSet: The record set
         """
-
-        sc = kwargs.pop("sc", None)
-        numparts = kwargs.pop("numparts", None)
-        cache = kwargs.pop("cache", False)
-
-        sc = sc or get_or_create_default_spark_context()
-        numparts = numparts or sc.defaultParallelism
+        sc = config.sc or get_or_create_default_spark_context()
+        numparts = config.numparts or sc.defaultParallelism
+        cache = config.cache
 
         numparts = min(len(records), numparts)
         rdd = sc.parallelize(records, numparts)
+
         return cls(rdd, cache=cache)
 
     def __init__(self, rdd, cache=False):

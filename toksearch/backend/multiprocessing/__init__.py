@@ -14,9 +14,12 @@
 
 import os
 
+from dataclasses import dataclass
+from typing import Optional, List, Union
 from joblib import Parallel, delayed
 
 from ...record.record_set import RecordSet
+from ...record import Record
 from ...pipeline.pipeline_funcs import _map_single, _map_multiple
 
 
@@ -31,28 +34,43 @@ class _Mapper:
         return _map_single(record, self.operations)
 
 
-class MultiprocessingBackend:
+@dataclass
+class MultiprocessingConfig:
+    """ Configuration for the multiprocessing backend
 
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-
-    def initialize(self, records):
-        return MultiprocessingRecordSet.from_records(records)
+    Arguments:
+        num_workers: The number of workers to use for parallel processing.
+            If set to None (the default), half the number of CPUs on the machine will be used.
+        batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
+            Defaults to "auto".
+    """
+    num_workers: Optional[int] = None
+    batch_size: Union[str, int] = "auto"
 
 
 class MultiprocessingRecordSet(RecordSet):
 
     @classmethod
-    def from_records(cls, records, **kwargs):
-        return cls(records, **kwargs)
+    def from_records(cls, records: List[Record], config: Optional[MultiprocessingConfig] = None) -> "MultiprocessingRecordSet":
+        """ Create a MultiprocessingRecordSet from a list of records
 
-    def __init__(self, records, **kwargs):
-        self.kwargs = kwargs
+        Arguments:
+            records: The records to create the record set from
+            config: The configuration for the multiprocessing backend
+
+        Returns:
+            MultiprocessingRecordSet: The record set
+
+        """
+        return cls(records, config=config)
+
+    def __init__(self, records: List[Record], config: Optional[MultiprocessingConfig] = None):
+        self.config = config or MultiprocessingConfig()
         self.records = records
 
     def map(self, *operations):
-        num_workers = self.kwargs.get("num_workers", DEFAULT_NUM_WORKERS)
-        batch_size = self.kwargs.get("batch_size", "auto")
+        num_workers = self.config.num_workers or DEFAULT_NUM_WORKERS
+        batch_size = self.config.batch_size
 
         # Use joblib to parallelize the mapping
         # Just shutdown the pool after we're done
@@ -64,7 +82,7 @@ class MultiprocessingRecordSet(RecordSet):
         # Consolidate the results by just calling empty operations on the updated records
         updated_records = _map_multiple(updated_records, [])
 
-        return self.__class__(updated_records, **self.kwargs)
+        return self.__class__(updated_records, config=self.config)
 
     def __getitem__(self, index):
         return self.records[index]

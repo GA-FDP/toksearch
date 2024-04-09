@@ -14,6 +14,7 @@
 
 import copy
 from ..record import Record, InvalidShotNumber
+from ..record.record_set import RecordSet
 
 
 class PipelineSource:
@@ -53,3 +54,6 @@ class PipelineSource:
 
     def initialize_result(self, backend):
         return backend.initialize(self.records)
+
+    def create_recordset(self, recordset_cls: type[RecordSet], config=None):
+        return recordset_cls.from_records(self.records, config=config)

@@ -1,5 +1,5 @@
 
-::: toksearch.backend.multiprocessing.MultiprocessingBackend
+::: toksearch.backend.multiprocessing.MultiprocessingConfig
     handler: python
     options:
         show_root_heading: True

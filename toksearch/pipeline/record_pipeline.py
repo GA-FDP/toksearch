@@ -34,7 +34,7 @@ import numpy as np
 import itertools
 import xarray as xr
 import multiprocessing
-from typing import List
+from typing import List, Optional, Callable, Union
 
 
 from ..utilities.utilities import (
@@ -60,10 +60,14 @@ from .align import XarrayAligner
 from ..record import Record, InvalidShotNumber
 from ..record.record_set import RecordSet
 
-from ..backend.ray import RayBackend
-from ..backend.spark import SparkBackend
-from ..backend.serial import SerialBackend
-from ..backend.multiprocessing import MultiprocessingBackend
+
+from ..backend.multiprocessing import MultiprocessingRecordSet, MultiprocessingConfig
+from ..backend.ray import RayRecordSet, RayConfig
+
+from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
+from pyspark.context import SparkContext
+
+from ..backend.serial import SerialRecordSet
 
 from .pipeline_source import PipelineSource
 
@@ -335,11 +339,11 @@ class Pipeline:
         return _map_single(record, self._operations)
         # return self._map_single_shot(record)
 
-    def compute(self, backend):
+    def compute(self, recordset_cls, config=None):
         if isinstance(self.parent, RecordSet):
             initial_result = self.parent
         else:
-            initial_result = self.parent.initialize_result(backend)
+            initial_result = self.parent.create_recordset(recordset_cls, config=config)
 
         return initial_result.map(*self._operations)
 
@@ -350,49 +354,87 @@ class Pipeline:
 
         Returns a SerialRecordSet object
         """
-        backend = SerialBackend()
-        return self.compute(backend)
+        return self.compute(SerialRecordSet)
 
     ####################### RAY  ######################
 
     def compute_ray(
         self,
-        numparts=None,
-        placement_group_func=None,
-        memory_per_shot=None,
+        numparts: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        verbose: bool = True,
+        placement_group_func: Optional[Callable] = None,
+        memory_per_shot: Optional[int] = None,
         **ray_init_kwargs,
-    ):
-        backend = RayBackend(
+    ) -> RayRecordSet:
+        """Apply the pipeline using Ray
+        
+        Arguments:
+            numparts: The number of partitions to use when mapping. If not provided, the
+                number of partitions will equal the number of records in the pipeline.
+            batch_size: The number of elements to process in each batch. Defaults to
+                the number of records in the pipeline.
+            verbose: Whether to print verbose output. Default is True.
+            placement_group_func: A function that returns a placement group. See the ray docs
+                for more information on placement groups.
+            memory_per_shot: Memory to allocate to each shot in bytes. If not provided, there
+                is no limit.
+            **ray_init_kwargs: Keyword arguments to pass to ray.init
+
+        Returns:
+            RayRecordSet: The record set
+        """
+        config = RayConfig(
             numparts=numparts,
             placement_group_func=placement_group_func,
-            memory_per_shot=memory_per_shot,
+            memory_per_task=memory_per_shot,
             **ray_init_kwargs,
         )
 
-        return self.compute(backend)
+        return self.compute(RayRecordSet, config=config)
 
-        return raydd
 
     ####################### SPARK  ######################
-    def compute_spark(self, **kwargs):
+    def compute_spark(
+        self,
+        sc: Optional[SparkContext] = None,
+        numparts: Optional[int] = None,
+        cache: bool = False,
+    ) -> SparkRecordSet:
         """Apply the pipeline using Spark
 
-        Keyword Arguments:
+        Arguments:
             sc: SparkContext to use. If not provided, a default SparkContext will be created.
             numparts: Number of partitions to use. If not provided, the default number of partitions
                 will be used.
             cache: Whether to cache the RDD. Default is False.
 
         Returns:
-            SparkRecordSet object
+            SparkRecordSet: The record set
         """
-        backend = SparkBackend(**kwargs)
-        return self.compute(backend)
+        config = ToksearchSparkConfig(sc=sc, numparts=numparts, cache=cache)
+        return self.compute(SparkRecordSet, config=config)
 
     ####################### MULTIPROCESSING  ######################
-    def compute_multiprocessing(self, **kwargs):
-        backend = MultiprocessingBackend(**kwargs)
-        return self.compute(backend)
+    def compute_multiprocessing(
+        self, 
+        num_workers: Optional[int] = None,
+        batch_size: Union[str, int] = "auto",
+    ) -> MultiprocessingRecordSet:
+        """Apply the pipeline using multiprocessing
+
+        Arguments:
+            num_workers: The number of workers to use for parallel processing.
+                If set to None (the default), half the number of CPUs on the machine will be used.
+            batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
+                Defaults to "auto".
+        
+        Returns:
+            MultiprocessingRecordSet: The record set
+        """
+        config = MultiprocessingConfig(num_workers=num_workers, batch_size=batch_size)
+        return self.compute(MultiprocessingRecordSet, config=config)
+        
 
     ####################### Private methods ######################
 

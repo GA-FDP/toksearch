@@ -1,5 +1,5 @@
 
-::: toksearch.backend.ray.RayBackend
+::: toksearch.backend.ray.RayConfig
     handler: python
     options:
         show_root_heading: True

@@ -16,15 +16,10 @@ from ...record.record_set import RecordSet
 from ...pipeline.pipeline_funcs import _map_multiple
 
 
-class SerialBackend:
-    def initialize(self, records):
-        return SerialRecordSet.from_records(records)
-
-
 class SerialRecordSet(RecordSet):
 
     @classmethod
-    def from_records(cls, records):
+    def from_records(cls, records, config=None):
         return cls(records)
 
     def __init__(self, records):

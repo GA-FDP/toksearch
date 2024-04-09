@@ -23,7 +23,9 @@ across a Ray cluster, and provides methods for retrieving and ray object ids,
 which is useful for doing distributed operations on the records outside of
 toksearch.
 """
-from typing import List
+from typing import List, Optional, Callable
+from dataclasses import dataclass, asdict
+
 import ray
 
 from .raydd import RayDD
@@ -33,34 +35,57 @@ from ...record import Record
 
 
 # TODO: Put in defaults for numparts, batch_size, verbose, placement_group_func, memory_per_task, ray_init_kwargs
-class RayBackend:
-    def __init__(self, **kwargs):
-        """Create a RayBackend.
+#class RayBackend:
+#    def __init__(self, **kwargs):
+#        """Create a RayBackend.
+#
+#        The kwargs are passed to the RayRecordSet.from_records method when initializing.
+#
+#        Keyword Arguments:
+#            numparts (int): Number of partitions to use when mapping
+#            batch_size (int): Number of elements to process in each batch
+#            verbose (bool): Whether to print verbose output
+#            placement_group_func (callable): A function that returns a placement group
+#            memory_per_task (int): Memory to allocate to each task in bytes
+#            ray_init_kwargs (dict): Keyword arguments to pass to ray.init
+#
+#        """
+#        self.kwargs = kwargs
+#        self.kwargs["memory_per_task"] = self.kwargs.pop("memory_per_shot", None)
+#
+#    def initialize(self, records: List[Record]) -> "RayRecordSet":
+#        """Initialize the backend with a list of records.
+#
+#        Arguments:
+#            records: List of records to initialize the backend with.
+#
+#        Returns:
+#            RayRecordSet initialized with the records.
+#        """
+#        return RayRecordSet.from_records(records, **self.kwargs)
 
-        The kwargs are passed to the RayRecordSet.from_records method when initializing.
+@dataclass
+class RayConfig:
+    """ Configuration for the Ray backend
 
-        Keyword Arguments:
-            numparts (int): Number of partitions to use when mapping
-            batch_size (int): Number of elements to process in each batch
-            verbose (bool): Whether to print verbose output
-            placement_group_func (callable): A function that returns a placement group
-            memory_per_task (int): Memory to allocate to each task in bytes
-            ray_init_kwargs (dict): Keyword arguments to pass to ray.init
-
-        """
-        self.kwargs = kwargs
-        self.kwargs["memory_per_task"] = self.kwargs.pop("memory_per_shot", None)
-
-    def initialize(self, records: List[Record]) -> "RayRecordSet":
-        """Initialize the backend with a list of records.
-
-        Arguments:
-            records: List of records to initialize the backend with.
-
-        Returns:
-            RayRecordSet initialized with the records.
-        """
-        return RayRecordSet.from_records(records, **self.kwargs)
+    Arguments:
+        numparts: The number of partitions to use when mapping. If not provided, the
+            number of partitions will equal the number of records in the pipeline.
+        batch_size: The number of elements to process in each batch. Defaults to
+            the number of records in the pipeline.
+        verbose: Whether to print verbose output. Default is True.
+        placement_group_func: A function that returns a placement group. See the ray docs
+            for more information on placement groups.
+        memory_per_task: Memory to allocate to each task in bytes. If not provided, there
+            is no limit.
+        ray_init_kwargs: Dict of keyword arguments to pass to ray.init
+    """
+    numparts: Optional[int] = None
+    batch_size: Optional[int] = None
+    verbose: bool = True
+    placement_group_func: Optional[Callable] = None
+    memory_per_task: Optional[int] = None
+    ray_init_kwargs: Optional[dict] = None
 
 
 class RayRecordSet(RecordSet):
@@ -70,21 +95,15 @@ class RayRecordSet(RecordSet):
         self.raydd = raydd
 
     @classmethod
-    def from_records(cls, records: List[Record], **kwargs):
+    def from_records(cls, records: List[Record], config: Optional[RayConfig] = None) -> "RayRecordSet":
         """Create a RayRecordSet from a list of records.
 
         Arguments:
             records: List of records to create the RecordSet from.
-
-        Keyword Arguments:
-            numparts (int): Number of partitions to use when mapping
-            batch_size (int): Number of elements to process in each batch
-            verbose (bool): Whether to print verbose output
-            placement_group_func (callable): A function that returns a placement group
-            memory_per_task (int): Memory to allocate to each task in bytes
-            ray_init_kwargs (dict): Keyword arguments to pass to ray.init
+            config: Configuration for the Ray backend.
         """
-        raydd = RayDD.from_iterator(records, **kwargs)
+        config = config or RayConfig()
+        raydd = RayDD.from_iterator(records, **asdict(config))
         return cls(raydd)
 
     def map(self, *operations):

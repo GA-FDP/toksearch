@@ -1,5 +1,5 @@
 
-::: toksearch.backend.spark.SparkBackend
+::: toksearch.backend.spark.ToksearchSparkConfig
     handler: python
     options:
         show_root_heading: True
@@ -9,3 +9,4 @@
     handler: python
     options:
         show_root_heading: True
+        show_if_no_docstring: True
