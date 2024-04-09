@@ -111,14 +111,20 @@ class Pipeline:
     """
 
     @classmethod
-    def from_sql(cls, conn, query, *query_params, batch_size=None):
+    def from_sql(
+        cls, 
+        conn: "Connection", 
+        query: str, 
+        *query_params, 
+    ) -> "Pipeline":
         '''
         Initialize a Pipeline using the results of an sql query
 
         Arguments:
-            conn (Python DB API-compliant Connection object): A Connection object,
-                for example, from pyodbc, pymssql, sqlite, etc...
-            query (str): A query string. At a minimum, the query must produce
+            conn: A Connection object,
+                compatible with the Python DB API. This can be, for example, from
+                pyodbc, pymssql, sqlite, etc...
+            query: A query string. At a minimum, the query must produce
                 rows with the column "shot". The query cannot have columns
                 "key" or "errors" as those are reserved words in a Pipeline.
                 Additionally, if the query has any unnamed column a
@@ -128,14 +134,6 @@ class Pipeline:
                 server (used for the d3drdb), use either %d or %s as
                 placeholders (it doesn't matter which). For sqlite, ? is
                 used as the placeholder.
-
-        Keyword Arguments:
-            batch_size (int): If set to an integer, limits the number of
-                shots being processed at once. If not set, all shots are
-                done in a single batch. This is useful for very large
-                jobs that need more memory than available on the host or
-                cluster being used.
-
 
         Examples:
             ```python
@@ -173,9 +171,12 @@ class Pipeline:
 
         results = [dict(zip(column_names, row)) for row in cursor.fetchall()]
 
-        return cls(results, batch_size=batch_size)
+        return cls(results)
 
-    def __init__(self, parent, batch_size=None):
+    def __init__(
+        self,
+        parent, 
+    ):
         """
         Instantiate a Pipeline object
 
@@ -193,18 +194,8 @@ class Pipeline:
 
                 The parent can also be a PipelineSource, although typically this
                 is handled internally.
-
-
-        Keyword Arguments:
-            batch_size (int): If set to an integer, limits the number of
-                shots being processed at once. If not set, all shots are
-                done in a single batch. This is useful for very large
-                jobs that need more memory than available on the host or
-                cluster being used.
-
         """
 
-        self.batch_size = batch_size
 
         if isinstance(parent, Pipeline):
             self.parent = parent.parent
@@ -216,25 +207,24 @@ class Pipeline:
             if isinstance(parent, RecordSet):
                 pass
             elif isinstance(parent, Iterable):
-                parent = PipelineSource(parent, batch_size=batch_size)
+                parent = PipelineSource(parent)
 
             self.parent = parent
             self.do_shot_cleanups = False
             self.do_cleanups = False
             self._operations = []
 
-    # @property
-    # def batch_size(self):
-    #    return self.parent.batch_size
 
-    def fetch(self, name, signal):
+    def fetch(self, name: str, signal: "Signal"):
         """Add a signal to be fetched by the pipeline
 
         Appends a field (name) to the record being processed by the pipeline
 
         Arguments:
-            name: String
-            signal: An object derived from AbstractSignal
+            name: The name of the field to add to the record that will contain
+                the signal data, dimensions units (if applicable)
+            signal: The signal to fetch. Must be an object that implements the
+                Signal interface.
         """
         self._append_operation(_SafeFetch(name, signal))
 
@@ -377,6 +367,8 @@ class Pipeline:
                 for more information on placement groups.
             memory_per_shot: Memory to allocate to each shot in bytes. If not provided, there
                 is no limit.
+
+        Other Arguments:
             **ray_init_kwargs: Keyword arguments to pass to ray.init
 
         Returns:

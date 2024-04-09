@@ -18,7 +18,7 @@ from ..record.record_set import RecordSet
 
 
 class PipelineSource:
-    def __init__(self, input_items, batch_size=None):
+    def __init__(self, input_items):
         self._records = []
         for item in input_items:
             record = None
@@ -35,25 +35,12 @@ class PipelineSource:
 
             self.add_record(record)
 
-        self._batch_size = batch_size
-
     @property
     def records(self):
         return copy.deepcopy(self._records)
 
     def add_record(self, record):
         self._records.append(record)
-
-    @property
-    def batch_size(self):
-        return self._batch_size or len(self.records)
-
-    @property
-    def batches(self):
-        return partition_it(self.records, self.batch_size)
-
-    def initialize_result(self, backend):
-        return backend.initialize(self.records)
 
     def create_recordset(self, recordset_cls: type[RecordSet], config=None):
         return recordset_cls.from_records(self.records, config=config)

@@ -107,9 +107,9 @@ class TestPipeline(unittest.TestCase):
 
         record = p.compute_shot(1234)
 
-    def _create_pipeline(self, batch_size=None):
+    def _create_pipeline(self):
         shots = [1, 2, 3]
-        p = Pipeline(shots, batch_size=batch_size)
+        p = Pipeline(shots)
         sig = MockSignal()
         p.fetch("my_sig", sig)
         p.fetch_dataset("ds", {"s1": sig})
@@ -268,21 +268,10 @@ class TestPipeline(unittest.TestCase):
 
     def test_batch_size_ok(self):
         batch_size = 1
-        rec_list = PipelineSource(
-            [
-                1,
-                2,
-                3,
-                4,
-                5,
-            ],
-            batch_size=batch_size,
-        )
-        self.assertEqual(rec_list.batch_size, batch_size)
 
-        shots, p = self._create_pipeline(batch_size=batch_size)
+        shots, p = self._create_pipeline()
 
-        recs = p.compute_ray()
+        recs = p.compute_ray(batch_size=batch_size)
 
         self.assertEqual(len(recs), len(shots) - 1)
 
@@ -302,9 +291,9 @@ class TestRayRecordSet(unittest.TestCase):
         cls.res = cls.p.compute_ray(ray_init_kwargs=ray_init_kwargs)
 
     @classmethod
-    def _create_pipeline(cls, batch_size=None):
+    def _create_pipeline(cls):
         shots = list(range(0, 100))
-        p = Pipeline(shots, batch_size=batch_size)
+        p = Pipeline(shots)
         sig = MockSignal()
         p.fetch("my_sig", sig)
 
