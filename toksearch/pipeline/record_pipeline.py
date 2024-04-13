@@ -410,7 +410,7 @@ class Pipeline:
 
         Arguments:
             sc: SparkContext to use. If not provided, a default SparkContext will be created.
-            numparts: Number of partitions to use. If not provided, the default number of partitions
+        numparts: Number of partitions to use. If not provided, defaults to the number of records.
                 will be used.
             cache: Whether to cache the RDD. Default is False.
 

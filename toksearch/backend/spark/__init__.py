@@ -48,7 +48,7 @@ def default_spark_context(master=None):
 def get_or_create_default_spark_context():
 
     if not is_spark_initialized() and inside_toksearch_submit_job():
-        from ..slurm.spark_cluster import SlurmSparkCluster
+        from ...slurm.spark_cluster import SlurmSparkCluster
 
         cluster = SlurmSparkCluster.from_config()
         cluster.start()
@@ -73,7 +73,7 @@ class ToksearchSparkConfig:
 
     Arguments:
         sc: SparkContext to use. If not provided, a default SparkContext will be created.
-        numparts: Number of partitions to use. If not provided, the default number of partitions
+        numparts: Number of partitions to use. If not provided, defaults to the number of records.
             will be used.
         cache: Whether to cache the RDD. Default is False.
     """
@@ -96,7 +96,7 @@ class SparkRecordSet(RecordSet):
             SparkRecordSet: The record set
         """
         sc = config.sc or get_or_create_default_spark_context()
-        numparts = config.numparts or sc.defaultParallelism
+        numparts = config.numparts or len(records)
         cache = config.cache
 
         numparts = min(len(records), numparts)

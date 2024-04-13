@@ -21,9 +21,9 @@ import importlib
 
 from sh import scontrol, srun, grep, awk
 
-import findspark
+#import findspark
 
-findspark.init()
+#findspark.init()
 from pyspark import SparkContext
 
 from .common import ConfigLoader
@@ -49,7 +49,7 @@ class SlurmSparkCluster:
         try:
             nodelist = os.environ["SLURM_JOB_NODELIST"]
         except KeyError:
-            msg = "Cannot start SlurmSparkCluster outside " "sbatch or salloc"
+            msg = "Cannot start SlurmSparkCluster outside sbatch or salloc"
             e = Exception(msg)
 
         self._nodelist = nodelist
@@ -106,8 +106,8 @@ class SlurmSparkNode:
         self.node_ip = node_ip
 
         self.spark_home = spark_home or os.getenv("SPARK_HOME", None)
-        if self.spark_home is None:
-            raise (Exception("Could not resolve SPARK_HOME"))
+        #if self.spark_home is None:
+        #    raise (Exception("Could not resolve SPARK_HOME"))
 
         self._additional_start_options = []
         self._additional_srun_options = []
@@ -117,12 +117,14 @@ class SlurmSparkNode:
 
         srun_options = ["--nodes=1", "--ntasks=1", "-w", self.name]
 
-        spark_start_args = self._start_args()
         args = (
             srun_options
             + self._additional_srun_options
-            + spark_start_args
+            + ["spark-class"]
+            + [self.spark_class()]
+            + self.start_options()
             + self._additional_start_options
+            + self.start_args()
         )
 
         print(args)
@@ -134,19 +136,25 @@ class SlurmSparkNode:
     def add_start_options(self, *options):
         self._additional_start_options += options
 
-    def _start_args(self):
-        pass
-
 
 class SlurmSparkMaster(SlurmSparkNode):
-    def __init__(self, node_name, node_ip, spark_home=None):
+    def __init__(self, node_name, node_ip, spark_home=None, port=7077):
         super().__init__(node_name, node_ip, spark_home=spark_home)
-        self.master_address = f"spark://{self.node_ip}:7077"
+        self.port = port
+        self.master_address = f"spark://{self.node_ip}:{self.port}"
 
-    def _start_args(self):
-        start_master_command = os.path.join(self.spark_home, "sbin", "start-master.sh")
-        return [start_master_command]
+    def spark_class(self):
+        return "org.apache.spark.deploy.master.Master"
 
+    def start_args(self) -> list:
+        return []
+
+    def start_options(self) -> list:
+        return [
+            "--host", self.node_ip,
+            "--port", self.port,
+        ]
+        
     def start(self):
         os.environ["SPARK_MASTER_HOST"] = self.node_ip
         print("MASTER IP", self.node_ip)
@@ -158,6 +166,11 @@ class SlurmSparkWorkerNode(SlurmSparkNode):
         super().__init__(node_name, node_ip, spark_home=spark_home)
         self.master_address = master_address
 
-    def _start_args(self):
-        start_slave_command = os.path.join(self.spark_home, "sbin", "start-slave.sh")
-        return [start_slave_command, self.master_address, "-i", self.node_ip]
+    def spark_class(self):
+        return "org.apache.spark.deploy.worker.Worker"
+
+    def start_args(self) -> list:
+        return [self.master_address]
+
+    def start_options(self) -> list:
+        return ["-i", self.node_ip]

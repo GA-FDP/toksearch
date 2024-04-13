@@ -14,8 +14,19 @@
 
 from sh import scontrol, srun, grep, awk
 
-
 def saga_ip_address(hostname):
+    """Get the IB ip address for a host on the saga cluster"""
+    ib_hostname = hostname + "-ib"
+
+    with open("/etc/hosts") as f:
+        for line in f:
+            if ib_hostname in line:
+                return line.split()[0].strip()
+        else:
+            raise ValueError(f"Could not find IP address for {ib_hostname}")
+
+
+def _old_saga_ip_address(hostname):
     """Get the IB ip address for a host on the saga cluster"""
     ib_hostname = hostname + "-ib"
     return awk(grep(ib_hostname, "/etc/hosts"), "{print $1}").strip()

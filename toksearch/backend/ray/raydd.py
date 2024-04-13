@@ -94,6 +94,7 @@ class RayDD:
         """
 
         ray_init_kwargs = kwargs.pop("ray_init_kwargs", {})
+        ray_init_kwargs = ray_init_kwargs if ray_init_kwargs else {}
 
         if not ray.is_initialized():
 
@@ -108,7 +109,7 @@ class RayDD:
                 ray_init_kwargs["logging_level"] = logging.ERROR
 
             if inside_toksearch_submit_job():
-                from ..slurm.ray_cluster import SlurmRayCluster
+                from ...slurm.ray_cluster import SlurmRayCluster
 
                 cluster = SlurmRayCluster.from_config(
                     temp_dir=ray_init_kwargs["_temp_dir"]

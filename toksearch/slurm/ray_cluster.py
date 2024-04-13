@@ -12,9 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Known good ray version:
-# 0.8.0
-
 
 import os
 import yaml
@@ -23,6 +20,7 @@ import subprocess
 import unittest
 import time
 import ray
+import psutil
 
 import uuid
 from sh import scontrol, srun, grep, awk
@@ -30,10 +28,6 @@ from sh import scontrol, srun, grep, awk
 from .common import ConfigLoader
 
 
-def saga_ip_address(hostname):
-    """Get the IB ip address for a host on the saga cluster"""
-    ib_hostname = hostname + "-ib"
-    return awk(grep(ib_hostname, "/etc/hosts"), "{print $1}").strip()
 
 
 class TestSagaIpAddress(unittest.TestCase):
