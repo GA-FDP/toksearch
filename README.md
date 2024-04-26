@@ -1,3 +1,5 @@
+![](ts_logo_blue.png)
+
 # Welcome to TokSearch
 
 TokSearch is a Python package for parallel retrieving, processing, and filtering of arbitrary-dimension fusion experimental data. TokSearch provides a high level API for extracting information from many shots, along with useful classes for low level data retrieval and manipulation.
