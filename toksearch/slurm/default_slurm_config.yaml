@@ -1,0 +1,124 @@
+# This is the default configuration file for toksearch_submit which
+# can be copied and modified to suit your needs.
+#
+# The base SLURM commands that toksearch_submit runs are of the following form:
+#
+# For interactive jobs:
+# salloc -N NUM_NODES --exclusive ${interactive.salloc} \
+#   srun -u --pty -N 1 --exclusive --propagate ${interactive.srun} \
+#   COMMAND_TO_RUN ARGS
+#
+# For batch jobs:
+# sbatch -N NUM_NODES --exclusive ${batch.sbatch} \
+#   COMMAND_TO_RUN ARGS
+#
+# Options and arguments in CAPS are provided by the user when running
+# toksearch_submit. The options and arguments in braces 
+# (e.g. ${batch.sbatch}) are injected from the configuration file.
+
+
+######################################################################
+#
+# Job options passed through to salloc/sbatch
+
+# Options for batch jobs (ie those using sbatch)
+batch:
+    sbatch:
+      - --time=4:00:00
+
+# Options for interactive jobs (ie those using salloc)
+interactive:
+    salloc:
+      - --time=4:00:00
+      - --x11=all
+
+    srun:
+      - --overlap
+
+######################################################################
+# SPARK
+# 
+# Spark processes are started using the srun command (when compute_spark
+# is invoked on a Pipeline object inside a SLURM job).
+#
+# The master process is started with the following command, with sections
+# in braces replaced by the configuration options, and options with 
+# underscore + CAPS (e.g. _PORT) filled automatically by toksearch_submit:
+# 
+# srun --nodes=1 --ntasks=1 -w _HOST ${spark.master.srun}  \
+#   spark-class org.apache.spark.deploy.master.Master \
+#     --host _HOST \
+#     --port _PORT \
+#     ${spark.master.start}
+#
+#
+# Similarly, the worker process is started with the following command:
+#
+# srun --nodes=1 --ntasks=1 -w _HOST ${spark.worker.srun}  \
+#   spark-class org.apache.spark.deploy.worker.Worker \
+#     -i _HOST \
+#     ${spark.worker.start} \
+#     _MASTER_URL
+#
+spark:
+    # Options for the Spark master
+    master:
+        srun:
+            - --overlap
+
+    worker:
+        srun:
+            - --overlap
+        start:
+            - -c
+            - 10
+            - -m
+            - 24G
+
+######################################################################
+# RAY
+#
+# Ray processes are started using the srun command (when compute_ray
+# is invoked on a Pipeline object inside a SLURM job).
+#
+# The master process is started with the following command, with sections
+# # in braces replaced by the configuration options, and options with 
+# underscore + CAPS (e.g. _PORT) filled automatically by toksearch_submit:
+#
+# srun --nodes=1 --ntasks=1 -w _HOST ${ray.master.srun}  \
+#   ray start 
+#   --head \
+#   --node-ip-address _IP \
+#   --port _PORT \
+#   --temp-dir _TEMP_DIR \
+#    ${ray.master.start} 
+# 
+# Similarly, the worker process is started with the following command:
+# 
+# srun --nodes=1 --ntasks=1 -w _HOST ${ray.worker.srun}  \
+#  ray start
+#  --node-ip-address _IP \
+#  --address _MASTER_ADDRESS:_MASTER_PORT \
+#  --temp-dir _TEMP_DIR \
+#  ${ray.worker.start}
+
+ray:
+    master:
+        srun:
+            - --overlap
+            - --propagate
+
+        # Ray memory options can be adjusted here
+        #start:
+          #- --object-store-memory=95000000000
+          #- --memory=80000000000
+
+    worker:
+        srun:
+            - --overlap
+            - --propagate
+
+        # Ray memory options can be adjusted here
+        #start:
+          #- --object-store-memory=95000000000
+          #- --memory=80000000000

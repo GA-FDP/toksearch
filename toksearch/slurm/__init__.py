@@ -29,11 +29,14 @@ def slurm_nodelist():
 
 
 def slurm_default_config(host=None):
-    host = host or socket.gethostname()
-
-    if host.startswith("saga"):
-        configfile = os.path.join(os.path.dirname(__file__), "saga", "saga_slurm.yaml")
-    else:
-        configfile = None
-
+    configfile = os.path.join(os.path.dirname(__file__), "default_slurm_config.yaml")
     return configfile
+
+    #host = host or socket.gethostname()
+
+    #if host.startswith("saga"):
+    #    configfile = os.path.join(os.path.dirname(__file__), "saga", "saga_slurm.yaml")
+    #else:
+    #    configfile = None
+
+    #return configfile

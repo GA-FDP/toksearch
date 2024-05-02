@@ -72,7 +72,7 @@ class SlurmRunner:
         self.num_nodes = num_nodes
 
         self.job_config = [f"-N {num_nodes}", "--exclusive"]
-        self.job_config += self.config.get("job", [])
+        #self.job_config += self.config.get("job", [])
 
     def get_envs(self):
         envs = {}
@@ -87,16 +87,26 @@ class SlurmRunner:
 
     def run_interactive(self, script, *script_args):
         self.set_envs()
+
+        interactive_config = self.config.get("interactive", {})
+        salloc_args = interactive_config.get("salloc", [])
+        srun_options = interactive_config.get("srun", [])
+
         srun_args = ["srun", "-u", "--pty", "-N", "1", "--exclusive", "--propagate"]
-        srun_args += self.config.get("interactive", [])
-        args = self.job_config + srun_args + [script] + list(script_args)
+        srun_args += interactive_config.get("srun", [])
+        args = self.job_config + salloc_args + srun_args + [script] + list(script_args)
         comm = ["salloc"] + args
         print(" ".join(comm))
         return subprocess.run(comm)
 
     def run_batch(self, script, *script_args):
         self.set_envs()
-        args = self.job_config + [script] + list(script_args)
+
+        batch_config = self.config.get("batch", {})
+        sbatch_args = batch_config.get("sbatch", [])
+
+
+        args = self.job_config + sbatch_args + [script] + list(script_args)
         comm = ["sbatch"] + args
         return subprocess.run(comm)
 
