@@ -17,8 +17,8 @@ channels:
   - conda-forge
 dependencies:
   - python=3.10
-  - mkdocs
-  - mkdocs-material
-  - mkdocstrings
-  - mkdocstrings-python
-  - mkdocs-jupyter
+  - mkdocs=1.5.3
+  - mkdocs-material=9.5
+  - mkdocstrings=0.24.1
+  - mkdocstrings-python=1.9.1
+  - mkdocs-jupyter=0.24.6
