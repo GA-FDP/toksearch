@@ -47,12 +47,5 @@ Finally, install TokSearch itself:
 ```bash
 pip install -e .
 ```
-## Viewing the Documentation
 
-Eventually, the documentation will be hosted on Github Pages. For now, you can build the documentation locally by running:
-
-```bash
-mkdocs serve
-```
-
-The documentation will be available at ```http://localhost:8000``` (or possibly a different port if 8000 is already in use).
+In the near future, we will provide a way to install TokSearch directly from PyPI using pip and conda-forge.
