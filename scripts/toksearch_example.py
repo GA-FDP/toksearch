@@ -16,16 +16,14 @@
 
 import argparse
 from toksearch import Pipeline
-from toksearch import MdsSignal, PtDataSignal
+from toksearch import MdsSignal
 
 
 def create_pipeline(shots):
     ipmhd_signal = MdsSignal(r"\ipmhd", "efit01")
-    ip_signal = PtDataSignal("ip")
 
     pipeline = Pipeline(shots)
     pipeline.fetch("ipmhd", ipmhd_signal)
-    pipeline.fetch("ip", ip_signal)
 
     @pipeline.map
     def calc_max_ipmhd(rec):
@@ -51,6 +49,6 @@ if __name__ == "__main__":
     if backend == "ray":
         results = pipeline.compute_ray()
     else:  # spark
-        results = pipeline.compute_spark(numparts=1000)
+        results = pipeline.compute_spark()
 
     print(f"Got {len(results)} results using {backend}")
