@@ -19,6 +19,11 @@ import os
 import numpy as np
 
 
+from pathlib import Path
+root_path = Path(__file__).parent
+version_file = root_path / "toksearch" / "VERSION"
+
+
 def ell1_extension():
     # Check if the user has specified an include dir for cblas.h. 
     # If not, then check whether we're using a conda env
@@ -54,9 +59,22 @@ def ell1_extension():
 
 packages = [os.path.join('toksearch', package) for package in find_packages('toksearch')]
 
-setup(name = 'toksearch',
-      ext_modules = [ell1_extension(),],
-      include_package_data=True,
-      packages=packages,
-      scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
+
+setup(
+    name = 'toksearch',
+    setup_requires=["setuptools-git-versioning>=2.0,<3"],
+    setuptools_git_versioning={
+        "enabled": True,
+        "version_file": version_file,
+        "count_commits_from_version_file": True,  # <--- enable commits tracking
+        "dev_template": "{tag}.dev{ccount}",  # suffix for versions will be .dev
+        "dirty_template": "{tag}.dev{ccount}",  # same thing here
+    },
+    ext_modules = [ell1_extension(),],
+    include_package_data=True,
+    packages=packages,
+    scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
+    # this package will read some included files in runtime, avoid installing it as .zip
+    zip_safe=False,
+      
 )
