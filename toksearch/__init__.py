@@ -16,3 +16,7 @@ from .signal.signal import Signal
 from .signal.mds import MdsSignal, MdsTreePath
 from .pipeline.align import XarrayAligner
 from .pipeline import Pipeline
+
+from pathlib import Path
+
+__version__ = Path(__file__).parent.joinpath("VERSION").read_text().strip()
