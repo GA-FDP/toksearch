@@ -26,15 +26,15 @@ import importlib
 
 # Apparently, python 3.9 changed how it deals with Iterable
 try:
-    from collections.abc import Iterable
+    from collections.abc import Iterable as CollectionIterable
 except ImportError:
-    from collections import Iterable
+    from collections import Iterable as CollectionIterable
 
 import numpy as np
 import itertools
 import xarray as xr
 import multiprocessing
-from typing import List, Optional, Callable, Union, Type
+from typing import List, Optional, Callable, Union, Type, Iterable
 
 
 from ..utilities.utilities import (
@@ -209,7 +209,7 @@ class Pipeline:
         else:
             if isinstance(parent, RecordSet):
                 pass
-            elif isinstance(parent, Iterable):
+            elif isinstance(parent, CollectionIterable):
                 parent = PipelineSource(parent)
 
             self.parent = parent
