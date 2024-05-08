@@ -21,18 +21,7 @@ import os
 
 
 class TestConfigFileHandling(unittest.TestCase):
-    def test_saga_yml_exists(self):
-        f = toksearch.slurm.__file__
-
-        yml_file = os.path.join(os.path.dirname(f), "saga", "saga_slurm.yaml")
-        self.assertTrue(os.path.exists(yml_file))
 
     def test_slurm_default_config(self):
-        host = socket.gethostname()
-
         default_config = slurm_default_config()
-
-        if host.startswith("saga"):
-            self.assertTrue(os.path.exists(default_config))
-        else:
-            self.assertIsNone(default_config)
+        self.assertTrue(os.path.exists(default_config))

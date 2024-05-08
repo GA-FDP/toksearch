@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+from typing import Type
 from ..record import Record, InvalidShotNumber
 from ..record.record_set import RecordSet
 
@@ -42,5 +43,5 @@ class PipelineSource:
     def add_record(self, record):
         self._records.append(record)
 
-    def create_recordset(self, recordset_cls: type[RecordSet], config=None):
+    def create_recordset(self, recordset_cls: Type[RecordSet], config=None):
         return recordset_cls.from_records(self.records, config=config)
