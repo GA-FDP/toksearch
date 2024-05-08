@@ -16,7 +16,6 @@ from setuptools import setup
 from setuptools import Extension
 from setuptools import find_packages
 import os
-import numpy as np
 
 
 from pathlib import Path
@@ -29,6 +28,8 @@ def ell1_extension():
     # If not, then check whether we're using a conda env
     # (presumably with openblas installed)
     # Failing that, do nothing and hope for the best.
+    import numpy as np
+
     conda_prefix = os.getenv('CONDA_PREFIX', None)
     user_blas_dir = os.getenv('ELL1_BLAS_INCLUDE_DIR', None)
 
@@ -56,9 +57,13 @@ def ell1_extension():
         include_dirs=include_dirs,
     )
 
+try:
+    extensions = [ell1_extension(),]
+except ImportError:
+    extensions = []
 
-packages = [os.path.join('toksearch', package) for package in find_packages('toksearch')]
-
+packages = ["toksearch",]
+packages += [os.path.join('toksearch', package) for package in find_packages('toksearch')]
 
 setup(
     name = 'toksearch',
@@ -70,7 +75,7 @@ setup(
         "dev_template": "{tag}.dev{ccount}",  # suffix for versions will be .dev
         "dirty_template": "{tag}.dev{ccount}",  # same thing here
     },
-    ext_modules = [ell1_extension(),],
+    ext_modules = extensions,
     include_package_data=True,
     packages=packages,
     scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
