@@ -16,11 +16,7 @@ from setuptools import setup
 from setuptools import Extension
 from setuptools import find_packages
 import os
-
-
-from pathlib import Path
-root_path = Path(__file__).parent
-version_file = root_path / "toksearch" / "VERSION"
+import versioneer
 
 
 def ell1_extension():
@@ -67,14 +63,8 @@ packages += [os.path.join('toksearch', package) for package in find_packages('to
 
 setup(
     name = 'toksearch',
-    setup_requires=["setuptools-git-versioning>=2.0,<3"],
-    setuptools_git_versioning={
-        "enabled": True,
-        "version_file": version_file,
-        "count_commits_from_version_file": True,  # <--- enable commits tracking
-        "dev_template": "{tag}.dev{ccount}",  # suffix for versions will be .dev
-        "dirty_template": "{tag}.dev{ccount}",  # same thing here
-    },
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     ext_modules = extensions,
     include_package_data=True,
     packages=packages,

@@ -11,19 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
+{% set data = load_setup_py_data() %}
+
 package:
     name: toksearch
-    version: {{ environ.get('VERSION', '') }}
-
-build:
-    script_env:
-        - VERSION
+    version: {{ data.get('version') }}
 
 source:
-    - path: ../toksearch
-      folder: toksearch
-    - path: ../setup.py
-    - path: ../setup.cfg
+    git_url: ../
 
 requirements:
     build:
@@ -36,20 +33,23 @@ requirements:
 
     run:
         - python
-        - bottleneck
-        - cloudpickle
-        - findspark<2.0
-        - matplotlib
         - mdsplus=7.7
         - numpy>=1.20
         - pymssql
         - ray-core
+        - pyspark
         - scipy
         - sh
         - xarray
+        - bottleneck
         - openblas
+        - joblib>=1.3
+        - jupyter
 
 test:
-    imports:
-        - toksearch
-
+    requires:
+        - docker-py
+    source_files:
+        - tests
+    commands:
+        - cd tests; ./testit

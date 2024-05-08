@@ -8,5 +8,6 @@ dist
 envs
 *.egg-info
 toksearch.orig
+.eggs
 
 

@@ -19,4 +19,6 @@ from .pipeline import Pipeline
 
 from pathlib import Path
 
-__version__ = Path(__file__).parent.joinpath("VERSION").read_text().strip()
+from . import _version
+
+__version__ = _version.get_versions()['version']

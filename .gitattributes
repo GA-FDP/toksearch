@@ -1,1 +1,2 @@
 tests/trees/* binary
+toksearch/_version.py export-subst
