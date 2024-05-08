@@ -1,3 +1,3 @@
-include toksearch/slurm/saga/*.yaml
 include docs/*.ipynb
 include toksearch/VERSION
+include toksearch/slurm/default_slurm_config.yaml
