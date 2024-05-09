@@ -21,7 +21,8 @@ from abc import ABC, abstractmethod
 import timeit
 import time
 import MDSplus as mds
-import docker
+import socket
+import subprocess
 
 
 from toksearch.signal.mds import (
@@ -47,85 +48,85 @@ DEFAULT_TREEPATH = trees_dir
 DEFAULT_EXPRESSION = r"\ipmhd"
 
 
-# The container cache is used to ensure that only one container is running
-# at a time.
-class ContainerCache:
-    _container = None
+class MdsIpCache:
+    host = "localhost"
     _port = None
 
     @classmethod
-    def create_and_run_container(
-        cls, treename=DEFAULT_TREE
-    ) -> docker.models.containers.Container:
-        """Run an MDSplus server in a Docker container
+    def start_server(cls, treename=DEFAULT_TREE):
+        if cls._port is not None:
+            return cls._port
 
-        Args:
-            treename (str, optional): The name of the tree to run. Defaults to 'efit01'.
+        try:
+            # Determine the script's directory to locate the mdsip.hosts file
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            hosts_file_path = os.path.join(script_dir, "etc", "mdsip.hosts")
 
-        Returns:
-            docker.models.containers.Container: The Docker container object
-        """
-        if cls._container is not None:
-            return cls._container
+            # Find a free port
+            cls._port = cls.find_free_port()
 
-        # Get the current user's UID and GID
-        current_uid = os.getuid()
-        current_gid = os.getgid()
+            # Add the tdi directory to the MDS_PATH
+            # The assumption is that we're running in a conda
+            # environment, so we can find the python executable
+            # and the tdi directory from that
+            python_exe = sys.executable
+            bin_dir = os.path.abspath(os.path.dirname(python_exe))
+            env_dir = os.path.dirname(bin_dir)
+            tdi_dir = os.path.join(env_dir, "tdi")
 
-        # Initialize a Docker client using the default socket or configuration
-        client = docker.from_env()
+            MDS_PATH = os.environ.get("MDS_PATH", "")
+            MDS_PATH = f"{MDS_PATH};{tdi_dir};"
 
-        # Define the container environment variables with dynamic UID and GID
-        environment = {
-            "UID": str(current_uid),
-            "GID": str(current_gid),
-            f"{treename}_path": "/trees",
-        }
+            subprocess_env = os.environ.copy()
+            subprocess_env["MDS_PATH"] = MDS_PATH
 
-        # Define the volume mapping
-        volumes = {
-            trees_dir: {"bind": "/trees", "mode": "ro"},
-        }
+            # Add the tree path to the environment
+            subprocess_env[f"{treename}_path"] = trees_dir
 
-        # Define the port mapping
-        ports = {
-            "8000/tcp": 0,
-        }
+            # Start the mdsip server on a free port
+            cls.mdsip_process = subprocess.Popen(
+                ["mdsip", "-s", "-p", str(cls._port), "-h", hosts_file_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=subprocess_env,
+            )
 
-        # Pull the image and run the container
-        container = client.containers.run(
-            "mdsplus/mdsplus:tree-server-stable-7.128.1",
-            detach=True,  # Run in detached mode
-            environment=environment,
-            volumes=volumes,
-            ports=ports,
-        )
+            print("mdsip server started")
+            time.sleep(2)  # Wait a moment to ensure the server is ready
+        except Exception as e:
+            cls._port = None
+            raise e
 
-        container.reload()
-        port = container.ports["8000/tcp"][0]["HostPort"]
         max_retries = 10
-        time.sleep(1)
         for i in range(max_retries):
             try:
-                conn = mds.Connection(f"localhost:{port}")
+                conn = mds.Connection(f"{cls.host}:{cls._port}")
                 del conn
                 break
             except Exception as e:
+                print(
+                    f"Failed to connect to MDSplus server at {cls.host}:{cls._port}. Retrying..."
+                )
                 time.sleep(1)
 
         if i == max_retries - 1:
-            raise Exception("Failed to connect to MDSplus server")
-
-        cls._container = container
-        cls._port = port
-        return container
+            cls._port = None
+            raise Exception(
+                f"Failed to connect to MDSplus server at {cls.host}:{cls._port}"
+            )
 
     @classmethod
-    def stop_container(cls):
-        if cls._container is not None:
-            cls._container.stop()
-            cls._container = None
+    def stop_server(cls):
+        if cls._port is not None:
+            cls.mdsip_process.terminate()
+            cls.mdsip_process.wait()
             cls._port = None
+
+    @classmethod
+    def find_free_port(cls):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
 
     @classmethod
     def port(cls):
@@ -133,7 +134,7 @@ class ContainerCache:
 
 
 def tearDownModule():
-    ContainerCache.stop_container()
+    MdsIpCache.stop_server()
 
 
 class TestMdsTreePath(unittest.TestCase):
@@ -303,9 +304,10 @@ class TestMdsRemoteSignal(GenericTestMdsSignal, unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.container = ContainerCache.create_and_run_container()
-        cls.port = ContainerCache.port()
-        cls.server = f"localhost:{cls.port}"
+        MdsIpCache.start_server()
+        cls.port = MdsIpCache.port()
+        cls.host = MdsIpCache.host
+        cls.server = f"{cls.host}:{cls.port}"
 
     def _signal(self, expression, tree, dims, fetch_units, data_order):
         server = self.server
@@ -344,9 +346,10 @@ class TestMdsConnectionRegistry(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.container = ContainerCache.create_and_run_container()
-        cls.port = ContainerCache.port()
-        cls.server = f"localhost:{cls.port}"
+        MdsIpCache.start_server()
+        cls.port = MdsIpCache.port()
+        cls.host = MdsIpCache.host
+        cls.server = f"{cls.host}:{cls.port}"
 
     def setUp(self):
         self.registry = MdsConnectionRegistry()

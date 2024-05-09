@@ -47,8 +47,6 @@ requirements:
         - jupyter
 
 test:
-    requires:
-        - docker-py
     source_files:
         - tests
     commands:
