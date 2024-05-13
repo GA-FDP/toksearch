@@ -22,3 +22,4 @@ dependencies:
   - mkdocstrings=0.24.1
   - mkdocstrings-python=1.9.1
   - mkdocs-jupyter=0.24.6
+  - mike=2.0
