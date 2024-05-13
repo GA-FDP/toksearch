@@ -14,9 +14,42 @@ or...
 
 The ```Pipeline``` also provides a ```where``` method which takes as input a user-defined function that returns a boolean value. If the function evaluates to ```False``` for a record, then that record is removed from the pipeline.
 
+
 ## Installation
 
-At the moment, the cleanest way to install TokSearch is to first set up a Conda/Mamba environment with the required dependencies, and then install TokSearch from the local clone of the repository. Here are the steps:
+TokSearch is available on the `ga-fdp` conda channel. 
+
+In the near future, we will provide a way to install TokSearch directly from PyPI using pip.
+
+
+### Installation with Conda in an existing environment
+
+To install in an existing conda environment, run:
+
+
+
+```bash
+conda install -c ga-fdp -c conda-forge toksearch
+```
+
+or equivalently
+
+```bash
+conda install -c conda-forge ga-fdp::toksearch
+```
+
+You can substitute `mamba` for `conda` if you prefer.
+
+### Installation with Conda in a new environment
+Optionally, you can create a new environment:
+
+```bash
+mamba create -n toksearch -c ga-fdp -c conda-forge toksearch
+```
+
+### Installation from Source
+
+At the moment, the cleanest way to install TokSearch from source is to first set up a Conda/Mamba environment with the required dependencies, and then install TokSearch from the local clone of the repository. Here are the steps:
 
 First, clone the repository, then from the root directory of the repository, run:
 
@@ -48,4 +81,3 @@ Finally, install TokSearch itself:
 pip install -e .
 ```
 
-In the near future, we will provide a way to install TokSearch directly from PyPI using pip and conda-forge.

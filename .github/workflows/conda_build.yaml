@@ -1,0 +1,57 @@
+name: Conda Package CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'release-*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          channels: conda-forge
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu' # See 'Supported distributions' for available options
+          java-version: '8'
+
+      - name: Build Conda package
+        run: |
+          mamba install --yes boa
+          mkdir /outdir
+          conda mambabuild --output-folder=/outdir recipe 
+
+      - name: Get Tags
+        if: startsWith(github.ref, 'refs/tags/release-')
+        id: tag
+        uses: ildug/get-tag-action@v1
+
+      - name: Upload to Anaconda
+        if: startsWith(github.ref, 'refs/tags/release-')
+        run: |
+          mamba install -c conda-forge anaconda-client
+          
+          anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --force /outdir/linux-64/*.tar.bz2
+
+          mamba env create -n toksearch_docs -f docs/docs_environment.yaml
+          conda activate toksearch_docs
+          major=${{ steps.tag.outputs.major  }}
+          minor=${{ steps.tag.outputs.minor  }}
+
+          git config --global user.name "Docs Deploy"
+          git config --global user.email "toksearch-docs@fusion.gat.com"
+          mike deploy --push --update-aliases ${major}.${minor}.X latest
+
