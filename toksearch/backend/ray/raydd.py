@@ -188,7 +188,7 @@ class RayDD:
         numparts = self.numparts
         verbose = self.verbose
 
-        num_cpus = int(ray.available_resources()["CPU"])
+        num_cpus = int(ray.available_resources().get("CPU", 2))
 
         numparts = numparts if numparts else len(ids)
 
