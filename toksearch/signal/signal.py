@@ -39,16 +39,24 @@ class Signal(ABC):
     resources) when the application is done.
 
     The fetch method is the main method that needs to be called to fetch the
-    data for a shot. It calls the fetch_data method, which is an abstract
-    method that needs to be implemented by subclasses. If the dims attribute is
-    set, then the fetch method calls the fetch_dims method to fetch the dimensions.
-    If the with_units attribute is True, then the fetch method calls the fetch_units
-    method to fetch the units of the signal. If a callback function has been set
-    with the set_callback method, it is called after the data is fetched.
+    data for a shot. It first performs registration of the signal with the 
+    SignalRegistry object. It then calls the _fetch method, which is an abstract
+    method that needs to be implemented by subclasses. The _fetch method is
+    responsible for fetching the data for a shot, and should return a dictionary
+    containing the data fetched for the signal. The dictionary should contain a
+    key 'data' with the data, and keys for each dimension of the data, with the
+    values being the values of the dimensions. If the with_units attribute is True,
+    the dictionary should also contain a key 'units' with the units of the data and
+    dimensions.If a callback function has been set with the set_callback method,
+    it is called after the data is fetched.
 
     Methods:
-        fetch_data: Abstract method. Fetch the data for a shot. This method
-            needs to be implemented by subclasses.
+        fetch: Fetch the data for a shot.
+
+        fetch_as_xarray: Fetch the data for a shot as an xarray DataArray object.
+
+        _fetch: Abstract method. Fetch the data for a shot. This method should be implemented
+            by subclasses.
 
         cleanup_shot: Abstract method. Clean up any resources specific to a shot. For example, if
             an MDSplus tree is opened to fetch data, this method should close the tree.
@@ -57,12 +65,6 @@ class Signal(ABC):
             network connection is opened to fetch data (and shared amongst multiple shots),
             this method should close it.
 
-        fetch_dims: fetch the dimensions of the signal
-
-        fetch_units: fetch the units of the signal
-
-        initialize: initialize any resources needed to fetch data for a shot, as well as
-            any internal state that is specific to a shot.
 
         clear_state: clear any state that is specific to a shot (generally state is initialized
             in the initialize method)
@@ -72,6 +74,8 @@ class Signal(ABC):
         set_dims: set the dimensions of the signal
 
     Note:
+
+
         fetch_data, cleanup, and cleanup_shot are abstract methods that need to be implemented
         by subclasses.
 
@@ -179,6 +183,7 @@ class Signal(ABC):
 
         return self
 
+
     def fetch(self, shot: int) -> dict:
         """Fetch the data for a shot
 
@@ -200,25 +205,16 @@ class Signal(ABC):
 
         SignalRegistry().register(self)
 
-        self.initialize(shot)
-
-        results = {}
-
-        results["data"] = self.fetch_data(shot)
-
-        if self.dims is not None:
-            dims_dict = self.fetch_dims(shot)
-            results.update(dims_dict)
-
-        if self.with_units:
-            results["units"] = self.fetch_units(shot)
+        results = self._fetch(shot)
 
         if results and (self._callback is not None):
             results = self._callback(results)
 
-        self.clear_state(shot)
-
         return results
+
+    @abstractmethod
+    def _fetch(self, shot: int) -> dict:
+        pass
 
     def fetch_as_xarray(self, shot: int) -> xr.DataArray:
         """Fetch the data for a shot as an xarray DataArray object
@@ -255,73 +251,6 @@ class Signal(ABC):
 
         return results
 
-    def fetch_dims(self, shot: int) -> dict:
-        """Fetch the dimensions of the signal
-
-        This method should be overridden by subclasses to fetch the dimensions
-        of the signal. The method should return a dictionary with keys for each
-        dimension of the signal, and values for the values of the dimensions.
-
-        Arguments:
-            shot (int): The shot number to fetch the dimensions for
-
-        Returns:
-            dict: A dictionary containing the dimensions of the signal. The dictionary
-                should contain a key for each dimension of the signal, with the values
-                being the values of the dimensions.
-        """
-        pass
-
-    def fetch_units(self, shot: int) -> dict:
-        """Fetch the units of the signal
-
-        This method should be overridden by subclasses to fetch the units of the signal.
-        The method should return a dictionary with keys for each dimension of the signal
-        and the data, and values for the units of the dimensions and data.
-
-        Arguments:
-            shot (int): The shot number to fetch the units for
-
-        Returns:
-            dict: A dictionary containing the units of the signal. The dictionary should
-                contain a key 'data' with the units of the data, and keys for each dimension
-                of the signal, with the values being the units of the dimensions.
-        """
-        return {}
-
-    def clear_state(self, shot: int):
-        """Clear any state that is specific to a shot
-
-        This method should be overridden by subclasses to clear any state that is
-        specific to a shot. This is typically used to clear any internal state that
-        is initialized in the initialize method.
-
-        Arguments:
-            shot (int): The shot number to clear the state for
-        """
-        pass
-
-    def initialize(self, shot: int):
-        """Initialize any resources needed to fetch data for a shot
-
-        For instance, if an mds datasource is being used, this will open
-        the tree.
-        """
-        pass
-
-    @abstractmethod
-    def fetch_data(self, shot: int) -> Any:
-        """Fetch the data for a shot
-
-        This method should be overridden by subclasses to fetch the data for a shot.
-
-        Arguments:
-            shot (int): The shot number to fetch the data for
-
-        Returns:
-            Any: The data fetched for the signal, most typically a numpy array
-        """
-        pass
 
     @abstractmethod
     def cleanup_shot(self, shot):
