@@ -150,7 +150,19 @@ class MdsLocalSignal(Signal):
         self.set_dims(dims, data_order)
 
 
-    def _fetch(self, shot):
+    def gather(self, shot):
+        """Gather the data for a shot
+        
+        Arguments:
+            shot (int): The shot number to gather the data for
+
+        Returns:
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
+        """
         results = {}
 
         tree = MdsTreeRegistry().open_tree(self.treename, shot, treepath=self.treepath)
@@ -178,7 +190,6 @@ class MdsLocalSignal(Signal):
             results["units"] = units
 
         return results
-
 
     def cleanup_shot(self, shot: int):
         """Close the tree for this shot
@@ -268,8 +279,20 @@ class MdsSignal(Signal):
         return sig
 
 
-    def _fetch(self, shot):
-        return self.sig._fetch(shot)
+    def gather(self, shot):
+        """Gather the data for a shot
+        
+        Arguments:
+            shot (int): The shot number to gather the data for
+
+        Returns:
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
+        """
+        return self.sig.gather(shot)
 
 
     def cleanup_shot(self, shot: int):
@@ -356,7 +379,19 @@ class MdsRemoteSignal(Signal):
         return MdsConnectionRegistry().connect(self.server)
 
 
-    def _fetch(self, shot):
+    def gather(self, shot):
+        """Gather the data for a shot
+        
+        Arguments:
+            shot (int): The shot number to gather the data for
+
+        Returns:
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
+        """
         connection = self.connect()
         connection.openTree(self.treename, shot)
 

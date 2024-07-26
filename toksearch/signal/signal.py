@@ -16,12 +16,15 @@ import os
 import inspect
 import xarray as xr
 import numpy as np
-from typing import Any
+from typing import Any, Callable
 import uuid
 import warnings
 from abc import ABC, abstractmethod
 
-from toksearch.utilities.utilities import capture_exception
+
+################################################################################
+# Signal Abstract Base Class
+################################################################################
 
 
 class Signal(ABC):
@@ -40,9 +43,9 @@ class Signal(ABC):
 
     The fetch method is the main method that needs to be called to fetch the
     data for a shot. It first performs registration of the signal with the 
-    SignalRegistry object. It then calls the _fetch method, which is an abstract
-    method that needs to be implemented by subclasses. The _fetch method is
-    responsible for fetching the data for a shot, and should return a dictionary
+    SignalRegistry object. It then calls the gather method, which is an abstract
+    method that needs to be implemented by subclasses. The gather method is
+    responsible for collecting the data for a shot, and should return a dictionary
     containing the data fetched for the signal. The dictionary should contain a
     key 'data' with the data, and keys for each dimension of the data, with the
     values being the values of the dimensions. If the with_units attribute is True,
@@ -55,7 +58,7 @@ class Signal(ABC):
 
         fetch_as_xarray: Fetch the data for a shot as an xarray DataArray object.
 
-        _fetch: Abstract method. Fetch the data for a shot. This method should be implemented
+        gather: Abstract method. Collect the data for a shot. This method should be implemented
             by subclasses.
 
         cleanup_shot: Abstract method. Clean up any resources specific to a shot. For example, if
@@ -65,18 +68,14 @@ class Signal(ABC):
             network connection is opened to fetch data (and shared amongst multiple shots),
             this method should close it.
 
-
-        clear_state: clear any state that is specific to a shot (generally state is initialized
-            in the initialize method)
-
-        set_callback: set a callback function to be called after the data is fetched in the fetch method
+        set_callback: set a callback function to be called after the data is gathered in the fetch method
 
         set_dims: set the dimensions of the signal
 
     Note:
 
 
-        fetch_data, cleanup, and cleanup_shot are abstract methods that need to be implemented
+        gather, cleanup, and cleanup_shot are abstract methods that need to be implemented
         by subclasses.
 
     Attributes:
@@ -187,10 +186,7 @@ class Signal(ABC):
     def fetch(self, shot: int) -> dict:
         """Fetch the data for a shot
 
-        This method fetches the data for a shot by calling the fetch_data method.
-        It then calls the fetch_dims and fetch_units methods to fetch the dimensions
-        and units of the signal, respectively. If a callback function has been set
-        with the set_callback method, it is called after the data is fetched.
+        
 
         Arguments:
             shot (int): The shot number to fetch the data for
@@ -205,7 +201,7 @@ class Signal(ABC):
 
         SignalRegistry().register(self)
 
-        results = self._fetch(shot)
+        results = self.gather(shot)
 
         if results and (self._callback is not None):
             results = self._callback(results)
@@ -213,7 +209,8 @@ class Signal(ABC):
         return results
 
     @abstractmethod
-    def _fetch(self, shot: int) -> dict:
+    def gather(self, shot: int) -> dict:
+        """Collect the data for a shot"""
         pass
 
     def fetch_as_xarray(self, shot: int) -> xr.DataArray:
@@ -269,6 +266,10 @@ class Signal(ABC):
         """
         pass
 
+
+################################################################################
+# SignalRegistry Class
+################################################################################
 
 class SignalRegistry:
     """Class to keep track of all signals used in a toksearch application
