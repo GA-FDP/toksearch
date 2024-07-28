@@ -717,15 +717,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.Signal.clear_state" class="md-nav__link">
-    <span class="md-ellipsis">
-      clear_state
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#toksearch.Signal.fetch" class="md-nav__link">
     <span class="md-ellipsis">
       fetch
@@ -744,36 +735,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_data" class="md-nav__link">
+  <a href="#toksearch.Signal.gather" class="md-nav__link">
     <span class="md-ellipsis">
-      fetch_data
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_dims" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_dims
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_units" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_units
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.initialize" class="md-nav__link">
-    <span class="md-ellipsis">
-      initialize
+      gather
     </span>
   </a>
   
@@ -900,15 +864,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.Signal.clear_state" class="md-nav__link">
-    <span class="md-ellipsis">
-      clear_state
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#toksearch.Signal.fetch" class="md-nav__link">
     <span class="md-ellipsis">
       fetch
@@ -927,36 +882,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_data" class="md-nav__link">
+  <a href="#toksearch.Signal.gather" class="md-nav__link">
     <span class="md-ellipsis">
-      fetch_data
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_dims" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_dims
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.fetch_units" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_units
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.Signal.initialize" class="md-nav__link">
-    <span class="md-ellipsis">
-      initialize
+      gather
     </span>
   </a>
   
@@ -1029,12 +957,16 @@ SignalRegistry object, which keeps track of all signals used in a toksearch
 application. This allows for easy cleanup of all signals (and associated
 resources) when the application is done.</p>
 <p>The fetch method is the main method that needs to be called to fetch the
-data for a shot. It calls the fetch_data method, which is an abstract
-method that needs to be implemented by subclasses. If the dims attribute is
-set, then the fetch method calls the fetch_dims method to fetch the dimensions.
-If the with_units attribute is True, then the fetch method calls the fetch_units
-method to fetch the units of the signal. If a callback function has been set
-with the set_callback method, it is called after the data is fetched.</p>
+data for a shot. It first performs registration of the signal with the 
+SignalRegistry object. It then calls the gather method, which is an abstract
+method that needs to be implemented by subclasses. The gather method is
+responsible for collecting the data for a shot, and should return a dictionary
+containing the data fetched for the signal. The dictionary should contain a
+key 'data' with the data, and keys for each dimension of the data, with the
+values being the values of the dimensions. If the with_units attribute is True,
+the dictionary should also contain a key 'units' with the units of the data and
+dimensions.If a callback function has been set with the set_callback method,
+it is called after the data is fetched.</p>
 
 
 
@@ -1048,11 +980,27 @@ with the set_callback method, it is called after the data is fetched.</p>
     </thead>
     <tbody>
           <tr>
-            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.fetch_data" href="#toksearch.Signal.fetch_data">fetch_data</a></code></td>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.fetch" href="#toksearch.Signal.fetch">fetch</a></code></td>
             <td>
               <div class="doc-md-description">
-                <p>Abstract method. Fetch the data for a shot. This method
-needs to be implemented by subclasses.</p>
+                <p>Fetch the data for a shot.</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.fetch_as_xarray" href="#toksearch.Signal.fetch_as_xarray">fetch_as_xarray</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Fetch the data for a shot as an xarray DataArray object.</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.gather" href="#toksearch.Signal.gather">gather</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Abstract method. Collect the data for a shot. This method should be implemented
+by subclasses.</p>
               </div>
             </td>
           </tr>
@@ -1076,44 +1024,10 @@ this method should close it.</p>
             </td>
           </tr>
           <tr>
-            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.fetch_dims" href="#toksearch.Signal.fetch_dims">fetch_dims</a></code></td>
-            <td>
-              <div class="doc-md-description">
-                <p>fetch the dimensions of the signal</p>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.fetch_units" href="#toksearch.Signal.fetch_units">fetch_units</a></code></td>
-            <td>
-              <div class="doc-md-description">
-                <p>fetch the units of the signal</p>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.initialize" href="#toksearch.Signal.initialize">initialize</a></code></td>
-            <td>
-              <div class="doc-md-description">
-                <p>initialize any resources needed to fetch data for a shot, as well as
-any internal state that is specific to a shot.</p>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.clear_state" href="#toksearch.Signal.clear_state">clear_state</a></code></td>
-            <td>
-              <div class="doc-md-description">
-                <p>clear any state that is specific to a shot (generally state is initialized
-in the initialize method)</p>
-              </div>
-            </td>
-          </tr>
-          <tr>
             <td><code><a class="autorefs autorefs-internal" title="toksearch.Signal.set_callback" href="#toksearch.Signal.set_callback">set_callback</a></code></td>
             <td>
               <div class="doc-md-description">
-                <p>set a callback function to be called after the data is fetched in the fetch method</p>
+                <p>set a callback function to be called after the data is gathered in the fetch method</p>
               </div>
             </td>
           </tr>
@@ -1127,12 +1041,11 @@ in the initialize method)</p>
           </tr>
     </tbody>
   </table>
+      <p>Note:</p>
+<div class="language-text highlight"><pre><span></span><code>gather, cleanup, and cleanup_shot are abstract methods that need to be implemented
+by subclasses.
+</code></pre></div>
 
-<details class="note" open>
-  <summary>Note</summary>
-  <p>fetch_data, cleanup, and cleanup_shot are abstract methods that need to be implemented
-by subclasses.</p>
-</details>
 
 
   <p><strong>Attributes:</strong></p>
@@ -1265,58 +1178,6 @@ the tree.</p>
 
 
 
-<h3 id="toksearch.Signal.clear_state" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">clear_state</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Clear any state that is specific to a shot</p>
-<p>This method should be overridden by subclasses to clear any state that is
-specific to a shot. This is typically used to clear any internal state that
-is initialized in the initialize method.</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to clear the state for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
 <h3 id="toksearch.Signal.fetch" class="doc doc-heading">
           <code class="highlight language-python"><span class="n">fetch</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
 
@@ -1326,10 +1187,6 @@ is initialized in the initialize method.</p>
   <div class="doc doc-contents ">
   
       <p>Fetch the data for a shot</p>
-<p>This method fetches the data for a shot by calling the fetch_data method.
-It then calls the fetch_dims and fetch_units methods to fetch the dimensions
-and units of the signal, respectively. If a callback function has been set
-with the set_callback method, it is called after the data is fetched.</p>
 
 
 
@@ -1474,8 +1331,8 @@ with dimensions specified in the dims attribute of the Signal object.</p>
 
 
 
-<h3 id="toksearch.Signal.fetch_data" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_data</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
+<h3 id="toksearch.Signal.gather" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">gather</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
   
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
@@ -1486,239 +1343,7 @@ with dimensions specified in the dims attribute of the Signal object.</p>
 
   <div class="doc doc-contents ">
   
-      <p>Fetch the data for a shot</p>
-<p>This method should be overridden by subclasses to fetch the data for a shot.</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch the data for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-<th>Name</th>        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-<td><code>Any</code></td>          <td>
-                <code><span title="typing.Any">Any</span></code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The data fetched for the signal, most typically a numpy array</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.Signal.fetch_dims" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_dims</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Fetch the dimensions of the signal</p>
-<p>This method should be overridden by subclasses to fetch the dimensions
-of the signal. The method should return a dictionary with keys for each
-dimension of the signal, and values for the values of the dimensions.</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch the dimensions for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-<th>Name</th>        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-<td><code>dict</code></td>          <td>
-                <code>dict</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>A dictionary containing the dimensions of the signal. The dictionary
-should contain a key for each dimension of the signal, with the values
-being the values of the dimensions.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.Signal.fetch_units" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_units</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Fetch the units of the signal</p>
-<p>This method should be overridden by subclasses to fetch the units of the signal.
-The method should return a dictionary with keys for each dimension of the signal
-and the data, and values for the units of the dimensions and data.</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch the units for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-<th>Name</th>        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-<td><code>dict</code></td>          <td>
-                <code>dict</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>A dictionary containing the units of the signal. The dictionary should
-contain a key 'data' with the units of the data, and keys for each dimension
-of the signal, with the values being the units of the dimensions.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.Signal.initialize" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">initialize</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Initialize any resources needed to fetch data for a shot</p>
-<p>For instance, if an mds datasource is being used, this will open
-the tree.</p>
+      <p>Collect the data for a shot</p>
 
   </div>
 

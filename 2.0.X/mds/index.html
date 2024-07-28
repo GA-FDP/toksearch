@@ -541,15 +541,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.clear_state" class="md-nav__link">
-    <span class="md-ellipsis">
-      clear_state
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#toksearch.MdsSignal.create_local_or_remote_signal" class="md-nav__link">
     <span class="md-ellipsis">
       create_local_or_remote_signal
@@ -559,36 +550,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_data" class="md-nav__link">
+  <a href="#toksearch.MdsSignal.gather" class="md-nav__link">
     <span class="md-ellipsis">
-      fetch_data
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_dims" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_dims
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_units" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_units
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.initialize" class="md-nav__link">
-    <span class="md-ellipsis">
-      initialize
+      gather
     </span>
   </a>
   
@@ -931,15 +895,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.clear_state" class="md-nav__link">
-    <span class="md-ellipsis">
-      clear_state
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#toksearch.MdsSignal.create_local_or_remote_signal" class="md-nav__link">
     <span class="md-ellipsis">
       create_local_or_remote_signal
@@ -949,36 +904,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_data" class="md-nav__link">
+  <a href="#toksearch.MdsSignal.gather" class="md-nav__link">
     <span class="md-ellipsis">
-      fetch_data
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_dims" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_dims
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.fetch_units" class="md-nav__link">
-    <span class="md-ellipsis">
-      fetch_units
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#toksearch.MdsSignal.initialize" class="md-nav__link">
-    <span class="md-ellipsis">
-      initialize
+      gather
     </span>
   </a>
   
@@ -1289,55 +1217,6 @@ to True.</p>
 
 
 
-<h3 id="toksearch.MdsSignal.clear_state" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">clear_state</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Clear the internal state for the given shot</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to clear the internal state for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
 <h3 id="toksearch.MdsSignal.create_local_or_remote_signal" class="doc doc-heading">
           <code class="highlight language-python"><span class="n">create_local_or_remote_signal</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">treename</span><span class="p">,</span> <span class="n">location</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
   
@@ -1362,15 +1241,15 @@ to True.</p>
 
 
 
-<h3 id="toksearch.MdsSignal.fetch_data" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_data</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
+<h3 id="toksearch.MdsSignal.gather" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">gather</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
 
 </h3>
 
 
   <div class="doc doc-contents ">
   
-      <p>Fetch the data for the given shot</p>
+      <p>Gather the data for a shot</p>
 
 
 
@@ -1392,58 +1271,7 @@ to True.</p>
           </td>
           <td>
             <div class="doc-md-description">
-              <p>The shot number to fetch data for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-      <p>Returns:
-    np.ndarray: The data for the given shot</p>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.MdsSignal.fetch_dims" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_dims</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Fetch the dimensions for the given shot</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch data for</p>
+              <p>The shot number to gather the data for</p>
             </div>
           </td>
           <td>
@@ -1466,138 +1294,15 @@ to True.</p>
     <tbody>
         <tr>
 <td><code>dict</code></td>          <td>
-                <code>dict</code>
           </td>
           <td>
             <div class="doc-md-description">
-              <p>A dictionary of the dimensions for the given shot. The keys
-are the names of the dimensions and the values are the data for
-the dimensions.</p>
+              <p>A dictionary containing the data gathered for the signal. The dictionary
+will contain a key 'data' with the data, and keys for each dimension of the
+data, with the values being the values of the dimensions. If the with_units
+attribute is True, the dictionary will also contain a key 'units' with the units
+of the data and dimensions.</p>
             </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.MdsSignal.fetch_units" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">fetch_units</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Fetch the units for the given shot</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch data for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><strong>Returns:</strong></p>
-  <table>
-    <thead>
-      <tr>
-<th>Name</th>        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-<td><code>dict</code></td>          <td>
-                <code>dict</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>A dictionary containing the units of the signal. The dictionary contains
-a key 'data' with the units of the data, and keys for each dimension
-of the signal, with the values being the units of the dimensions.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-  </div>
-
-</div>
-
-
-<div class="doc doc-object doc-function">
-
-
-
-<h3 id="toksearch.MdsSignal.initialize" class="doc doc-heading">
-          <code class="highlight language-python"><span class="n">initialize</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
-
-</h3>
-
-
-  <div class="doc doc-contents ">
-  
-      <p>Open the connection to the remote server or the local tree</p>
-
-
-
-  <p><strong>Parameters:</strong></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr>
-          <td><code>shot</code></td>
-          <td>
-                <code>int</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>The shot number to fetch data for</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
           </td>
         </tr>
     </tbody>
