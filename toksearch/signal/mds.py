@@ -149,94 +149,47 @@ class MdsLocalSignal(Signal):
 
         self.set_dims(dims, data_order)
 
-    def open_tree(self, shot):
-        """Open the mds tree for reading"""
-        return MdsTreeRegistry().open_tree(self.treename, shot, treepath=self.treepath)
 
-    def initialize(self, shot):
-        """Open the mds tree for reading and set the internal state
-
-        In this case the internal state is the relevant MDSplus node
-        data for the given shot
-
+    def gather(self, shot):
+        """Gather the data for a shot
+        
         Arguments:
-            shot (int): The shot number to fetch data for
+            shot (int): The shot number to gather the data for
 
+        Returns:
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
         """
-        tree = self.open_tree(shot)
+        results = {}
+
+        tree = MdsTreeRegistry().open_tree(self.treename, shot, treepath=self.treepath)
         node = tree.getNode(self.expression)
-        self._shot_state[shot] = node.getData()
+        mds_signal = node.getData()
+        results["data"] = mds_signal.data()
 
-    # Note: the mds.Signal is not the same a s toksearch.Signal
-    def _mds_signal(self, shot: int) -> mds.Signal:
-        if shot not in self._shot_state:
-            self.initialize(shot)
-        return self._shot_state[shot]
-
-    def fetch_data(self, shot: int) -> np.ndarray:
-        """Fetch the data for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            np.ndarray: The data for the given shot
-        """
-        mds_signal = self._mds_signal(shot)
-        return mds_signal.data()
-
-    def fetch_dims(self, shot: int) -> dict:
-        """Fetch the dimensions for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            dict: A dictionary of the dimensions for the given shot. The keys
-                are the names of the dimensions and the values are the data for
-                the dimensions.
-        """
-        mds_signal = self._mds_signal(shot)
         dims = self.dims
 
         dims_dict = {}
         if not dims:
             dims = []
         for i, dim in enumerate(dims):
-            dims_dict[dim] = mds_signal.getDimensionAt(i).data()
+            results[dim] = mds_signal.getDimensionAt(i).data()
 
-        return dims_dict
+        if self.with_units:
+            units = {}
+            units["data"] = str(mds_signal.getUnits().data())
+            dims = self.dims
+            if not dims:
+                dims = []
+            for i, dim in enumerate(dims):
+                units[dim] = str(mds_signal.getDimensionAt(i).getUnits().data())
 
-    def fetch_units(self, shot: int) -> dict:
-        """Fetch the units for the given shot
+            results["units"] = units
 
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            dict: A dictionary containing the units of the signal. The dictionary contains
-                a key 'data' with the units of the data, and keys for each dimension
-                of the signal, with the values being the units of the dimensions.
-
-        """
-        mds_signal = self._mds_signal(shot)
-        units = {}
-        units["data"] = str(mds_signal.getUnits().data())
-        dims = self.dims
-        if not dims:
-            dims = []
-        for i, dim in enumerate(dims):
-            units[dim] = str(mds_signal.getDimensionAt(i).getUnits().data())
-
-        return units
-
-    def clear_state(self, shot: int):
-        """Clear the internal state for the given shot
-
-        Arguments:
-            shot (int): The shot number to clear the internal state for
-        """
-        self._shot_state = {}
+        return results
 
     def cleanup_shot(self, shot: int):
         """Close the tree for this shot
@@ -325,57 +278,22 @@ class MdsSignal(Signal):
 
         return sig
 
-    def initialize(self, shot: int):
-        """Open the connection to the remote server or the local tree
 
+    def gather(self, shot):
+        """Gather the data for a shot
+        
         Arguments:
-            shot (int): The shot number to fetch data for
-        """
-        self.sig.initialize(shot)
-
-    def fetch_data(self, shot: int) -> np.ndarray:
-        """Fetch the data for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-        Returns:
-            np.ndarray: The data for the given shot
-        """
-        return self.sig.fetch_data(shot)
-
-    def fetch_dims(self, shot: int) -> dict:
-        """Fetch the dimensions for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
+            shot (int): The shot number to gather the data for
 
         Returns:
-            dict: A dictionary of the dimensions for the given shot. The keys
-                are the names of the dimensions and the values are the data for
-                the dimensions.
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
         """
-        return self.sig.fetch_dims(shot)
+        return self.sig.gather(shot)
 
-    def fetch_units(self, shot: int) -> dict:
-        """Fetch the units for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            dict: A dictionary containing the units of the signal. The dictionary contains
-                a key 'data' with the units of the data, and keys for each dimension
-                of the signal, with the values being the units of the dimensions.
-        """
-        return self.sig.fetch_units(shot)
-
-    def clear_state(self, shot):
-        """Clear the internal state for the given shot
-
-        Arguments:
-            shot (int): The shot number to clear the internal state for
-        """
-        self.sig.clear_state(shot)
 
     def cleanup_shot(self, shot: int):
         """Close the tree for this shot
@@ -460,93 +378,51 @@ class MdsRemoteSignal(Signal):
         """Open the connection to remote server"""
         return MdsConnectionRegistry().connect(self.server)
 
-    def initialize(self, shot: int):
-        """Open the connection to remote server and open the tree for reading
 
+    def gather(self, shot):
+        """Gather the data for a shot
+        
         Arguments:
-            shot (int): The shot number to fetch data for
+            shot (int): The shot number to gather the data for
+
+        Returns:
+            dict: A dictionary containing the data gathered for the signal. The dictionary
+                will contain a key 'data' with the data, and keys for each dimension of the
+                data, with the values being the values of the dimensions. If the with_units
+                attribute is True, the dictionary will also contain a key 'units' with the units
+                of the data and dimensions.
         """
         connection = self.connect()
         connection.openTree(self.treename, shot)
-        self._shot_state[shot] = True
 
-    def _is_initialized(self, shot):
-        return self._shot_state.get(shot, False)
+        results = {}
+        results["data"] = connection.get(self.expression).value
 
-    def fetch_data(self, shot: int) -> np.ndarray:
-        """Fetch the data for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            np.ndarray: The data for the given shot
-        """
-        if not self._is_initialized(shot):
-            self.initialize(shot)
-
-        connection = self.connect()
-        return connection.get(self.expression).value
-
-    def fetch_dims(self, shot: int) -> dict:
-        """Fetch the dimensions for the given shot
-
-        Arguments:
-            shot (int): The shot number to fetch data for
-
-        Returns:
-            dict: A dictionary of the dimensions for the given shot. The keys
-                are the names of the dimensions and the values are the data for
-                the dimensions.
-        """
-        if not self._is_initialized(shot):
-            self.initialize(shot)
-
-        connection = self.connect()
         dims = self.dims
         dims_dict = {}
         if not dims:
             dims = []
         for i, dim in enumerate(dims):
             dim_expression = _dim_of_expression(self.expression, dim=i)
-            dims_dict[dim] = connection.get(dim_expression).value
-        return dims_dict
+            results[dim] = connection.get(dim_expression).value
 
-    def fetch_units(self, shot):
-        """Fetch the units for the given shot
 
-        Arguments:
-            shot (int): The shot number to fetch data for
+        if self.with_units:
+            units = {}
+            units["data"] = connection.get(
+                _units_of_expression(self.expression, dim=-1)
+            ).value
+            dims = self.dims
+            if not dims:
+                dims = []
+            for i, dim in enumerate(dims):
+                units_expression = _units_of_expression(self.expression, dim=i)
+                units[dim] = connection.get(units_expression).value
 
-        Returns:
-            dict: A dictionary containing the units of the signal. The dictionary contains
-                a key 'data' with the units of the data, and keys for each dimension
-                of the signal, with the values being the units of the dimensions.
+            results["units"] = units
 
-        """
-        if not self._is_initialized(shot):
-            self.initialize(shot)
+        return results
 
-        connection = self.connect()
-        units = {}
-        units["data"] = connection.get(
-            _units_of_expression(self.expression, dim=-1)
-        ).value
-        dims = self.dims
-        if not dims:
-            dims = []
-        for i, dim in enumerate(dims):
-            units_expression = _units_of_expression(self.expression, dim=i)
-            units[dim] = connection.get(units_expression).value
-        return units
-
-    def clear_state(self, shot):
-        """Clear the internal state for the given shot
-
-        Arguments:
-            shot (int): The shot number to clear the internal state for
-        """
-        self._shot_state = {}
 
     def cleanup_shot(self, shot):
         """Close all trees for the given shot

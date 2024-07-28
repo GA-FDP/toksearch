@@ -31,28 +31,24 @@ class MockSignal(Signal):
         self.data = data if data is not None else self.default_d
         self.times = times if times is not None else self.default_t
 
-    def fetch_data(self, shot):
-        return self.data
+    def gather(self, shot):
+        results = {}
 
-    def fetch_dims(self, shot):
-        dims_dict = {}
+        results["data"] = self.data
+        
         if self.dims:
-            dims_dict["times"] = self.times
-        return dims_dict
+            results["times"] = self.times
 
-    def fetch_units(self, shot):
         units_dict = {}
         if self.with_units:
             units_dict["data"] = "A"
             if self.dims and "times" in self.dims:
                 units_dict["times"] = "ms"
-        return units_dict
 
-    def initialize(self, shot):
-        pass
+            results["units"] = units_dict
 
-    def clear_state(self, shot):
-        pass
+        return results
+
 
     def cleanup(self):
         pass

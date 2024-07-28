@@ -234,14 +234,12 @@ class GenericTestMdsSignal(ABC):
         """Just see if it runs without throwing exception"""
         sig = self.signal()
         shot = DEFAULT_SHOT
-        sig.initialize(shot)
         sig.cleanup_shot(shot)
 
     def test_cleanup(self):
         """Just see if it runs without throwing exception"""
         sig = self.signal()
         shot = DEFAULT_SHOT
-        sig.initialize(shot)
         sig.cleanup()
 
     def test_fetch_returns_valid_data_times(self):
