@@ -160,8 +160,7 @@ class MdsLocalSignal(Signal):
 
         tree = MdsTreeRegistry().open_tree(self.treename, shot, treepath=self.treepath)
         node = tree.getNode(self.expression)
-        mds_signal = node.getData()
-        results["data"] = mds_signal.data()
+        results["data"] = node.data()
 
         dims = self.dims
 
@@ -169,16 +168,16 @@ class MdsLocalSignal(Signal):
         if not dims:
             dims = []
         for i, dim in enumerate(dims):
-            results[dim] = mds_signal.getDimensionAt(i).data()
+            results[dim] = node.getDimensionAt(i).data()
 
         if self.with_units:
             units = {}
-            units["data"] = str(mds_signal.getUnits().data())
+            units["data"] = str(node.getUnits().data())
             dims = self.dims
             if not dims:
                 dims = []
             for i, dim in enumerate(dims):
-                units[dim] = str(mds_signal.getDimensionAt(i).getUnits().data())
+                units[dim] = str(node.getDimensionAt(i).getUnits().data())
 
             results["units"] = units
 
