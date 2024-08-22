@@ -45,6 +45,7 @@ import psutil
 from typing import Union, Iterable, Optional
 
 from .signal import Signal
+from ..utilities.utilities import set_env
 
 
 def _dim_of_expression(expression, dim=0):
@@ -59,22 +60,6 @@ def _units_of_expression(expression, dim=0):
         return exp.format(_dim_of_expression(expression, dim))
 
 
-@contextlib.contextmanager
-def set_env(var: str, val: str):
-    """Context mananger to temporarily set environment variable
-
-    Arguments:
-        var (str): The name of the environment variable
-        val (str): The value to set the environment variable to
-    """
-    old_environ = dict(os.environ)
-    os.environ[var] = val
-    try:
-        yield
-    finally:
-        os.environ.clear()
-        os.environ.update(old_environ)
-
 class MdsTreePath(object):
     def __init__(self, **paths):
         """Create an object to manage the paths to MDSplus trees
@@ -88,14 +73,22 @@ class MdsTreePath(object):
     @contextlib.contextmanager
     def set_env(self):
         """Temporarily set mds treepath environment variables"""
-        old_environ = dict(os.environ)
-        for key, val in self.paths.items():
-            os.environ[self.variable_name(key)] = val
+        old_var_vals = {var: os.getenv(var, None) for var in self.paths.keys()}
+
+        for var, val in self.paths.items():
+            var_name = self.variable_name(var)
+            old_var_vals[var_name] = os.getenv(var_name, None)
+            os.environ[var_name] = val
+
         try:
             yield
         finally:
-            os.environ.clear()
-            os.environ.update(old_environ)
+            for var, old_val in old_var_vals.items():
+                var_name = self.variable_name(var)
+                if old_val is None:
+                    os.environ.pop(var_name, None)
+                else:
+                    os.environ[var_name] = old_val
 
     @classmethod
     def variable_name(cls, treename):

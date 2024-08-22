@@ -13,9 +13,10 @@
 # limitations under the License.
 
 import unittest
+import os
 
 
-from toksearch.utilities.utilities import capture_exception
+from toksearch.utilities.utilities import capture_exception, set_env, unset_env
 
 
 class TestUtilities(unittest.TestCase):
@@ -26,6 +27,25 @@ class TestUtilities(unittest.TestCase):
         except Exception as e:
             val = capture_exception("my label", e)
 
-        self.assertEquals(val["label"], "my label")
+        self.assertEqual(val["label"], "my label")
         self.assertTrue("Exception" in val["type"])
         self.assertTrue(val["traceback"].startswith("Traceback"))
+
+
+    def test_set_env(self):
+
+        os.environ.pop("MY_VAR", None)
+
+        with set_env("MY_VAR", "MY_VAL"):
+            self.assertEqual(os.getenv("MY_VAR", None), "MY_VAL")
+
+        self.assertIsNone(os.getenv("MY_VAR", None))
+
+    def test_unset_env(self):
+
+        os.environ["MY_VAR"] = "MY_VAL"
+
+        with unset_env("MY_VAR"):
+            self.assertIsNone(os.getenv("MY_VAR", None))
+
+        self.assertEqual(os.getenv("MY_VAR", None), "MY_VAL")

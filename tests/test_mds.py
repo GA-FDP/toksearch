@@ -149,8 +149,9 @@ class TestMdsTreePath(unittest.TestCase):
         # Clear the variables in they already exist
         for key, val in paths.items():
             varname = MdsTreePath.variable_name(key)
-            if varname in os.environ:
-                del os.environ[varname]
+            os.environ.pop(varname, None)
+            #if varname in os.environ:
+            #    del os.environ[varname]
             self.assertNotIn(varname, os.environ)
 
         # Check if the variables are set inside the context manager
