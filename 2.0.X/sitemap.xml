@@ -2,97 +2,97 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/Aggregating_Data/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/Parallelization/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/SQL/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/Using_with_Xarray/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/Working_with_Signals/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/backend_multiprocessing/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/backend_ray/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/backend_serial/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/backend_spark/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/distributed_computing/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/mds/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/overview/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/pipeline/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/record/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/record_set/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/signal/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/sql/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
          <loc>https://ga-fdp.github.io/toksearch/2.0.X/tutorial/</loc>
-         <lastmod>2024-07-28</lastmod>
+         <lastmod>2024-08-22</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>

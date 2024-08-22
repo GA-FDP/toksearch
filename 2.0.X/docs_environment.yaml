@@ -23,3 +23,4 @@ dependencies:
   - mkdocstrings-python=1.9.1
   - mkdocs-jupyter=0.24.6
   - mike=2.0
+  - griffe<1
