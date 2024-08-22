@@ -21,25 +21,27 @@ import traceback
 @contextlib.contextmanager
 def set_env(var, val):
     """Context mananger to temporarily set environment variable"""
-    old_environ = dict(os.environ)
+    old_val = os.getenv(var, None)
     os.environ[var] = val
     try:
         yield
     finally:
-        os.environ.clear()
-        os.environ.update(old_environ)
+        if old_val is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = old_val
 
 
 @contextlib.contextmanager
 def unset_env(var):
     """Context mananger to temporarily set environment variable"""
-    old_environ = dict(os.environ)
+    old_val = os.getenv(var, None)
     os.environ.pop(var, None)
     try:
         yield
     finally:
-        os.environ.clear()
-        os.environ.update(old_environ)
+        if old_val is not None:
+            os.environ[var] = old_val
 
 
 def chunk_it(seq, num):
