@@ -14,10 +14,11 @@
 
 name: toksearch
 channels:
+  - ga-fdp
   - conda-forge
 dependencies:
   - python
-  - mdsplus=7.7
+  - mdsplus-xrd
   - numpy>=1.20, <2
   - pymssql
   - ray-core

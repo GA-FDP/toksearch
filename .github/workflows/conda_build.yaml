@@ -34,7 +34,7 @@ jobs:
         run: |
           mamba install --yes boa
           mkdir ${HOME}/outdir
-          conda mambabuild --output-folder=${HOME}/outdir recipe 
+          conda mambabuild --output-folder=${HOME}/outdir -c ga-fdp recipe 
 
       - name: Get Tags
         if: startsWith(github.ref, 'refs/tags/release-')
