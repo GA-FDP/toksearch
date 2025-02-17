@@ -1,0 +1,2268 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+        <meta name="author" content="Brian Sammuli">
+      
+      
+        <link rel="canonical" href="https://ga-fdp.github.io/toksearch/2.1.X/pipeline/">
+      
+      
+        <link rel="prev" href="../Aggregating_Data/">
+      
+      
+        <link rel="next" href="../record/">
+      
+      
+      <link rel="icon" href="../favicon.ico">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.20">
+    
+    
+      
+        <title>Pipeline - TokSearch</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.66ac8b77.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#toksearch.Pipeline" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="TokSearch" class="md-header__button md-logo" aria-label="TokSearch" data-md-component="logo">
+      
+  <img src="../ts_just_logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            TokSearch
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Pipeline
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/GA-FDP/toksearch" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GA-FDP/toksearch
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="TokSearch" class="md-nav__button md-logo" aria-label="TokSearch" data-md-component="logo">
+      
+  <img src="../ts_just_logo.svg" alt="logo">
+
+    </a>
+    TokSearch
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/GA-FDP/toksearch" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GA-FDP/toksearch
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Tutorials
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Tutorials
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    The Basics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Working_with_Signals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Working with signals
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Using_with_Xarray/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Xarray and signal alignment
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Parallelization/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parallelization
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../distributed_computing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Distributed computing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sql/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Creating pipelines from SQL
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Aggregating_Data/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Combining data after pipeline computation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            API
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Pipeline
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Pipeline
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.Pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      __init__
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.align" class="md-nav__link">
+    <span class="md-ellipsis">
+      align
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_multiprocessing" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_multiprocessing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_ray" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_ray
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_record
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_serial" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_serial
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_shot" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_shot
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_spark" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_spark
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      fetch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.fetch_dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      fetch_dataset
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.from_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      from_sql
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      keep
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      map
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.where" class="md-nav__link">
+    <span class="md-ellipsis">
+      where
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Record
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mds/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MDSplus Data Access
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Backend
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_4">
+            <span class="md-nav__icon md-icon"></span>
+            Backend
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_ray/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ray
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_spark/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Spark
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_serial/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Serial
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_multiprocessing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multiprocessing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Abstract Interfaces
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            Abstract Interfaces
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Signal
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record_set/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    RecordSet
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.Pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.__init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      __init__
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.align" class="md-nav__link">
+    <span class="md-ellipsis">
+      align
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_multiprocessing" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_multiprocessing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_ray" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_ray
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_record" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_record
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_serial" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_serial
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_shot" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_shot
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.compute_spark" class="md-nav__link">
+    <span class="md-ellipsis">
+      compute_spark
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.fetch" class="md-nav__link">
+    <span class="md-ellipsis">
+      fetch
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.fetch_dataset" class="md-nav__link">
+    <span class="md-ellipsis">
+      fetch_dataset
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.from_sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      from_sql
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      keep
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.map" class="md-nav__link">
+    <span class="md-ellipsis">
+      map
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.Pipeline.where" class="md-nav__link">
+    <span class="md-ellipsis">
+      where
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  <h1>Pipeline</h1>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.Pipeline" class="doc doc-heading">
+          <code>toksearch.Pipeline</code>
+
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>Pipeline class for processing data</p>
+<p>The Pipeline class is used to process data in a series of steps. The
+Pipeline class is designed to be used in a functional style, where
+operations are added to the pipeline in a linear fashion. The pipeline
+can then be applied to a set of Records objects. The pipeline can be applied
+in serial, using Ray, using Spark, or using multiprocessing, or using
+a custom backend. The results of the pipeline are stored in an object that
+is derived from a RecordSet, which is a list-like object that can be used
+to access the results of the pipeline.</p>
+
+
+
+  <p><strong>Methods:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.from_sql" href="#toksearch.Pipeline.from_sql">from_sql</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Initialize a Pipeline using the results of an sql query</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.__init__" href="#toksearch.Pipeline.__init__">__init__</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Initialize a Pipeline object</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.fetch" href="#toksearch.Pipeline.fetch">fetch</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Add a signal to be fetched by the pipeline</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.fetch_dataset" href="#toksearch.Pipeline.fetch_dataset">fetch_dataset</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Create an xarray dataset field in the record</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.map" href="#toksearch.Pipeline.map">map</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply a function to the records from of the previous step in the pipeline,
+modifying the record in place</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.keep" href="#toksearch.Pipeline.keep">keep</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Keep only the fields specified in the list</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.align" href="#toksearch.Pipeline.align">align</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Align an xarray dataset with a specified set of coordinates
+(typically times)</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.where" href="#toksearch.Pipeline.where">where</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply a function to the records of the previous step in the pipeline,
+and keep the record if the result is truthy, remove it otherwise</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_shot" href="#toksearch.Pipeline.compute_shot">compute_shot</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Run the pipeline for a single shot, returning a record object</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_record" href="#toksearch.Pipeline.compute_record">compute_record</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline to a record object</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute" href="#toksearch.Pipeline.compute">compute</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline using a backend</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_serial" href="#toksearch.Pipeline.compute_serial">compute_serial</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline serially on the local host</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_ray" href="#toksearch.Pipeline.compute_ray">compute_ray</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline using Ray</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_spark" href="#toksearch.Pipeline.compute_spark">compute_spark</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline using Spark</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><code><a class="autorefs autorefs-internal" title="toksearch.Pipeline.compute_multiprocessing" href="#toksearch.Pipeline.compute_multiprocessing">compute_multiprocessing</a></code></td>
+            <td>
+              <div class="doc-md-description">
+                <p>Apply the pipeline using multiprocessing</p>
+              </div>
+            </td>
+          </tr>
+    </tbody>
+  </table>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.__init__" class="doc doc-heading">
+          <code class="highlight language-python"><span class="fm">__init__</span><span class="p">(</span><span class="n">parent</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Instantiate a Pipeline object</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>parent</code></td>
+          <td>
+                <code><span title="typing.Union">Union</span>[<span title="typing.Iterable">Iterable</span>[<span title="typing.Union">Union</span>[int, dict, <a class="autorefs autorefs-internal" title="toksearch.record.Record" href="../record/#toksearch.record.Record">Record</a>]], <a class="autorefs autorefs-internal" title="toksearch.pipeline.record_pipeline.Pipeline" href="#toksearch.Pipeline">Pipeline</a>, <a class="autorefs autorefs-internal" title="toksearch.record.record_set.RecordSet" href="../record_set/#toksearch.record.record_set.RecordSet">RecordSet</a>, <span title="toksearch.pipeline.pipeline_source.PipelineSource">PipelineSource</span>]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The parent object. This can be an Iterable, a Pipeline, a
+RecordSet, or a PipelineSource.</p>
+<p>If parent is an Iterable, then the elements of the Iterable
+must be one of three types:
+    1) A integer shot number
+    2) A dictionary containing at least the field "shot"
+       (and not the fields "key" or "errors")
+    3) A Record object.</p>
+<p>If the parent is another Pipeline, then the newly constructed
+Pipeline will act as a continuation of the parent.</p>
+<p>The parent can also be a PipelineSource, although typically this
+is handled internally.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.align" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">align</span><span class="p">(</span><span class="n">ds_name</span><span class="p">,</span> <span class="n">align_with</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="s1">&#39;times&#39;</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;pad&#39;</span><span class="p">,</span> <span class="n">extrapolate</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">interp_kwargs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Align an xarray dataset with a specified set of coordinates</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>ds_name</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Name of the dataset in the record</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>align_with</code></td>
+          <td>
+                <code><span title="typing.Union">Union</span>[str, <span title="typing.List">List</span>, <span title="numpy.ndarray">ndarray</span>, <span title="typing.Callable">Callable</span>, float]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The coordinates to align with. This can be a string
+(which will be interpreted as a field in the dataset), a list
+(which will be interpreted as a list of values), a numpy array,
+a callable (which will be called with the dataset and the dim
+as arguments), or a numeric value (which will be interpreted as
+a sample period).</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>dim</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The dimension to align along. Default is 'times'</p>
+            </div>
+          </td>
+          <td>
+                <code>&#39;times&#39;</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>method</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The method to use for alignment. Default is 'pad', which
+zero-order holds the data. Other options include 'linear' and
+'cubic'.</p>
+            </div>
+          </td>
+          <td>
+                <code>&#39;pad&#39;</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>extrapolate</code></td>
+          <td>
+                <code>bool</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether to extrapolate data. Default is True.</p>
+            </div>
+          </td>
+          <td>
+                <code>True</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>interp_kwargs</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[dict]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Dict of eyword arguments to pass to the interpolation
+function provided by xarray. Default is None.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute</span><span class="p">(</span><span class="n">recordset_cls</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline using a backend defined by recordset_cls</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>recordset_cls</code></td>
+          <td>
+                <code><span title="typing.Type">Type</span>[<a class="autorefs autorefs-internal" title="toksearch.record.record_set.RecordSet" href="../record_set/#toksearch.record.record_set.RecordSet">RecordSet</a>]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The class of the RecordSet to use. This should be a subclass
+of RecordSet.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>config</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[object]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Configuration object for the backend RecordSet (e.g. RayConfig if
+using Ray, MultiprocessingConfig if using multiprocessing, etc.)</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+<th>Name</th>        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+<td><code>RecordSet</code></td>          <td>
+                <code><a class="autorefs autorefs-internal" title="toksearch.record.record_set.RecordSet" href="../record_set/#toksearch.record.record_set.RecordSet">RecordSet</a></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The record set</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_multiprocessing" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_multiprocessing</span><span class="p">(</span><span class="n">num_workers</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline using multiprocessing</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>num_workers</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[int]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The number of workers to use for parallel processing.
+If set to None (the default), half the number of CPUs on the machine will be used.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>batch_size</code></td>
+          <td>
+                <code><span title="typing.Union">Union</span>[str, int]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The batch size to use for parallel processing, passed to joblib.Parallel.
+Defaults to "auto".</p>
+            </div>
+          </td>
+          <td>
+                <code>&#39;auto&#39;</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+<th>Name</th>        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+<td><code>MultiprocessingRecordSet</code></td>          <td>
+                <code><a class="autorefs autorefs-internal" title="toksearch.backend.multiprocessing.MultiprocessingRecordSet" href="../backend_multiprocessing/#toksearch.backend.multiprocessing.MultiprocessingRecordSet">MultiprocessingRecordSet</a></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The record set</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_ray" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_ray</span><span class="p">(</span><span class="n">numparts</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">placement_group_func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">memory_per_shot</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">ray_init_kwargs</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline using Ray</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>numparts</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[int]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The number of partitions to use when mapping. If not provided, the
+number of partitions will equal the number of records in the pipeline.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>batch_size</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[int]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The number of elements to process in each batch. Defaults to
+the number of records in the pipeline.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>verbose</code></td>
+          <td>
+                <code>bool</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Whether to print verbose output. Default is True.</p>
+            </div>
+          </td>
+          <td>
+                <code>True</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>placement_group_func</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[<span title="typing.Callable">Callable</span>]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>A function that returns a placement group. See the ray docs
+for more information on placement groups.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+        <tr>
+          <td><code>memory_per_shot</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[int]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Memory to allocate to each shot in bytes. If not provided, there
+is no limit.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+
+
+  <p><strong>Other Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>**ray_init_kwargs</code></td>
+          <td>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Keyword arguments to pass to ray.init</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+<th>Name</th>        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+<td><code>RayRecordSet</code></td>          <td>
+                <code><a class="autorefs autorefs-internal" title="toksearch.backend.ray.RayRecordSet" href="../backend_ray/#toksearch.backend.ray.RayRecordSet">RayRecordSet</a></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The record set</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_record" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_record</span><span class="p">(</span><span class="n">record</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline to a record object</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_serial" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_serial</span><span class="p">()</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline serially on the local host</p>
+<p>Returns a SerialRecordSet object</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_shot" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_shot</span><span class="p">(</span><span class="n">shot</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Run the pipeline for a single shot, returning a record object</p>
+<p>Note that an empty record object is first created, and the acted on
+by the pipeline. If there are prerequiste fields in the record, then the
+method compute_record should be used to pass a record object directly to
+the pipeline.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.compute_spark" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">compute_spark</span><span class="p">(</span><span class="n">sc</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">numparts</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">cache</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply the pipeline using Spark</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>sc</code></td>
+          <td>
+                <code><span title="typing.Optional">Optional</span>[<span title="pyspark.context.SparkContext">SparkContext</span>]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>SparkContext to use. If not provided, a default SparkContext will be created.</p>
+            </div>
+          </td>
+          <td>
+                <code>None</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+      <p>numparts: Number of partitions to use. If not provided, defaults to the number of records.
+        will be used.
+    cache: Whether to cache the RDD. Default is False.</p>
+
+
+
+  <p><strong>Returns:</strong></p>
+  <table>
+    <thead>
+      <tr>
+<th>Name</th>        <th>Type</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+<td><code>SparkRecordSet</code></td>          <td>
+                <code><a class="autorefs autorefs-internal" title="toksearch.backend.spark.SparkRecordSet" href="../backend_spark/#toksearch.backend.spark.SparkRecordSet">SparkRecordSet</a></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The record set</p>
+            </div>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.fetch" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">fetch</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">signal</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Add a signal to be fetched by the pipeline</p>
+<p>Appends a field (name) to the record being processed by the pipeline</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>name</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The name of the field to add to the record that will contain
+the signal data, dimensions units (if applicable)</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>signal</code></td>
+          <td>
+                <code><a class="autorefs autorefs-internal" title="toksearch.signal.signal.Signal" href="../signal/#toksearch.Signal">Signal</a></code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>The signal to fetch. Must be an object that implements the
+Signal interface.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.fetch_dataset" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">fetch_dataset</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">signals</span><span class="p">,</span> <span class="n">append</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Create an xarray dataset field called name in the record.</p>
+<p>signal_dict is a dict of the form name: signal. Each key in
+signal_dict will become the name of a data var in the resulting
+dataset.</p>
+<p>If the append keyword is set to True, then if name exists, it
+will be appended to. Otherwise, a new field is created (and
+any existing data in that field will be lost).</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.from_sql" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">from_sql</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="o">*</span><span class="n">query_params</span><span class="p">)</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Initialize a Pipeline using the results of an sql query</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>conn</code></td>
+          <td>
+                <code>Connection</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>A Connection object,
+compatible with the Python DB API. This can be, for example, from
+pyodbc, pymssql, sqlite, etc...</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>query</code></td>
+          <td>
+                <code>str</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>A query string. At a minimum, the query must produce
+rows with the column "shot". The query cannot have columns
+"key" or "errors" as those are reserved words in a Pipeline.
+Additionally, if the query has any unnamed column a
+MissingColumnName exception will be raised.</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+        <tr>
+          <td><code>query_params</code></td>
+          <td>
+                <code>arbitrary type</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>Optional. Used to pass parameters
+into a query. The exact query syntax is db-dependent. For SQL
+server (used for the d3drdb), use either %d or %s as
+placeholders (it doesn't matter which). For sqlite, ? is
+used as the placeholder.</p>
+            </div>
+          </td>
+          <td>
+                <code>()</code>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+
+
+<p><strong>Examples:</strong></p>
+    <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pipeline</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.sql.mssql</span><span class="w"> </span><span class="kn">import</span> <span class="n">connect_d3drdb</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># See documentation for connect_d3drdb for more details</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">conn</span> <span class="o">=</span> <span class="n">connect_d3drdb</span><span class="p">()</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Query without parameters</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;select shot from shots_type where shot_type = &#39;plasma&#39;&quot;</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">pipe</span> <span class="o">=</span> <span class="n">Pipeline</span><span class="o">.</span><span class="n">from_sql</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">query</span><span class="p">)</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># Query with parameters, limiting to shot numbers greater than a</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># threshold</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">threshold</span> <span class="o">=</span> <span class="mi">180000</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="n">query</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="s2">    select shot</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s2">    from shots_type</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="s2">    where shot_type = &#39;plasma&#39; and shot &gt; </span><span class="si">%d</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="s2">    &quot;&quot;&quot;</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="n">pipe</span> <span class="o">=</span> <span class="n">Pipeline</span><span class="o">.</span><span class="n">from_sql</span><span class="p">(</span><span class="n">conn</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="n">threshold</span><span class="p">)</span>
+</span></code></pre></div>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.keep" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">keep</span><span class="p">(</span><span class="n">fields</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Keep only the specified fields in the record</p>
+
+
+
+  <p><strong>Parameters:</strong></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th>Default</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+          <td><code>fields</code></td>
+          <td>
+                <code><span title="typing.List">List</span>[str]</code>
+          </td>
+          <td>
+            <div class="doc-md-description">
+              <p>List of fields to keep</p>
+            </div>
+          </td>
+          <td>
+              <em>required</em>
+          </td>
+        </tr>
+    </tbody>
+  </table>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.map" class="doc doc-heading">
+          <code class="highlight language-python"><span class="nb">map</span><span class="p">(</span><span class="n">func</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply func to result of the previous step in the pipeline</p>
+<p>Func is expected to be of the form func(record) -&gt; record</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.Pipeline.where" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">where</span><span class="p">(</span><span class="n">func</span><span class="p">)</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Apply a func to result in the previous step in the pipeline. If
+the result of the func is truthy, then keep the record in the pipeline.
+Otherwise, purge the record from the pipeline.</p>
+<p>func must be of the form func(record) -&gt; Truth-like value</p>
+
+  </div>
+
+</div>
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.dd8806f2.min.js"></script>
+      
+    
+  </body>
+</html>
