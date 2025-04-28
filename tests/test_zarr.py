@@ -27,13 +27,18 @@ class TestZarrSignal(unittest.TestCase):
         os.chdir(self.test_dir)
 
     @classmethod
-    def create_tmp_zarr(self, shot: int = 30421, group: str = "magnetics"):
+    def create_tmp_zarr(
+        self,
+        shot: int = 30421,
+        group: str = "magnetics",
+        file_name_format: str = "{shot}.zarr",
+    ):
         ip = xr.DataArray(
             np.random.random((1000,)), dims=["time"], attrs=dict(units="A")
         )
         time = xr.DataArray(np.linspace(0, 1.0, 1000), dims=["time"])
         dataset = xr.Dataset(dict(ip=ip, time=time))
-        dataset.to_zarr(f"{shot}.zarr", group=group)
+        dataset.to_zarr(file_name_format.format(shot=shot), group=group)
 
     @classmethod
     def tearDownClass(cls):
@@ -51,12 +56,6 @@ class TestZarrSignal(unittest.TestCase):
         self.assertEqual(result["data"].shape, (1000,))
         self.assertIsInstance(result["times"], np.ndarray)
         self.assertEqual(result["times"].shape, (1000,))
-
-    def test_fetch_no_group(self):
-        self.create_tmp_zarr(30422, group=None)
-        ip_signal = ZarrSignal(path=self.test_dir, treepath="ip")
-        result = ip_signal.fetch_as_xarray(30422)
-        self.assertIsInstance(result, xr.DataArray)
 
     def test_fetch_as_xarray(self):
         ip_signal = ZarrSignal(path=self.test_dir, treepath="magnetics/ip")
@@ -78,3 +77,19 @@ class TestZarrSignal(unittest.TestCase):
         self.assertEqual(result["data"].shape, (1000,))
         self.assertIsInstance(result["times"], np.ndarray)
         self.assertEqual(result["times"].shape, (1000,))
+
+    def test_fetch_no_group(self):
+        self.create_tmp_zarr(30422, group=None)
+        ip_signal = ZarrSignal(path=self.test_dir, treepath="ip")
+        result = ip_signal.fetch_as_xarray(30422)
+        self.assertIsInstance(result, xr.DataArray)
+
+    def test_fetch_custom_file_name_format(self):
+        custom_name = "MAST{shot}.zarr"
+        self.create_tmp_zarr(30423, file_name_format=custom_name)
+
+        ip_signal = ZarrSignal(
+            path=self.test_dir, treepath="magnetics/ip", file_name_format=custom_name
+        )
+        result = ip_signal.fetch_as_xarray(30423)
+        self.assertIsInstance(result, xr.DataArray)

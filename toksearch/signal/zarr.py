@@ -31,6 +31,7 @@ class ZarrSignal(Signal):
         treepath: str,
         dims: Iterable[str] = ("times",),
         fetch_units: bool = True,
+        file_name_format: str = "{shot}.zarr",
         fs: Optional[AsyncFileSystem] = None,
     ):
         """Create a signal object that fetches data from an MDSplus tree
@@ -41,6 +42,9 @@ class ZarrSignal(Signal):
             dims: See documentation for the Signal class. Defaults to ('times',)
             fetch_units: See documentation for the Signal class. Defaults
                 to True.
+            file_name_format: A format string containing a parameter `shot`
+                for finding shot files. e.g. `MyFunName-{shot}.zarr`. Default format will search
+                for files called `{shot}.zarr`.
             fs: The `fsspec` filesystem object to use (optional). If `None`
                 assume that Zarr store is a local path
         """
@@ -49,6 +53,7 @@ class ZarrSignal(Signal):
         self.treepath = treepath
         self.fetch_units = fetch_units
         self.dims = dims
+        self.file_name_format = file_name_format
         self.fs = fs
         if fs is None:
             self.fs = AsyncFileSystemWrapper(
@@ -68,7 +73,7 @@ class ZarrSignal(Signal):
                 attribute is True, the dictionary will also contain a key 'units' with the units
                 of the data and dimensions.
         """
-        shot_file = os.path.join(self.path, f"{shot}.zarr")
+        shot_file = os.path.join(self.path, self.file_name_format.format(shot=shot))
         if "://" not in shot_file:
             # edge case: default to using local `file://` protocol if none specified
             shot_file = f"file://{shot_file}"
