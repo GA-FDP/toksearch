@@ -73,7 +73,9 @@ class ZarrSignal(Signal):
             # edge case: default to using local `file://` protocol if none specified
             shot_file = f"file://{shot_file}"
         protocol, file_path = str(shot_file).split("://", maxsplit=1)
-        group_name, signal_name = self.treepath.rsplit("/", maxsplit=1)
+        parts = self.treepath.rsplit("/", maxsplit=1)
+        signal_name = parts[-1]
+        group_name = parts[-2] if len(parts) > 1 else None
 
         store = zarr.storage.FsspecStore(fs=self.fs, path=file_path)
         store = xr.open_zarr(store, group=group_name)
