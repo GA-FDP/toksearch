@@ -18,7 +18,7 @@ import zarr
 import zarr.storage
 import xarray as xr
 from typing import Iterable, Optional
-from fsspec import AbstractFileSystem
+from fsspec.asyn import AsyncFileSystem
 from fsspec.implementations.asyn_wrapper import AsyncFileSystemWrapper
 
 from .signal import Signal
@@ -31,7 +31,7 @@ class ZarrSignal(Signal):
         treepath: str,
         dims: Iterable[str] = ("times",),
         fetch_units: bool = True,
-        fs: Optional[AbstractFileSystem] = None,
+        fs: Optional[AsyncFileSystem] = None,
     ):
         """Create a signal object that fetches data from an MDSplus tree
 
