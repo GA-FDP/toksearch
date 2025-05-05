@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from .signal.signal import Signal
+from .signal.zarr import ZarrSignal
 from .signal.mds import MdsSignal, MdsTreePath
 from .pipeline.align import XarrayAligner
 from .pipeline import Pipeline
@@ -21,4 +22,4 @@ from pathlib import Path
 
 from . import _version
 
-__version__ = _version.get_versions()['version']
+__version__ = _version.get_versions()["version"]
