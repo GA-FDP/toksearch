@@ -18,6 +18,7 @@ channels:
 dependencies:
   - python=3.10
   - mkdocs=1.5.3
+  - mkdocs-autorefs<1.4
   - mkdocs-material=9.5
   - mkdocstrings=0.24.1
   - mkdocstrings-python=1.9.1
