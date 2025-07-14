@@ -45,6 +45,12 @@ import psutil
 from typing import Union, Iterable, Optional
 
 from .signal import Signal
+
+try:
+    from toksearch_d3d.signal.ptdata import PtDataSignal
+except ImportError:
+    PtDataSignal = None
+
 from ..utilities.utilities import set_env
 
 
@@ -196,7 +202,28 @@ class MdsLocalSignal(Signal):
         MdsTreeRegistry().close_all_trees()
 
 
-class MdsSignal(Signal):
+def MdsSignal(expression: str,
+              treename: str,
+              location: Optional[Union[str, MdsTreePath]] = None,
+              dims: Iterable[str] = ("times",),
+              data_order: Optional[Iterable[str]] = None,
+              fetch_units: bool = True):
+    """
+    Factory method for _MdsSignal class. Automatically returns
+    a PtDataSignal object if the expression redirects the MDSplus
+    signal to ptdata. Otherwise returns a MdsSignal instance
+    """
+    if PtDataSignal is None or ("ptdata" not in expression and "ptheader" not in expresion):
+        return _MdsSignal(expression, treename, location, dims, 
+                          data_order, fetch_units)
+    else:
+        start = expression.find("(")
+        end = expression.rfind("(")
+        ptdata_pointname = expression[start:end]
+        return PtDataSignal(ptdata_pointname, remote=True, 
+                            ical=1, keep_header=False, fetch_times=True, fetch_units=True)
+
+class _MdsSignal(Signal):
 
     def __init__(
         self,
