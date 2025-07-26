@@ -25,6 +25,7 @@ source:
 requirements:
     build:
         - {{ compiler('c') }}
+        - {{ stdlib('c') }}
     host:
         - python
         - numpy>=1.20, <2
