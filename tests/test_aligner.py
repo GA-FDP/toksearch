@@ -108,7 +108,7 @@ class TestTimebaseAligner(unittest.TestCase):
         self._align("s1", "pad", True)
         res = self.pipeline.compute_shot(self.shot)
         ds = res["ds"]
-        self.assertEquals(self.d2[-2], ds["s2"].values[-1])
+        self.assertEqual(self.d2[-2], ds["s2"].values[-1])
         self.assertFalse(res.errors)
 
     def test_with_ndarray_input_pad(self):

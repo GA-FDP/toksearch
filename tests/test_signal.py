@@ -79,7 +79,7 @@ class TestSignalRegistry(unittest.TestCase):
         reg.register(sig)
         reg.register(sig)
         self.assertIn(sig, reg)
-        self.assertEquals(len(reg.signals), 1)
+        self.assertEqual(len(reg.signals), 1)
 
 
 class TestDimensionedSignal(unittest.TestCase):
@@ -103,7 +103,7 @@ class TestDimensionedSignal(unittest.TestCase):
         sig = self.signal().set_callback(lambda _: {"data": 1234})
         shot = 1234
         res = sig.fetch(shot)
-        self.assertEquals(res["data"], 1234)
+        self.assertEqual(res["data"], 1234)
 
     def test_fetch_no_times(self):
         sig = self.signal(dims=None)

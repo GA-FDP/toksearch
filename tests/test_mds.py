@@ -191,11 +191,11 @@ class TestMdsSignal(unittest.TestCase):
 
     def test_local_has_correct_treepath(self):
         sig = MdsSignal("blah", "efit01", location="abc")
-        self.assertEquals(sig.sig.treepath, "abc")
+        self.assertEqual(sig.sig.treepath, "abc")
 
     def test_local_with_double_colons(self):
         sig = MdsSignal("blah", "efit01", location="abc::")
-        self.assertEquals(sig.sig.treepath, "abc::")
+        self.assertEqual(sig.sig.treepath, "abc::")
 
     def test_create_remote_mdsignal(self):
         sig = MdsSignal("blah", "efit01", location="remote://blah")
@@ -325,8 +325,8 @@ class TestMdsRemoteSignal(GenericTestMdsSignal, unittest.TestCase):
     #    #shot = self.defaults.unitless_shot() #use shot that doesnt have units defined
     #    shot = DEFAULT_SHOT
     #    results = sig.fetch(shot)
-    #    self.assertEquals(results['units']['data']," ")
-    #    self.assertEquals(results['units']['times']," ")
+    #    self.assertEqual(results['units']['data']," ")
+    #    self.assertEqual(results['units']['times']," ")
 
 
 class TestMdsLocalSignal(GenericTestMdsSignal, unittest.TestCase):
