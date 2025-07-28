@@ -25,11 +25,6 @@ jobs:
           miniforge-version: latest
           channels: conda-forge
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu' # See 'Supported distributions' for available options
-          java-version: '8'
-
       - name: Build Conda package
         run: |
           mamba install --yes boa
