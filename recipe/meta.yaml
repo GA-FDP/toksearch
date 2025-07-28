@@ -27,13 +27,13 @@ requirements:
         - {{ compiler('c') }}
         - {{ stdlib('c') }}
     host:
-        - python
+        - python {{ python }}
         - numpy>=1.20, <2
         - setuptools
         - openblas
 
     run:
-        - python
+        - python {{ python }}
         - mdsplus-xrd
         - numpy>=1.20, <2
         - pymssql
