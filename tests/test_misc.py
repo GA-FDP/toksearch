@@ -22,4 +22,4 @@ class TestSetEnv(unittest.TestCase):
         arbitrary_string = "aardvark"
         var = "some_variable"
         with set_env(var, arbitrary_string):
-            self.assertEquals(os.environ[var], arbitrary_string)
+            self.assertEqual(os.environ[var], arbitrary_string)
