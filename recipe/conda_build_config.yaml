@@ -24,5 +24,5 @@ pin_run_as_build:
 c_compiler_version: # [unix]
   - 12 # [linux]
 
-c_stdlib:
-- sysroot
+c_stdlib_version: # [linux]
+- 2.17 # [linux]
