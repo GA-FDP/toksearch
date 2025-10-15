@@ -26,6 +26,7 @@ requirements:
     build:
         - {{ compiler('c') }}
         - {{ stdlib('c') }}
+        - sysroot_linux-64=2.17
     host:
         - python {{ python }}
         - numpy>=1.20, <2
