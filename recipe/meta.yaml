@@ -34,7 +34,7 @@ requirements:
 
     run:
         - python {{ python }}
-        - mdsplus-xrd
+        - mdsplus-xrdcl
         - numpy>=1.20, <2
         - pymssql
         - ray-core

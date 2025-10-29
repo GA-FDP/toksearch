@@ -78,6 +78,8 @@ class MdsTreePath(object):
         for var, val in self.paths.items():
             var_name = self.variable_name(var)
             old_var_vals[var_name] = os.getenv(var_name, None)
+
+            print("AAAAAA", var_name, var, val)
             os.environ[var_name] = val
 
         try:
@@ -248,8 +250,22 @@ class MdsSignal(Signal):
 
         See the docs for the MdsSignal class for more information on the arguments
         """
+
         if location is None:
-            location = os.getenv("TOKSEARCH_MDS_DEFAULT", None) or MdsTreePath()
+            path_kwargs = {}
+
+            tree_var = MdsTreePath.variable_name(treename)
+
+            if (os.getenv(tree_var, None) is None) and (os.getenv("default_tree_path", None) is None):
+                print(f"Warning, neither {tree_var} or default_tree_path are set")
+
+
+                default_location = os.getenv("TOKSEARCH_MDS_DEFAULT", None)
+                if default_location:
+                    path_kwargs = {treename: default_location}
+
+            location = MdsTreePath(**path_kwargs)
+
 
         if isinstance(location, MdsTreePath):
             return MdsLocalSignal(expression, treename, treepath=location, **kwargs)
