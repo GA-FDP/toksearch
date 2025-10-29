@@ -79,7 +79,6 @@ class MdsTreePath(object):
             var_name = self.variable_name(var)
             old_var_vals[var_name] = os.getenv(var_name, None)
 
-            print("AAAAAA", var_name, var, val)
             os.environ[var_name] = val
 
         try:
