@@ -63,7 +63,8 @@ class _SafeFetchAsXarray(object):
             # basically idempotent
             val = self.signal.fetch_as_xarray(record.shot)
             record[self.ds_name] = xr.merge(
-                [record[self.ds_name], val.to_dataset(name=self.signame)]
+                [record[self.ds_name], val.to_dataset(name=self.signame)],
+                join="outer",
             )
         except Exception as e:
             record.set_error(self.ds_name, e)
