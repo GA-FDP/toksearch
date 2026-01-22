@@ -12,8 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Usage:
+# fdp run python efit_data.py
+#
+# This assumes that you've followed the installation instructions for
+# the fusion data platform here:
+# https://ga-fdp.github.io/installation/
+
+
 import os
 
+# These will generally be set in the environment, but it doesn't hurt
+# to have them
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -22,7 +32,6 @@ import random
 import numpy as np
 from toksearch import Pipeline
 from toksearch import MdsSignal
-import ray
 
 
 def create_pipeline(shots, mds_location, efit_tree):
@@ -34,7 +43,7 @@ def create_pipeline(shots, mds_location, efit_tree):
         efit_tree,
         location=mds_location,
         dims=("norm_flux", "times"),
-        data_func=lambda d: d.T,
+        data_order=("times", "norm_flux"),
     )
 
     cmpr_sig = MdsSignal(
@@ -42,7 +51,7 @@ def create_pipeline(shots, mds_location, efit_tree):
         efit_tree,
         location=mds_location,
         dims=("dim0", "times"),
-        data_func=lambda d: d.T,
+        data_order=("times", "dim0"),
     )
 
     psirz_sig = MdsSignal(
@@ -50,7 +59,7 @@ def create_pipeline(shots, mds_location, efit_tree):
         efit_tree,
         location=mds_location,
         dims=("r", "z", "times"),
-        data_func=lambda d: d.T,
+        data_order=("times", "z", "r"),
     )
 
     # First fetch pprime
@@ -97,21 +106,13 @@ def create_pipeline(shots, mds_location, efit_tree):
 
 if __name__ == "__main__":
 
-    mds_location = "/mnt/beegfs/archives/mdsplus/codes/~t/~j~i/~h~g/~f~e/~d~c"
+    mds_location = None
 
-    url = os.environ.get("RAY_URL", None)
-
-    if url:
-        print("USING URL {}".format(url))
-        ray.init(redis_address=url)
-    else:
-        print("USING LOCAL RAY")
-        ray.init(object_store_memory=int(100e9))
-
-    shots = np.arange(162163, 177022)
+    # Process a few thousand shots, should result in around 10GB of data
+    shots = np.arange(162163, 165920)
     pipeline = create_pipeline(shots, mds_location, "efit01")
 
-    recs = pipeline.compute_ray(numparts=512)
+    recs = pipeline.compute_multiprocessing(num_workers=8)
 
     print("NUM RECS: {}".format(len(recs)))
 
