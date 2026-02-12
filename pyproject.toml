@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools", "numpy>=1.20,<2", "versioneer"]
+build-backend = "setuptools.build_meta"
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "toksearch/_version.py"
+versionfile_build = "toksearch/_version.py"
+tag_prefix = "release-"
+parentdir_prefix = "toksearch-"

@@ -302,7 +302,7 @@ method_ell1(PyObject *self, PyObject *args, PyObject *kwargs)
 *****************************************************************************/
 
 static PyMethodDef Ell1Methods[] = {
-    {"_compute_ell1", method_ell1, METH_VARARGS|METH_KEYWORDS, "Calculate l1 filter"},
+    {"_compute_ell1", (PyCFunction)method_ell1, METH_VARARGS|METH_KEYWORDS, "Calculate l1 filter"},
     {NULL, NULL, 0, NULL}
 };
 

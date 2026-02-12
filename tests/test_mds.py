@@ -73,21 +73,27 @@ class MdsIpCache:
             bin_dir = os.path.abspath(os.path.dirname(python_exe))
             env_dir = os.path.dirname(bin_dir)
             tdi_dir = os.path.join(env_dir, "tdi")
+            print(f"{tdi_dir=}")
 
             MDS_PATH = os.environ.get("MDS_PATH", "")
             MDS_PATH = f"{MDS_PATH};{tdi_dir};"
+            MDS_PATH = tdi_dir
+            print(f"{MDS_PATH=}")
 
             subprocess_env = os.environ.copy()
             subprocess_env["MDS_PATH"] = MDS_PATH
 
             # Add the tree path to the environment
             subprocess_env[f"{treename}_path"] = trees_dir
+            print(f"{trees_dir=}")
 
             # Start the mdsip server on a free port
             cls.mdsip_process = subprocess.Popen(
                 ["mdsip", "-s", "-p", str(cls._port), "-h", hosts_file_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                #stdout=subprocess.PIPE,
+                #stderr=subprocess.PIPE,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
                 env=subprocess_env,
             )
 
@@ -175,15 +181,17 @@ class TestMdsSignal(unittest.TestCase):
 
         with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
             sig = MdsSignal("blah", "efit01")
-        self.assertEqual(sig.sig.server, server)
-        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
+        self.assertEqual(sig.sig.treepath.paths["efit01"], default_location)
 
     def test_local_location_grabbed_from_environment(self):
         default_location = "/some/fake/path"
         with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
             sig = MdsSignal("blah", "efit01")
-        self.assertEqual(sig.sig.treepath, default_location)
         self.assertIsInstance(sig.sig, MdsLocalSignal)
+        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
+        self.assertEqual(sig.sig.treepath.paths["efit01"], default_location)
 
     def test_create_local_mdsignal(self):
         sig = MdsSignal("blah", "efit01", location="blah")
