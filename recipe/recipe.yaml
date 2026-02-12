@@ -14,7 +14,7 @@ build:
   number: 1
   string: py${{ PYTHON }}h${{ build_hash }}_${{ build_number }}
   script:
-    - ${{ PYTHON }} -m pip install . --no-deps --ignore-installed -vv
+    - ${{ PYTHON }} -m pip install . --no-deps --no-build-isolation --ignore-installed -vv
 
 requirements:
   build:
@@ -47,9 +47,12 @@ tests:
   - script:
       content:
         - cd tests && ./testit
-      extra_requirements:
-        source:
-          - tests
+    requirements:
+      run:
+        - openjdk >=17
+    files:
+      source:
+        - tests/
 
 about:
   homepage: https://github.com/GA-FDP/toksearch

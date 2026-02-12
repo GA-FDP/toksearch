@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "numpy>=1.20,<2", "versioneer"]
+requires = ["setuptools", "numpy>=1.20,<2"]
 build-backend = "setuptools.build_meta"
 
 [tool.versioneer]

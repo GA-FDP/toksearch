@@ -16,6 +16,8 @@ from setuptools import setup
 from setuptools import Extension
 from setuptools import find_packages
 import os
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
 import versioneer
 
 
@@ -26,7 +28,7 @@ def ell1_extension():
     # Failing that, do nothing and hope for the best.
     import numpy as np
 
-    conda_prefix = os.getenv('CONDA_PREFIX', None)
+    conda_prefix = os.getenv('PREFIX', os.getenv('CONDA_PREFIX', None))
     user_blas_dir = os.getenv('ELL1_BLAS_INCLUDE_DIR', None)
 
     if user_blas_dir:

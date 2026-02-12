@@ -43,8 +43,8 @@ limitations under the License.
 #define THEPRINTF printf
 
 /* OpenBLAS includes */
-//#include "common.h"
 #include "cblas.h"
+extern void openblas_set_num_threads(int num_threads);
 
 #include "ell1.h"
 
