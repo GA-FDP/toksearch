@@ -4779,8 +4779,8 @@ packages:
   timestamp: 1769460227866
 - pypi: ./
   name: toksearch
-  version: 2.3.0+0.g0fba41a.dirty
-  sha256: 06893dab63bbe34eedee27a416084300b86c4fd3fc36e5003e98ac0c07ebc8b7
+  version: 2.3.0+3.gbf4fd9e
+  sha256: dd92f708f0b5627d620a2b2be6fa4f8d8187038a6ecdab7817dcf908550cc239
   editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.0-pyhcf101f3_0.conda
   sha256: 62940c563de45790ba0f076b9f2085a842a65662268b02dd136a8e9b1eaf47a8
