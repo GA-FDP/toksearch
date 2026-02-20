@@ -5,7 +5,7 @@ platforms = ["linux-64"]
 
 [dependencies]
 python = ">=3.11,<3.13"
-mdsplus-xrdcl = ">=0.2.0"
+mdsplus-xrdcl = ">=0.2.1"
 numpy = ">=1.20, <2"
 pymssql = "*"
 ray-core = "*"
