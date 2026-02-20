@@ -1,5 +1,0 @@
-#!/bin/sh
-
-pip uninstall toksearch
-rm -rf build dist *.egg-info
-find ./ -name "*.so" | xargs -r rm

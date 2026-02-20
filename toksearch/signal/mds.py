@@ -500,11 +500,10 @@ class MdsTreeRegistry(object):
     def close_tree(self, treename, shot):
         tree = self._tree_map.get(treename, {}).pop(shot, None)
         if tree is not None:
-            # Prevent __del__ from calling close() on a potentially
-            # stale C pointer (segfaults in forked multiprocessing workers).
-            # Setting public=True makes __del__ a no-op. The OS reclaims
-            # the C resources when the worker process exits.
-            tree.public = True
+            try:
+                tree.close()
+            except Exception:
+                pass
 
     def close_all_trees(self):
         for treename, shots_dict in list(self._tree_map.items()):

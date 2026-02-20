@@ -12,14 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import os
 import inspect
+import contextlib
 import xarray as xr
 import numpy as np
 from typing import Any, Callable
 import uuid
 import warnings
 from abc import ABC, abstractmethod
+
+
+@contextlib.contextmanager
+def _gc_disabled():
+    """Context manager that disables the GC for the duration of the block.
+
+    Prevents GC-triggered __del__ from firing mid-way through C library calls
+    (e.g. MDSplus _TreeClose), which can cause re-entrant heap corruption.
+    GC is restored to its prior state on exit.
+    """
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if enabled:
+            gc.enable()
 
 
 ################################################################################
@@ -201,7 +220,9 @@ class Signal(ABC):
 
         SignalRegistry().register(self)
 
-        results = self.gather(shot)
+        with _gc_disabled():
+            results = self.gather(shot)
+
 
         if results and (self._callback is not None):
             results = self._callback(results)
@@ -325,13 +346,14 @@ class SignalRegistry:
             shot (int): The shot number to clean up resources for
         """
 
-        for signal in self.signals:
-            try:
-                signal.cleanup_shot(shot)
-            except Exception as e:
-                print(
-                    f"Warning: failed to cleanup signal {signal} for shot {shot}: {e}"
-                )
+        with _gc_disabled():
+            for signal in self.signals:
+                try:
+                    signal.cleanup_shot(shot)
+                except Exception as e:
+                    print(
+                        f"Warning: failed to cleanup signal {signal} for shot {shot}: {e}"
+                    )
 
     def reset(self):
         """Reset the registry to an empty state"""
