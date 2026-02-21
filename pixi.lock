@@ -6,6 +6,8 @@ environments:
     - url: https://conda.anaconda.org/conda-forge/
     indexes:
     - https://pypi.org/simple
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
     packages:
       linux-64:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2
@@ -203,7 +205,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.10.0-h5888daf_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/markupsafe-3.0.3-py312h8a5da7c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.1-pyhd8ed1ab_0.conda
-      - conda: https://conda.anaconda.org/ga-fdp/linux-64/mdsplus-xrdcl-0.2.0-py312hc11ce1e_0.tar.bz2
+      - conda: https://conda.anaconda.org/ga-fdp/linux-64/mdsplus-xrdcl-0.2.1-py312hc11ce1e_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/mistune-3.2.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/msgpack-python-1.1.2-py312hd9148b4_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/multidict-6.7.0-py312h8a5da7c_0.conda
@@ -327,6 +329,8 @@ environments:
     channels:
     - url: https://conda.anaconda.org/ga-fdp/
     - url: https://conda.anaconda.org/conda-forge/
+    options:
+      pypi-prerelease-mode: if-necessary-or-explicit
     packages:
       linux-64:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2
@@ -3269,21 +3273,13 @@ packages:
   license_family: MIT
   size: 43805
   timestamp: 1754946862113
-- conda: https://conda.anaconda.org/ga-fdp/linux-64/mdsplus-xrdcl-0.2.0-py312hc11ce1e_0.tar.bz2
-  sha256: 93b708f705129b54e8ed1a7fc3391eaf67f29e00fd6d20b5eaa3d66e04ec8946
-  md5: 7790b9c5b1704d015d7479be789fec29
+- conda: https://conda.anaconda.org/ga-fdp/linux-64/mdsplus-xrdcl-0.2.1-py312hc11ce1e_0.tar.bz2
+  sha256: 9bf316ea2543cf42cb723767140c7e3c1b0afcc2e67ee36ab743443e8bf880d2
+  md5: 074e1742baca13e399f6f0c5f89c8a25
   depends:
   - __glibc >=2.28,<3.0.a0
   - freetds 1.*
-  - freetds >=1.5.11,<2.0a0
   - libfdpio 1.*
-  - libgcc >=14
-  - libgfortran
-  - libgfortran5 >=14.3.0
-  - libiconv >=1.18,<2.0a0
-  - libstdcxx >=14
-  - libxml2
-  - libxml2-16 >=2.15.1
   - libzlib >=1.3.1,<2.0a0
   - numpy >=1.24,<2
   - numpy >=1.26.4,<2.0a0
@@ -3292,8 +3288,8 @@ packages:
   - readline >=8.3,<9.0a0
   license: MIT
   license_family: MIT
-  size: 3090579
-  timestamp: 1770890610880
+  size: 3112485
+  timestamp: 1771630325635
 - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
   sha256: 78c1bbe1723449c52b7a9df1af2ee5f005209f67e40b6e1d3c7619127c43b1c7
   md5: 592132998493b3ff25fd7479396e8351
@@ -4779,9 +4775,8 @@ packages:
   timestamp: 1769460227866
 - pypi: ./
   name: toksearch
-  version: 2.3.0+3.gbf4fd9e
+  version: 2.4.1+3.g10ceca9
   sha256: dd92f708f0b5627d620a2b2be6fa4f8d8187038a6ecdab7817dcf908550cc239
-  editable: true
 - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.0-pyhcf101f3_0.conda
   sha256: 62940c563de45790ba0f076b9f2085a842a65662268b02dd136a8e9b1eaf47a8
   md5: 72e780e9aa2d0a3295f59b1874e3768b
