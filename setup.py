@@ -69,6 +69,7 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     ext_modules = extensions,
     include_package_data=True,
+    package_data={'toksearch': ['skills/*/SKILL.md']},
     packages=packages,
     scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
     # this package will read some included files in runtime, avoid installing it as .zip

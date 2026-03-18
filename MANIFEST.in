@@ -1,3 +1,4 @@
 include docs/*.ipynb
 include toksearch/VERSION
 include toksearch/slurm/default_slurm_config.yaml
+recursive-include toksearch/skills *.md
