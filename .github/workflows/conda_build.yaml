@@ -25,7 +25,17 @@ jobs:
         with:
           pixi-version: latest
 
+      - name: Set staging channel for pre-release builds
+        if: startsWith(github.ref, 'refs/tags/release-')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/release-}"
+          if [[ "$VERSION" =~ (rc|a|b)[0-9] ]]; then
+            echo "EXTRA_CHANNEL=ga-fdp/label/staging" >> $GITHUB_ENV
+          fi
+
       - name: Build Conda package
+        env:
+          EXTRA_CHANNEL: ${{ env.EXTRA_CHANNEL }}
         run: |
           pixi global install rattler-build
           ./build_package.sh ${HOME}/outdir
@@ -33,14 +43,21 @@ jobs:
       - name: Upload to Anaconda
         if: startsWith(github.ref, 'refs/tags/release-')
         run: |
+          VERSION="${GITHUB_REF#refs/tags/release-}"
+          if [[ "$VERSION" =~ (rc|a|b)[0-9] ]]; then
+            LABEL="staging"
+          else
+            LABEL="main"
+          fi
           rattler-build upload anaconda \
             --owner ga-fdp \
+            --label "$LABEL" \
             --api-key ${{ secrets.ANACONDA_API_TOKEN }} \
             --force \
             ${HOME}/outdir/linux-64/*.conda
 
       - name: Deploy Docs
-        if: startsWith(github.ref, 'refs/tags/release-')
+        if: startsWith(github.ref, 'refs/tags/release-') && !contains(github.ref, 'rc') && !contains(github.ref, 'a') && !contains(github.ref, 'b')
         run: |
           TAG=${GITHUB_REF#refs/tags/release-}
           MAJOR=$(echo $TAG | cut -d. -f1)
