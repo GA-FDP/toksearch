@@ -51,7 +51,7 @@ jobs:
           fi
           pip install anaconda-client
           anaconda upload \
-            --token ${{ secrets.ANACONDA_API_TOKEN }} \
+            -t ${{ secrets.ANACONDA_API_TOKEN }} \
             --user ga-fdp \
             --label "$LABEL" \
             --force \
