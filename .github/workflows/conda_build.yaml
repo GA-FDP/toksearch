@@ -49,10 +49,11 @@ jobs:
           else
             LABEL="main"
           fi
-          rattler-build upload anaconda \
-            --owner ga-fdp \
+          pip install anaconda-client
+          anaconda upload \
+            --token ${{ secrets.ANACONDA_API_TOKEN }} \
+            --user ga-fdp \
             --label "$LABEL" \
-            --api-key ${{ secrets.ANACONDA_API_TOKEN }} \
             --force \
             ${HOME}/outdir/linux-64/*.conda
 
