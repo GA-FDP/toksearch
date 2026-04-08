@@ -249,10 +249,13 @@ class Pipeline:
             self._append_operation(f)
 
     def map(self, func):
-        """
-        Apply func to result of the previous step in the pipeline
+        """Apply func to result of the previous step in the pipeline.
 
-        Func is expected to be of the form func(record) -> record
+        func modifies the record in place. The return value is ignored.
+
+        Arguments:
+            func: A callable of the form func(record) -> None.
+                  Modify record fields directly (e.g. rec['key'] = value).
         """
         f = _SafeMap(func)
         self._append_operation(f)
