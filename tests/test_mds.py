@@ -391,6 +391,85 @@ class TestMdsConnectionRegistry(unittest.TestCase):
         conn2 = registry.connect(server)
         self.assertIsNot(conn, conn2)
 
+    def test_disconnect_calls_conn_disconnect(self):
+        # Regression: previous implementation removed the cached connection
+        # from the map but never called conn.disconnect(), leaking the
+        # underlying mdsip socket until garbage collection.
+        from unittest import mock
+        server = "fake.host:9999"
+        registry = MdsConnectionRegistry()
+        fake_conn = mock.MagicMock()
+        registry._connection_map[server] = fake_conn
+        registry.disconnect(server)
+        fake_conn.disconnect.assert_called_once()
+        self.assertNotIn(server, registry._connection_map)
+
+    def test_disconnect_unknown_server_is_noop(self):
+        registry = MdsConnectionRegistry()
+        # Must not raise even if the server was never connected.
+        registry.disconnect("never.connected:1234")
+
+
+class TestMdsRemoteSignalRetry(unittest.TestCase):
+    """Verify that MdsRemoteSignal.gather retries on MDSplusERROR.
+
+    These tests exercise the wrapper logic in isolation by patching the
+    inner _do_gather hook, so they don't need a running mdsip server.
+    """
+
+    def setUp(self):
+        from unittest import mock
+        # Wipe any cached connections to keep each test independent.
+        MdsConnectionRegistry()._connection_map.clear()
+        self.signal = MdsRemoteSignal(r"\foo", "mytree", "fake.host:9999")
+        self._mock = mock
+
+    def test_gather_returns_value_on_first_try(self):
+        with self._mock.patch.object(
+            MdsRemoteSignal, "_do_gather", return_value={"data": 42}
+        ) as do_gather:
+            result = self.signal.gather(123)
+        self.assertEqual(result, {"data": 42})
+        self.assertEqual(do_gather.call_count, 1)
+
+    def test_gather_retries_once_on_mdsplus_error(self):
+        from MDSplus.mdsExceptions import MDSplusERROR
+        # First call raises MDSplusERROR, second call returns a value.
+        side_effect = [MDSplusERROR(), {"data": 7}]
+        with self._mock.patch.object(
+            MdsRemoteSignal, "_do_gather", side_effect=side_effect
+        ) as do_gather, self._mock.patch.object(
+            MdsConnectionRegistry, "disconnect"
+        ) as disconnect:
+            result = self.signal.gather(123)
+        self.assertEqual(result, {"data": 7})
+        self.assertEqual(do_gather.call_count, 2)
+        disconnect.assert_called_once_with(self.signal.server)
+
+    def test_gather_does_not_retry_on_tree_errors(self):
+        # Tree-class errors don't corrupt the connection -- they should
+        # propagate without a reconnect.
+        from MDSplus.mdsExceptions import TreeNODATA
+        with self._mock.patch.object(
+            MdsRemoteSignal, "_do_gather", side_effect=TreeNODATA()
+        ) as do_gather, self._mock.patch.object(
+            MdsConnectionRegistry, "disconnect"
+        ) as disconnect:
+            with self.assertRaises(TreeNODATA):
+                self.signal.gather(123)
+        self.assertEqual(do_gather.call_count, 1)
+        disconnect.assert_not_called()
+
+    def test_gather_propagates_second_failure(self):
+        from MDSplus.mdsExceptions import MDSplusERROR
+        with self._mock.patch.object(
+            MdsRemoteSignal,
+            "_do_gather",
+            side_effect=[MDSplusERROR(), MDSplusERROR()],
+        ), self._mock.patch.object(MdsConnectionRegistry, "disconnect"):
+            with self.assertRaises(MDSplusERROR):
+                self.signal.gather(123)
+
 
 class TestMdsTreeRegistry(unittest.TestCase):
     def test_get_tree_returns_none_with_empty_map(self):
