@@ -35,7 +35,10 @@ on a local disk. The MdsTreePath class is used by the MdsLocalSignal class to
 set the environment variables for the MDSplus trees.
 """
 
+import logging
+
 import MDSplus as mds
+from MDSplus.mdsExceptions import MDSplusERROR
 import pdb
 import os
 import contextlib
@@ -46,6 +49,8 @@ from typing import Union, Iterable, Optional
 
 from .signal import Signal
 from ..utilities.utilities import set_env
+
+_log = logging.getLogger(__name__)
 
 
 def _dim_of_expression(expression, dim=0):
@@ -337,12 +342,16 @@ class MdsConnectionRegistry(object):
         return conn
 
     def disconnect(self, server):
-        if server in self._connection_map:
-            conn = self._connection_map[server]
+        """Drop the cached connection for a server and close it.
+
+        After this call, the next :meth:`connect` for the same server
+        creates a fresh :class:`MDSplus.Connection`.
+        """
+        conn = self._connection_map.pop(server, None)
+        if conn is not None:
             try:
-                del self._connection_map[server]
-                conn = self._connection_map.get(server, None)
-            except:
+                conn.disconnect()
+            except Exception:
                 pass
 
 
@@ -387,8 +396,18 @@ class MdsRemoteSignal(Signal):
 
 
     def gather(self, shot):
-        """Gather the data for a shot
-        
+        """Gather the data for a shot, with one retry on MDSplusERROR.
+
+        The mdsip server can leave per-connection state wedged after returning
+        the generic ``MDSplusERROR`` (``%MDSPLUS-E-ERROR``) for a query, so
+        subsequent operations on the same connection -- including for unrelated
+        shots -- can also return errors. To recover, drop the cached connection
+        and retry once on a fresh one.
+
+        Tree-class errors (``TreeNODATA``, ``TreeFOPENR``, ``TreeNOCURRENT``,
+        ...) follow a different server-side path and don't corrupt connection
+        state, so they are propagated unchanged.
+
         Arguments:
             shot (int): The shot number to gather the data for
 
@@ -399,6 +418,18 @@ class MdsRemoteSignal(Signal):
                 attribute is True, the dictionary will also contain a key 'units' with the units
                 of the data and dimensions.
         """
+        try:
+            return self._do_gather(shot)
+        except MDSplusERROR as e:
+            _log.warning(
+                "MDSplusERROR on %s for shot=%s expr=%r (%s); "
+                "dropping connection and retrying once",
+                self.server, shot, self.expression, e,
+            )
+            MdsConnectionRegistry().disconnect(self.server)
+            return self._do_gather(shot)
+
+    def _do_gather(self, shot):
         connection = self.connect()
         connection.openTree(self.treename, shot)
 
