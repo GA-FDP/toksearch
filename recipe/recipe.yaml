@@ -24,7 +24,7 @@ requirements:
     - openblas
   run:
     - python
-    - mdsplus-xrdcl >=0.2.2
+    - mdsplus-xrdcl >=2,<3
     - numpy >=1.20, <2
     - pymssql
     - ray-core
