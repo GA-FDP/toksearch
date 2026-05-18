@@ -19,6 +19,7 @@ stub with a ``.namespace`` attribute; the real ``Session`` class is tested in
 """
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from toksearch.llm.tools import (
@@ -87,6 +88,84 @@ class TestRunPython(unittest.TestCase):
         self.assertTrue(out.is_error)
         self.assertTrue(out.interrupted)
         self.assertEqual(out.text, "(interrupted)")
+
+
+class TestLookupDocs(unittest.TestCase):
+    """``lookup_docs`` reads SKILL.md bodies from the Session's skill registry.
+
+    The handler accesses ``session.skills`` (a dict[name -> Skill]) which the
+    real Session builds at __init__ from ``extra_skill_dirs`` + the core
+    ``toksearch/skills/`` directory.  These tests stub that mapping.
+    """
+
+    def _stub_session(self, skills):
+        return SimpleNamespace(skills=skills)
+
+    def test_unknown_skill_is_error(self):
+        from toksearch.llm.tools import LOOKUP_DOCS
+        s = self._stub_session({})
+        out = LOOKUP_DOCS.handler({"skill_name": "missing"}, s)
+        self.assertTrue(out.is_error)
+        self.assertIn("missing", out.text)
+
+    def test_known_skill_returns_body(self):
+        from toksearch.llm.tools import LOOKUP_DOCS, Skill
+        s = self._stub_session({"foo": Skill(name="foo",
+                                             description="d",
+                                             body="Hello body.")})
+        out = LOOKUP_DOCS.handler({"skill_name": "foo"}, s)
+        self.assertFalse(out.is_error)
+        self.assertEqual(out.text, "Hello body.")
+
+    def test_lookup_docs_spec_shape(self):
+        from toksearch.llm.tools import LOOKUP_DOCS
+        self.assertEqual(LOOKUP_DOCS.name, "lookup_docs")
+        self.assertIn("skill_name", LOOKUP_DOCS.input_schema["properties"])
+        self.assertEqual(LOOKUP_DOCS.input_schema["required"], ["skill_name"])
+
+
+class TestDiscoverSkills(unittest.TestCase):
+    def test_returns_empty_for_nonexistent_dirs(self):
+        from toksearch.llm.tools import discover_skills
+        skills = discover_skills([Path("/nonexistent")])
+        self.assertEqual(skills, {})
+
+    def test_parses_skill_with_frontmatter(self):
+        from toksearch.llm.tools import discover_skills, parse_skill_md
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sk = root / "myskill"
+            sk.mkdir()
+            (sk / "SKILL.md").write_text(
+                "---\nname: myskill\ndescription: My skill\n---\n\n"
+                "Body content here.\n")
+            skills = discover_skills([root])
+            self.assertIn("myskill", skills)
+            self.assertEqual(skills["myskill"].description, "My skill")
+            self.assertIn("Body content here", skills["myskill"].body)
+
+    def test_skips_dirs_without_skill_md(self):
+        from toksearch.llm.tools import discover_skills
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "not_a_skill").mkdir()
+            self.assertEqual(discover_skills([root]), {})
+
+    def test_parse_skill_md_no_frontmatter(self):
+        from toksearch.llm.tools import parse_skill_md
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md",
+                                          delete=False) as f:
+            f.write("Just body, no frontmatter.\n")
+            path = Path(f.name)
+        try:
+            fm, body = parse_skill_md(path)
+            self.assertEqual(fm, {})
+            self.assertIn("Just body", body)
+        finally:
+            path.unlink()
 
 
 if __name__ == "__main__":

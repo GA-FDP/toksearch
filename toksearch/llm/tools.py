@@ -106,3 +106,95 @@ RUN_PYTHON = ToolSpec(
     },
     handler=_run_python_handler,
 )
+
+# ----------------------------------------------------------------------
+# lookup_docs + skill discovery
+# ----------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Skill:
+    name: str
+    description: str
+    body: str
+
+
+def parse_skill_md(path: Path) -> tuple[dict, str]:
+    """Return ``(frontmatter, body)`` for a SKILL.md file.
+
+    Frontmatter is the YAML-ish block between two ``---`` lines at the top of
+    the file (we only need ``name`` and ``description`` so we do a tiny
+    line-by-line parser instead of pulling in PyYAML).  If no frontmatter is
+    present, returns ``({}, full_text)``.
+    """
+    text = path.read_text()
+    if text.startswith("---"):
+        _, fm, body = text.split("---", 2)
+        fm_dict = {}
+        for line in fm.strip().splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                fm_dict[k.strip()] = v.strip()
+        return fm_dict, body.lstrip("\n")
+    return {}, text
+
+
+def discover_skills(skill_dirs: list[Path]) -> dict[str, Skill]:
+    """Return ``{name: Skill}`` for every SKILL.md found under the given dirs.
+
+    Each entry in ``skill_dirs`` is searched one level deep: each subdirectory
+    containing a ``SKILL.md`` becomes a skill named after the subdirectory.
+    Dirs that don't exist are silently skipped.
+    """
+    skills: dict[str, Skill] = {}
+    for d in skill_dirs:
+        if not d.exists():
+            continue
+        for sub in sorted(d.iterdir()):
+            if not sub.is_dir():
+                continue
+            skill_md = sub / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            fm, body = parse_skill_md(skill_md)
+            skills[sub.name] = Skill(
+                name=sub.name,
+                description=fm.get("description", ""),
+                body=body,
+            )
+    return skills
+
+
+_LOOKUP_DOCS_DESCRIPTION = (
+    "Read a documentation skill. Returns the SKILL.md body for one of the "
+    "registered skills. Call this when you need detail on a specific "
+    "toksearch feature beyond what's in the system prompt."
+)
+
+
+def _lookup_docs_handler(args: dict, session) -> ToolOutput:
+    name = args["skill_name"]
+    skill = session.skills.get(name)
+    if skill is None:
+        available = sorted(session.skills)
+        return ToolOutput(
+            text=f"Unknown skill: {name!r}. Available: {available}",
+            is_error=True,
+        )
+    return ToolOutput(text=skill.body, is_error=False)
+
+
+LOOKUP_DOCS = ToolSpec(
+    name="lookup_docs",
+    description=_LOOKUP_DOCS_DESCRIPTION,
+    input_schema={
+        "type": "object",
+        "properties": {
+            "skill_name": {
+                "type": "string",
+                "description": "Name of a skill registered with the Session.",
+            },
+        },
+        "required": ["skill_name"],
+    },
+    handler=_lookup_docs_handler,
+)
