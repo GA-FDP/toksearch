@@ -35,6 +35,9 @@ from .session import Session
 def build_session(args) -> Session:
     """Construct a Session from parsed CLI args."""
     cfg = load_config()
+    # Default backend is "anthropic" in PR 1; PR 4 will register the "amsc"
+    # preset (via toksearch_d3d entry point) and the default will move to
+    # "amsc" to preserve the existing fdp query behavior for GA-on-prem users.
     backend_name = args.backend or cfg.backend or "anthropic"
     preset = resolve_preset(backend_name, cfg)
     backend_cls = get_backend_class(preset.backend)
@@ -48,6 +51,28 @@ def build_session(args) -> Session:
 
 
 def _resolve_api_key(preset, cfg) -> str | None:
+    """Resolve the API key for a preset.
+
+    Lookup order:
+      1. ``preset.api_key_env``: read from os.environ.
+      2. ``preset.api_key_file``: read from disk (~ expanded).
+      3. Built-in preset hardcoded fallback (``cfg.anthropic_api_key`` for
+         ``anthropic``, ``cfg.openai_api_key`` for ``openai``).
+      4. None.
+    """
+    import os
+    from pathlib import Path
+    if preset.api_key_env:
+        val = os.environ.get(preset.api_key_env)
+        if val:
+            return val
+    if preset.api_key_file:
+        path = Path(preset.api_key_file).expanduser()
+        if path.exists():
+            try:
+                return path.read_text().strip()
+            except OSError:
+                pass
     if preset.backend == "anthropic":
         return cfg.anthropic_api_key
     if preset.backend == "openai":

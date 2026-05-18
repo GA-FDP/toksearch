@@ -110,5 +110,43 @@ class TestCliChatSlashCommands(unittest.TestCase):
         self.assertIn(exit_code, (None, 0))
 
 
+class TestResolveApiKey(unittest.TestCase):
+    """Verify _resolve_api_key consults preset.api_key_env / api_key_file."""
+
+    def test_api_key_env_consulted(self):
+        from toksearch.llm.cli import _resolve_api_key
+        from toksearch.llm.presets import Preset
+        from toksearch.llm.config import Config
+        preset = Preset(backend="anthropic", api_key_env="MYSITE_TEST_KEY")
+        with mock.patch.dict("os.environ",
+                             {"MYSITE_TEST_KEY": "sk-from-env"}):
+            self.assertEqual(_resolve_api_key(preset, Config()),
+                             "sk-from-env")
+
+    def test_api_key_file_consulted(self):
+        import tempfile
+        from pathlib import Path
+        from toksearch.llm.cli import _resolve_api_key
+        from toksearch.llm.presets import Preset
+        from toksearch.llm.config import Config
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("sk-from-file\n")
+            key_path = Path(f.name)
+        try:
+            preset = Preset(backend="anthropic", api_key_file=str(key_path))
+            self.assertEqual(_resolve_api_key(preset, Config()),
+                             "sk-from-file")
+        finally:
+            key_path.unlink()
+
+    def test_fallback_to_config(self):
+        from toksearch.llm.cli import _resolve_api_key
+        from toksearch.llm.presets import Preset
+        from toksearch.llm.config import Config
+        preset = Preset(backend="anthropic")  # no api_key_env, no api_key_file
+        cfg = Config(anthropic_api_key="sk-from-cfg")
+        self.assertEqual(_resolve_api_key(preset, cfg), "sk-from-cfg")
+
+
 if __name__ == "__main__":
     unittest.main()
