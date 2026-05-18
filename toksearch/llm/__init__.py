@@ -13,6 +13,41 @@
 # limitations under the License.
 """toksearch.llm — Conversational LLM interface for TokSearch.
 
-Public re-exports are wired up at the end of PR 1; see
-``docs/superpowers/specs/2026-05-18-toksearch-llm-design.md``.
+See ``docs/superpowers/specs/2026-05-18-toksearch-llm-design.md``.
+
+Quickstart
+==========
+
+::
+
+    from toksearch.llm import Session
+    from toksearch.llm.backends.anthropic import AnthropicBackend
+
+    sess = Session(backend=AnthropicBackend(api_key="sk-..."))
+    result = sess.send("Fetch ip for shot 200000 and report peak in MA.",
+                       on_tool_call=lambda c: print(c.name, c.thought),
+                       on_tool_result=lambda r: print(r.output))
+    print(result.final_text)
 """
+
+from .errors import (
+    LLMError,
+    LLMConfigError,
+    LLMAuthError,
+    LLMBackendError,
+    LLMRateLimitError,
+    LLMUserAbort,
+)
+from .events import TextDelta, ToolCall, ToolResult, TurnComplete
+from .config import Config, load_config
+from .presets import Preset, BUILTIN_PRESETS, resolve_preset
+from .session import Session
+
+__all__ = [
+    "Session",
+    "Config", "load_config",
+    "Preset", "BUILTIN_PRESETS", "resolve_preset",
+    "TextDelta", "ToolCall", "ToolResult", "TurnComplete",
+    "LLMError", "LLMConfigError", "LLMAuthError",
+    "LLMBackendError", "LLMRateLimitError", "LLMUserAbort",
+]

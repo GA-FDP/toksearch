@@ -72,6 +72,11 @@ setup(
     package_data={'toksearch': ['skills/*/SKILL.md']},
     packages=packages,
     scripts=['scripts/toksearch_submit', 'scripts/toksearch_shape', 'scripts/toksearch_example.py'],
+    entry_points={
+        "console_scripts": [
+            "toksearch = toksearch.llm.cli:main",
+        ],
+    },
     # this package will read some included files in runtime, avoid installing it as .zip
     zip_safe=False,
       

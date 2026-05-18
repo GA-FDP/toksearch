@@ -9,3 +9,13 @@ versionfile_source = "toksearch/_version.py"
 versionfile_build = "toksearch/_version.py"
 tag_prefix = "release-"
 parentdir_prefix = "toksearch-"
+
+[project]
+name = "toksearch"
+dynamic = ["version"]
+
+[project.scripts]
+toksearch = "toksearch.llm.cli:main"
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.34", "openai>=1.50", "matplotlib"]
