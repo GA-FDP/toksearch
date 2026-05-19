@@ -17,19 +17,29 @@ The claude_agent_sdk module is real (conda-forge install), but we never
 construct an actual ClaudeSDKClient -- tests inject mocks to verify the
 backend wires options + MCP tools correctly and translates SDK messages
 into our event types.
+
+The test module gracefully skips itself when claude-agent-sdk is not
+installed (e.g. the conda-recipe's minimal test env that omits the
+``[llm]`` optional-dependency extra).
 """
 
-import asyncio
 import unittest
-from types import SimpleNamespace
-from unittest import mock
 
-from toksearch.llm.backends.base import Callbacks
-from toksearch.llm.backends.claude_sdk import ClaudeSDKBackend
-from toksearch.llm.messages import (
-    Message, TextBlock, ToolUseBlock, ToolResultBlock,
-)
-from toksearch.llm.tools import ToolOutput
+try:
+    import asyncio
+    import claude_agent_sdk  # noqa: F401
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from toksearch.llm.backends.base import Callbacks
+    from toksearch.llm.backends.claude_sdk import ClaudeSDKBackend
+    from toksearch.llm.messages import (
+        Message, TextBlock, ToolUseBlock, ToolResultBlock,
+    )
+    from toksearch.llm.tools import ToolOutput
+    _SDK_AVAILABLE = True
+except ImportError:
+    _SDK_AVAILABLE = False
 
 
 def _stub_session():
@@ -62,6 +72,7 @@ def _stub_session():
     return s
 
 
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
 class TestMcpToolsRunPython(unittest.TestCase):
     def test_run_python_tool_proxies_to_session(self):
         backend = ClaudeSDKBackend()
@@ -102,6 +113,7 @@ class TestMcpToolsRunPython(unittest.TestCase):
         self.assertTrue(result.get("isError", False))
 
 
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
 class TestMcpToolsLookupDocs(unittest.TestCase):
     def test_lookup_docs_tool_proxies_to_session(self):
         backend = ClaudeSDKBackend()
@@ -115,6 +127,7 @@ class TestMcpToolsLookupDocs(unittest.TestCase):
                       result["content"][0]["text"])
 
 
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
 class TestMcpToolsConfirm(unittest.TestCase):
     def test_confirm_false_returns_isError(self):
         """confirm() returning False aborts the tool call with an error result."""
@@ -129,6 +142,7 @@ class TestMcpToolsConfirm(unittest.TestCase):
         self.assertEqual(sess._executed, [])
 
 
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
 class TestBuildMcpServer(unittest.TestCase):
     def test_build_mcp_server_returns_config(self):
         backend = ClaudeSDKBackend()
@@ -140,6 +154,7 @@ class TestBuildMcpServer(unittest.TestCase):
         self.assertEqual(server.get("type"), "sdk")
 
 
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
 class TestRunConversation(unittest.TestCase):
     """Verify run_conversation drives ClaudeSDKClient and translates messages."""
 
