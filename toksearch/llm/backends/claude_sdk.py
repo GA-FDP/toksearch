@@ -59,6 +59,88 @@ class ClaudeSDKBackend(Backend):
         self._current_callbacks = None
         self._current_session = None
 
+    # ------------------------------------------------------------------
+    # MCP tool handlers (called by the SDK's internal loop via in-process MCP)
+    # ------------------------------------------------------------------
+
+    async def _run_python_handler(self, args: dict) -> dict:
+        """MCP tool: run_python.  Proxies to session._execute_tool."""
+        from ..events import ToolCall, ToolResult
+        from ..messages import ToolUseBlock
+        import uuid as _uuid
+        sess = self._current_session
+        cbs = self._current_callbacks
+        thought = args.get("thought")
+        call_id = f"sdk-{_uuid.uuid4().hex[:8]}"
+        cbs.fire_tool_call(ToolCall(
+            id=call_id, name="run_python", args=args, thought=thought,
+        ))
+        if cbs.confirm is not None and not cbs.confirm(ToolCall(
+                id=call_id, name="run_python", args=args, thought=thought)):
+            return {
+                "content": [{"type": "text", "text": "(interrupted)"}],
+                "isError": True,
+            }
+        block = ToolUseBlock(id=call_id, name="run_python", args=args)
+        output = sess._execute_tool(block)
+        cbs.fire_tool_result(ToolResult(
+            id=call_id, output=output.text, is_error=output.is_error,
+        ))
+        sess._append_tool_result(call_id, output.text, output.is_error)
+        return {
+            "content": [{"type": "text", "text": output.text}],
+            "isError": output.is_error,
+        }
+
+    async def _lookup_docs_handler(self, args: dict) -> dict:
+        """MCP tool: lookup_docs.  Proxies to session._execute_tool."""
+        from ..events import ToolCall, ToolResult
+        from ..messages import ToolUseBlock
+        import uuid as _uuid
+        sess = self._current_session
+        cbs = self._current_callbacks
+        call_id = f"sdk-{_uuid.uuid4().hex[:8]}"
+        cbs.fire_tool_call(ToolCall(
+            id=call_id, name="lookup_docs", args=args, thought=None,
+        ))
+        block = ToolUseBlock(id=call_id, name="lookup_docs", args=args)
+        output = sess._execute_tool(block)
+        cbs.fire_tool_result(ToolResult(
+            id=call_id, output=output.text, is_error=output.is_error,
+        ))
+        sess._append_tool_result(call_id, output.text, output.is_error)
+        return {
+            "content": [{"type": "text", "text": output.text}],
+            "isError": output.is_error,
+        }
+
+    # ------------------------------------------------------------------
+    # MCP server construction
+    # ------------------------------------------------------------------
+
+    def _build_mcp_server(self):
+        """Construct the in-process MCP server exposing our two tools."""
+        @sdk.tool(
+            "run_python",
+            "Execute a Python code string in the persistent toksearch "
+            "session namespace.",
+            {"code": str, "thought": str},
+        )
+        async def _rp(args):
+            return await self._run_python_handler(args)
+
+        @sdk.tool(
+            "lookup_docs",
+            "Read a documentation skill registered with the session.",
+            {"skill_name": str},
+        )
+        async def _ld(args):
+            return await self._lookup_docs_handler(args)
+
+        return sdk.create_sdk_mcp_server(
+            name="toksearch", version="1.0", tools=[_rp, _ld],
+        )
+
     def run_conversation(self, session, new_user_message, callbacks,
                           max_iterations):
         raise NotImplementedError(
