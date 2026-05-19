@@ -52,6 +52,12 @@ BUILTIN_PRESETS: dict[str, Preset] = {
         model="gpt-4o",
         api_key_env="OPENAI_API_KEY",
     ),
+    "claude-max": Preset(
+        backend="claude-max",
+        model=None,  # SDK picks the default; users may override via CLI.
+        api_key_env=None,
+        api_key_file=None,
+    ),
 }
 
 

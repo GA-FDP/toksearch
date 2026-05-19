@@ -35,5 +35,12 @@ class TestBackendRegistry(unittest.TestCase):
             get_backend_class("nonexistent")
 
 
+class TestClaudeMaxBackendClass(unittest.TestCase):
+    def test_get_backend_class_claude_max(self):
+        from toksearch.llm.backends import get_backend_class
+        from toksearch.llm.backends.claude_sdk import ClaudeSDKBackend
+        self.assertIs(get_backend_class("claude-max"), ClaudeSDKBackend)
+
+
 if __name__ == "__main__":
     unittest.main()

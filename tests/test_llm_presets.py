@@ -120,5 +120,19 @@ class TestDiscoveredPresets(unittest.TestCase):
         self.assertIsNone(p.base_url)
 
 
+class TestClaudeMaxPreset(unittest.TestCase):
+    def test_claude_max_in_builtins(self):
+        self.assertIn("claude-max", BUILTIN_PRESETS)
+        p = BUILTIN_PRESETS["claude-max"]
+        self.assertEqual(p.backend, "claude-max")
+        # Uses OAuth via `claude` CLI, not an API key env var:
+        self.assertIsNone(p.api_key_env)
+        self.assertIsNone(p.api_key_file)
+
+    def test_resolve_claude_max(self):
+        p = resolve_preset("claude-max", Config())
+        self.assertEqual(p.backend, "claude-max")
+
+
 if __name__ == "__main__":
     unittest.main()
