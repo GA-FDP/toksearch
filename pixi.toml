@@ -26,6 +26,8 @@ pip = "*"
 anthropic = ">=0.34"
 openai = ">=1.50"
 matplotlib = "*"
+claude-agent-sdk = ">=0.2"
+mcp = ">=1.23"
 
 [tasks]
 build = "pip install -e . --no-deps"
