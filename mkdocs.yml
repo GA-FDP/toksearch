@@ -52,10 +52,12 @@ nav:
     - "Distributed computing": distributed_computing.md
     - "Creating pipelines from SQL": sql.md
     - "Combining data after pipeline computation": Aggregating_Data.ipynb
+    - "LLM-driven analysis": LLM_Tutorial.ipynb
   - API:
     - "Pipeline": pipeline.md
     - "Record": record.md
-    - "MDSplus Data Access": mds.md 
+    - "MDSplus Data Access": mds.md
+    - "LLM Interface": llm.md
     - Backend:
       - Ray: backend_ray.md
       - Spark: backend_spark.md
