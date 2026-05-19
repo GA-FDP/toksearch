@@ -148,5 +148,36 @@ class TestResolveApiKey(unittest.TestCase):
         self.assertEqual(_resolve_api_key(preset, cfg), "sk-from-cfg")
 
 
+class TestCliPackageFlag(unittest.TestCase):
+    def _run_cli(self, argv):
+        from toksearch.llm import cli
+        fake_session = mock.MagicMock()
+        fake_session.send.return_value = mock.MagicMock(
+            stop_reason="end_turn", final_text="ok")
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(cli, "build_session",
+                                  return_value=fake_session) as build, \
+                mock.patch.object(sys, "stdin", new=io.StringIO("")), \
+                redirect_stdout(io.StringIO()):
+            try:
+                cli.main()
+            except SystemExit:
+                pass
+        return build
+
+    def test_package_flag_collected_into_list(self):
+        build = self._run_cli(
+            ["toksearch", "query", "--package", "toksearch",
+             "--package", "toksearch_d3d", "hi"])
+        ns = build.call_args.args[0]
+        self.assertEqual(ns.packages, ["toksearch", "toksearch_d3d"])
+
+    def test_no_package_flag_leaves_packages_none(self):
+        build = self._run_cli(["toksearch", "query", "hi"])
+        ns = build.call_args.args[0]
+        # argparse default for action="append" is None when never given
+        self.assertIsNone(ns.packages)
+
+
 if __name__ == "__main__":
     unittest.main()
