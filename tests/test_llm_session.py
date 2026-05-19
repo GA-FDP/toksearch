@@ -120,5 +120,68 @@ class TestSessionTools(unittest.TestCase):
         self.assertEqual(names, {"run_python", "lookup_docs"})
 
 
+class TestSessionDiscovery(unittest.TestCase):
+    """Verify Session uses discovery and the packages= filter works."""
+
+    def setUp(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def tearDown(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def test_namespace_includes_discovered_contributors(self):
+        from types import ModuleType
+        from unittest import mock
+        fake = ModuleType("fake_pkg")
+        fake.__llm_description__ = "fake description"
+        fake_ep = mock.MagicMock()
+        fake_ep.name = "fake_pkg"
+        fake_ep.load.return_value = fake
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [fake_ep] if group == "toksearch.llm.namespace" else [],
+        ):
+            backend = FakeBackend(scripted_turns=[_text("ok")])
+            sess = Session(backend=backend)
+        self.assertIn("fake_pkg", sess.namespace)
+        self.assertIs(sess.namespace["fake_pkg"], fake)
+        # The catalog line should mention the description.
+        self.assertIn("fake description", sess.system_prompt)
+
+    def test_packages_filter_excludes_others(self):
+        from types import ModuleType
+        from unittest import mock
+        a = ModuleType("aaa"); a.__llm_description__ = "a"
+        b = ModuleType("bbb"); b.__llm_description__ = "b"
+        ep_a = mock.MagicMock()
+        ep_a.name = "aaa"; ep_a.load.return_value = a
+        ep_b = mock.MagicMock()
+        ep_b.name = "bbb"; ep_b.load.return_value = b
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [ep_a, ep_b] if group == "toksearch.llm.namespace" else [],
+        ):
+            backend = FakeBackend(scripted_turns=[_text("ok")])
+            sess = Session(backend=backend, packages=["aaa"])
+        self.assertIn("aaa", sess.namespace)
+        self.assertNotIn("bbb", sess.namespace)
+
+    def test_empty_packages_list_loads_nothing_discovered(self):
+        from types import ModuleType
+        from unittest import mock
+        a = ModuleType("aaa"); a.__llm_description__ = "a"
+        ep = mock.MagicMock()
+        ep.name = "aaa"; ep.load.return_value = a
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [ep] if group == "toksearch.llm.namespace" else [],
+        ):
+            backend = FakeBackend(scripted_turns=[_text("ok")])
+            sess = Session(backend=backend, packages=[])
+        self.assertNotIn("aaa", sess.namespace)
+
+
 if __name__ == "__main__":
     unittest.main()

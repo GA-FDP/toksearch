@@ -53,11 +53,6 @@ def _default_namespace() -> dict:
     return ns
 
 
-def _core_skill_dir() -> Path:
-    import toksearch
-    return Path(toksearch.__file__).parent / "skills"
-
-
 class Session:
     """A conversational LLM session over the run_python persistent namespace."""
 
@@ -67,27 +62,40 @@ class Session:
         model: str | None = None,
         max_iterations: int = 20,
         extra_namespace: dict | None = None,
-        packages: list[str] | None = None,    # PR 2 plumbing; unused in PR 1
+        packages: list[str] | None = None,
         extra_skill_dirs: list[Path] | None = None,
     ):
+        from .discovery import (
+            discover_namespace_contributors,
+            discover_skill_dirs,
+        )
         self.backend = backend
         self.model = model or backend.default_model
         self.max_iterations = max_iterations
+        # ---- Namespace: defaults + discovered + extras ----
         self.namespace = _default_namespace()
+        namespace_entries: list[tuple[str, str]] = []
+        for name, value, desc in discover_namespace_contributors():
+            if packages is not None and name not in packages:
+                continue
+            self.namespace[name] = value
+            namespace_entries.append((name, desc))
         if extra_namespace:
             self.namespace.update(extra_namespace)
-        # Skills: core toksearch + any extras the caller passed in
-        skill_dirs = [_core_skill_dir()] + list(extra_skill_dirs or [])
+        # ---- Skills: discovered + extras ----
+        skill_dirs: list[Path] = []
+        for name, d in discover_skill_dirs():
+            if packages is not None and name not in packages:
+                continue
+            skill_dirs.append(d)
+        if extra_skill_dirs:
+            skill_dirs.extend(extra_skill_dirs)
         self.skills = discover_skills(skill_dirs)
-        # Tools: fixed in PR 1; PR 4 may register more.
+        # ---- Tools (fixed in PR 1) ----
         self.tool_specs = [RUN_PYTHON, LOOKUP_DOCS]
         self._tools_by_name = {t.name: t for t in self.tool_specs}
-        # System prompt: kernel + dynamic catalogs
-        namespace_entries = [
-            ("toksearch", "core pipeline, MdsSignal, ZarrSignal, fetch_dataset"),
-        ]
+        # ---- System prompt ----
         self.system_prompt = build_system_prompt(self.skills, namespace_entries)
-        # History
         self.history: list[Message] = []
 
     # ---- Public API ----
