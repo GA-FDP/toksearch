@@ -183,5 +183,37 @@ class TestSessionDiscovery(unittest.TestCase):
         self.assertNotIn("aaa", sess.namespace)
 
 
+class TestCoreSelfRegistration(unittest.TestCase):
+    """Confirm core toksearch registers itself as a contributor.
+
+    Without monkeypatching, discovery should find at least the core
+    'toksearch' contributor (declared in pyproject.toml entry points).
+    """
+
+    def setUp(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def tearDown(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def test_core_toksearch_namespace_entry_loaded(self):
+        from toksearch.llm.discovery import discover_namespace_contributors
+        names = [n for n, _v, _d in discover_namespace_contributors()]
+        self.assertIn("toksearch", names)
+
+    def test_core_skills_dir_loaded(self):
+        from toksearch.llm.discovery import discover_skill_dirs
+        names = [n for n, _p in discover_skill_dirs()]
+        self.assertIn("toksearch", names)
+
+    def test_session_system_prompt_mentions_toksearch(self):
+        backend = FakeBackend(scripted_turns=[_text("ok")])
+        sess = Session(backend=backend)
+        self.assertIn("toksearch", sess.system_prompt)
+        self.assertIn("Pipeline", sess.system_prompt)  # from __llm_description__
+
+
 if __name__ == "__main__":
     unittest.main()
