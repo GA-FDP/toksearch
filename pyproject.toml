@@ -19,3 +19,9 @@ toksearch = "toksearch.llm.cli:main"
 
 [project.optional-dependencies]
 llm = ["anthropic>=0.34", "openai>=1.50", "matplotlib"]
+
+[project.entry-points."toksearch.llm.namespace"]
+toksearch = "toksearch"
+
+[project.entry-points."toksearch.llm.skills"]
+toksearch = "toksearch.llm:CORE_SKILLS_DIR"

@@ -43,6 +43,10 @@ from .config import Config, load_config
 from .presets import Preset, BUILTIN_PRESETS, resolve_preset
 from .session import Session
 
+from pathlib import Path as _Path
+
+CORE_SKILLS_DIR = _Path(__file__).parent.parent / "skills"
+
 __all__ = [
     "Session",
     "Config", "load_config",
@@ -50,4 +54,5 @@ __all__ = [
     "TextDelta", "ToolCall", "ToolResult", "TurnComplete",
     "LLMError", "LLMConfigError", "LLMAuthError",
     "LLMBackendError", "LLMRateLimitError", "LLMUserAbort",
+    "CORE_SKILLS_DIR",
 ]

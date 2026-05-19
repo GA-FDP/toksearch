@@ -161,3 +161,8 @@ from pathlib import Path
 from . import _version
 
 __version__ = _version.get_versions()["version"]
+
+__llm_description__ = (
+    "core toksearch - Pipeline, MdsSignal, ZarrSignal, fetch_dataset, "
+    "and SQL helpers"
+)
