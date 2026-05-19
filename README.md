@@ -15,6 +15,30 @@ or...
 The ```Pipeline``` also provides a ```where``` method which takes as input a user-defined function that returns a boolean value. If the function evaluates to ```False``` for a record, then that record is removed from the pipeline.
 
 
+## Talk to your data
+
+TokSearch ships with `toksearch.llm` — a conversational interface that lets you ask for fusion data in plain English. The agent writes the pipeline code, runs it against a persistent Python namespace so follow-up turns iterate on cached results instead of re-fetching, and shows you each block before executing it. From a shell:
+
+```bash
+toksearch chat
+```
+
+```text
+you> Use run_python to fetch ipmhd for shot 165920 from efit01.
+[run_python] Fetch ipmhd via MdsSignal.
+  pipeline = toksearch.Pipeline([165920])
+  pipeline.fetch('ip', toksearch.MdsSignal(r'\ipmhd', 'efit01'))
+  rec = list(pipeline.compute_serial())[0]
+[output] (no output)
+
+you> What's the peak |Ip| in MA?
+[run_python] ...
+[output] 1.1325
+```
+
+Backends: Anthropic API, OpenAI API, your Claude Max plan via the Claude Agent SDK, or GA's AmSC endpoint via `toksearch_d3d`. See the [LLM tutorial](https://ga-fdp.github.io/toksearch/LLM_Tutorial/) for an end-to-end walkthrough and the [LLM Interface reference](https://ga-fdp.github.io/toksearch/llm/) for the full API surface.
+
+
 ## Installation
 
 TokSearch is available on the `ga-fdp` conda channel. 
