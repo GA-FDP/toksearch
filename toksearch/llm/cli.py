@@ -47,6 +47,7 @@ def build_session(args) -> Session:
         backend=backend,
         model=args.model or preset.model,
         max_iterations=args.max_iterations or cfg.max_iterations,
+        packages=args.packages,
     )
 
 
@@ -175,6 +176,10 @@ def _add_common(p):
                    help="Override the preset's default model.")
     p.add_argument("-n", "--max-iterations", type=int, default=None,
                    help="Cap on tool-call rounds per turn.")
+    p.add_argument("--package", dest="packages", action="append",
+                   default=None,
+                   help="Restrict discovered contributors to the named "
+                        "package(s). Repeat the flag to allow multiple.")
 
 
 def main(argv=None):
