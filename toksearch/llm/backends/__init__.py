@@ -17,10 +17,12 @@ from ..errors import LLMConfigError
 
 
 def get_backend_class(name: str):
-    """Resolve a backend-class name (e.g. 'anthropic', 'openai') to its class.
+    """Resolve a backend-class name to its class.
 
-    Imports the concrete class lazily so the import of ``toksearch.llm.backends``
-    doesn't require ``anthropic`` / ``openai`` SDKs to be installed.
+    Imports the concrete class lazily so the registry import doesn't
+    require ``anthropic``, ``openai``, or ``claude-agent-sdk`` SDKs to be
+    installed.  An ImportError on lazy load is re-raised as ``LLMConfigError``
+    with installation guidance.
     """
     if name == "anthropic":
         from .anthropic import AnthropicBackend
@@ -28,6 +30,15 @@ def get_backend_class(name: str):
     if name == "openai":
         from .openai import OpenAIBackend
         return OpenAIBackend
+    if name == "claude-max":
+        try:
+            from .claude_sdk import ClaudeSDKBackend
+        except ImportError as e:
+            raise LLMConfigError(
+                "The claude-max backend requires the claude-agent-sdk and "
+                "mcp packages. Install them via `pip install toksearch[llm]` "
+                "or, in pixi-managed envs, add them under [dependencies] in "
+                "pixi.toml.") from e
+        return ClaudeSDKBackend
     raise LLMConfigError(
-        f"Unknown backend: {name!r}. Known: anthropic, openai. "
-        "(claude-max is added in PR 3.)")
+        f"Unknown backend: {name!r}. Known: anthropic, openai, claude-max.")

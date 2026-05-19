@@ -74,6 +74,9 @@ def _resolve_api_key(preset, cfg) -> str | None:
                 return path.read_text().strip()
             except OSError:
                 pass
+    if preset.backend == "claude-max":
+        # ClaudeSDKBackend uses OAuth via the `claude` CLI; no API key.
+        return None
     if preset.backend == "anthropic":
         return cfg.anthropic_api_key
     if preset.backend == "openai":
