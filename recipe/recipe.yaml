@@ -38,6 +38,16 @@ requirements:
     - jupyter
     - fsspec
     - zarr =3
+    # toksearch.llm backends. anthropic + openai are the API providers;
+    # claude-agent-sdk + mcp back the claude-max backend (uses the user's
+    # Claude Max OAuth via the `claude` CLI). These mirror the `[llm]`
+    # optional-dependency extra in pyproject.toml so conda installs get
+    # the same surface as `pip install toksearch[llm]`.
+    - anthropic >=0.34
+    - openai >=1.50
+    - claude-agent-sdk >=0.2
+    - mcp >=1.23
+    - matplotlib
 
 tests:
   - script:
