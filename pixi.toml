@@ -23,6 +23,9 @@ zarr = "3.*"
 c-compiler = "*"
 setuptools = "*"
 pip = "*"
+anthropic = ">=0.34"
+openai = ">=1.50"
+matplotlib = "*"
 
 [tasks]
 build = "pip install -e . --no-deps"
