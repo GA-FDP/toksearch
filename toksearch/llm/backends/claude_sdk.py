@@ -141,7 +141,104 @@ class ClaudeSDKBackend(Backend):
             name="toksearch", version="1.0", tools=[_rp, _ld],
         )
 
+    # ------------------------------------------------------------------
+    # Async bridge
+    # ------------------------------------------------------------------
+
+    def _ensure_loop(self):
+        """Start the persistent daemon-thread event loop on first use."""
+        if self._loop is not None:
+            return
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(
+            target=self._loop.run_forever, daemon=True,
+            name="toksearch-llm-claude-sdk")
+        self._thread.start()
+
+    def _run_coro(self, coro):
+        self._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result()
+
+    # ------------------------------------------------------------------
+    # Conversation entry point
+    # ------------------------------------------------------------------
+
     def run_conversation(self, session, new_user_message, callbacks,
-                          max_iterations):
-        raise NotImplementedError(
-            "ClaudeSDKBackend.run_conversation is implemented in Task 3.")
+                          max_iterations) -> TurnComplete:
+        # Stash per-call state for the MCP handlers to read.
+        self._current_session = session
+        self._current_callbacks = callbacks
+        session._append_user(new_user_message)
+        return self._run_coro(self._async_turn(
+            session, new_user_message, callbacks, max_iterations))
+
+    async def _async_turn(self, session, prompt, callbacks, max_iterations):
+        from ..messages import TextBlock as _TextBlock, ToolUseBlock as _ToolUseBlock
+        client = await self._get_or_create_client(session, max_iterations)
+        await client.query(prompt)
+        # Collect assistant blocks across all messages from this turn.
+        assistant_blocks: list = []
+        final_text = ""
+        stop_reason = "end_turn"
+        async for msg in client.receive_response():
+            if isinstance(msg, sdk.AssistantMessage):
+                for b in msg.content:
+                    if isinstance(b, sdk.TextBlock):
+                        # Native text deltas can be streamed; fire on_text once
+                        # per AssistantMessage in PR 3 (no chunking).
+                        callbacks.fire_text(b.text)
+                        assistant_blocks.append(_TextBlock(text=b.text))
+                        final_text = b.text
+                    elif isinstance(b, sdk.ToolUseBlock):
+                        # The SDK already invoked the tool via our MCP server
+                        # (which appended the tool_result to history). Record
+                        # the tool_use block in our history too.
+                        assistant_blocks.append(_ToolUseBlock(
+                            id=b.id, name=b.name, args=dict(b.input)))
+            elif isinstance(msg, sdk.ResultMessage):
+                if msg.stop_reason:
+                    if msg.stop_reason in ("end_turn", "max_iterations",
+                                            "interrupted"):
+                        stop_reason = msg.stop_reason
+                    else:
+                        stop_reason = "end_turn"
+                if msg.result:
+                    final_text = msg.result
+                break
+        if assistant_blocks:
+            session._append_assistant(assistant_blocks)
+        result = TurnComplete(stop_reason=stop_reason, final_text=final_text)
+        callbacks.fire_turn_complete(result)
+        return result
+
+    async def _get_or_create_client(self, session, max_iterations):
+        if self._client is not None:
+            return self._client
+        options = sdk.ClaudeAgentOptions(
+            system_prompt=session.system_prompt,
+            mcp_servers={"toksearch": self._build_mcp_server()},
+            allowed_tools=[
+                "mcp__toksearch__run_python",
+                "mcp__toksearch__lookup_docs",
+            ],
+            permission_mode="bypassPermissions",
+            model=session.model,
+            max_turns=max_iterations,
+        )
+        try:
+            self._client = sdk.ClaudeSDKClient(options=options)
+            await self._client.connect()
+        except sdk.CLINotFoundError as e:
+            raise LLMAuthError(
+                "Could not find the `claude` CLI. Install Claude Code "
+                "(see https://docs.claude.com/en/docs/claude-code) and "
+                "run `claude login` to use the claude-max backend.") from e
+        except sdk.CLIConnectionError as e:
+            raise LLMAuthError(
+                "Failed to connect to the `claude` CLI. Run `claude login` "
+                "or set CLAUDE_CODE_OAUTH_TOKEN. Original error: " + str(e)
+            ) from e
+        except sdk.ClaudeSDKError as e:
+            raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
+        return self._client

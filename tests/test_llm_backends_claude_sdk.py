@@ -138,3 +138,104 @@ class TestBuildMcpServer(unittest.TestCase):
         from claude_agent_sdk.types import McpSdkServerConfig
         self.assertIsInstance(server, dict)
         self.assertEqual(server.get("type"), "sdk")
+
+
+class TestRunConversation(unittest.TestCase):
+    """Verify run_conversation drives ClaudeSDKClient and translates messages."""
+
+    def _make_async_iter(self, items):
+        async def gen():
+            for item in items:
+                yield item
+        return gen()
+
+    def _mock_client(self, response_messages):
+        """Build a mock ClaudeSDKClient with the given response stream."""
+        client = mock.MagicMock()
+        client.connect = mock.AsyncMock()
+        client.query = mock.AsyncMock()
+        client.receive_response = mock.MagicMock(
+            return_value=self._make_async_iter(response_messages))
+        return client
+
+    def test_single_turn_text_response(self):
+        from claude_agent_sdk import (
+            AssistantMessage, TextBlock as SDKTextBlock, ResultMessage,
+        )
+        msgs = [
+            AssistantMessage(content=[SDKTextBlock(text="hi")], model="m",
+                              parent_tool_use_id=None, error=None,
+                              usage=None, message_id="m1",
+                              stop_reason="end_turn", session_id="s1",
+                              uuid="u1"),
+            ResultMessage(subtype="success", duration_ms=10,
+                           duration_api_ms=5, is_error=False, num_turns=1,
+                           session_id="s1", stop_reason="end_turn",
+                           total_cost_usd=0.001, usage=None,
+                           result="hi", structured_output=None,
+                           model_usage=None, permission_denials=None,
+                           deferred_tool_use=None, errors=None,
+                           api_error_status=None, uuid="u2"),
+        ]
+        client = self._mock_client(msgs)
+        backend = ClaudeSDKBackend()
+        sess = _stub_session()
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ):
+            result = backend.run_conversation(
+                sess, "hello", Callbacks(), max_iterations=5)
+        self.assertEqual(result.stop_reason, "end_turn")
+        self.assertEqual(result.final_text, "hi")
+        # client.query was called with the user message
+        client.query.assert_called_once()
+        # User + assistant in history
+        roles = [m.role for m in sess.history]
+        self.assertEqual(roles, ["user", "assistant"])
+
+    def test_options_configure_mcp_and_allowed_tools(self):
+        """The SDK should be constructed with our MCP server + allowed_tools."""
+        from claude_agent_sdk import ResultMessage
+        msgs = [ResultMessage(
+            subtype="success", duration_ms=1, duration_api_ms=1,
+            is_error=False, num_turns=1, session_id="s",
+            stop_reason="end_turn", total_cost_usd=0.0, usage=None,
+            result="", structured_output=None, model_usage=None,
+            permission_denials=None, deferred_tool_use=None, errors=None,
+            api_error_status=None, uuid="u")]
+        client = self._mock_client(msgs)
+        backend = ClaudeSDKBackend()
+        sess = _stub_session()
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ) as ctor:
+            backend.run_conversation(sess, "hi", Callbacks(),
+                                      max_iterations=5)
+        opts = ctor.call_args.kwargs["options"]
+        self.assertIn("toksearch", opts.mcp_servers)
+        self.assertEqual(
+            sorted(opts.allowed_tools),
+            ["mcp__toksearch__lookup_docs", "mcp__toksearch__run_python"])
+        self.assertEqual(opts.permission_mode, "bypassPermissions")
+
+    def test_connect_failure_raises_auth_error(self):
+        from claude_agent_sdk import CLINotFoundError
+        from toksearch.llm.errors import LLMAuthError
+        client = mock.MagicMock()
+        async def _boom():
+            raise CLINotFoundError("not found")
+        client.connect = _boom
+        backend = ClaudeSDKBackend()
+        sess = _stub_session()
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ), self.assertRaises(LLMAuthError):
+            backend.run_conversation(sess, "hi", Callbacks(),
+                                      max_iterations=5)
+
+
+if __name__ == "__main__":
+    unittest.main()
