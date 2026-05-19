@@ -5920,12 +5920,14 @@ packages:
   timestamp: 1764695075374
 - pypi: ./
   name: toksearch
-  version: 2.6.0+29.gf4d2241
-  sha256: 2a60b1e5197c276c7d9c1acc63664b55279f686393c526f381dd75dfac86fe4e
+  version: 2.6.0+35.g97c263d
+  sha256: 191e44f87fbe93f8bc9c0b7425df83d3a8fdb40b1efe03f0f6eb3727392abda2
   requires_dist:
   - anthropic>=0.34 ; extra == 'llm'
   - openai>=1.50 ; extra == 'llm'
   - matplotlib ; extra == 'llm'
+  - claude-agent-sdk>=0.2 ; extra == 'llm'
+  - mcp>=1.23 ; extra == 'llm'
 - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.0-pyhcf101f3_0.conda
   sha256: 62940c563de45790ba0f076b9f2085a842a65662268b02dd136a8e9b1eaf47a8
   md5: 72e780e9aa2d0a3295f59b1874e3768b
