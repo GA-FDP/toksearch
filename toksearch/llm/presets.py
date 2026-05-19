@@ -58,12 +58,30 @@ BUILTIN_PRESETS: dict[str, Preset] = {
 def resolve_preset(name: str, config: Config) -> Preset:
     """Resolve a preset name to a fully-populated ``Preset``.
 
-    Lookup order: user presets > built-in presets.  When a preset name exists
-    in both, the user preset's fields are merged on top of the built-in.
+    Lookup order (highest precedence first):
+      1. User preset (``Config.user_presets[name]``) merged onto whatever
+         base (built-in, discovered, or new) applies.
+      2. Built-in preset (``BUILTIN_PRESETS[name]``).
+      3. Discovered preset (``toksearch.llm.presets`` entry point).
+      4. A user-only preset (no base; ``Preset(**user_preset)``).
+
+    Built-ins shadow discovered presets of the same name -- this prevents
+    a misconfigured package from silently hijacking a stable user-facing
+    name like ``"anthropic"``.
     """
+    from .discovery import discover_presets
+
     user = config.user_presets.get(name, {})
     if name in BUILTIN_PRESETS:
         base = BUILTIN_PRESETS[name]
+        if user:
+            return replace(base, **{k: v for k, v in user.items()
+                                    if k in {"backend", "model", "base_url",
+                                             "api_key_file", "api_key_env"}})
+        return base
+    discovered = discover_presets()
+    if name in discovered:
+        base = discovered[name]
         if user:
             return replace(base, **{k: v for k, v in user.items()
                                     if k in {"backend", "model", "base_url",
@@ -78,5 +96,6 @@ def resolve_preset(name: str, config: Config) -> Preset:
             raise LLMConfigError(f"Invalid user preset {name!r}: {e}") from e
     raise LLMConfigError(
         f"Unknown backend / preset: {name!r}. Built-in presets: "
-        f"{sorted(BUILTIN_PRESETS)}. Define a user preset in "
-        f"~/.fdp/config.toml under [llm.presets.{name}].")
+        f"{sorted(BUILTIN_PRESETS)}. Discovered presets: {sorted(discovered)}. "
+        f"Define a user preset in ~/.fdp/config.toml under "
+        f"[llm.presets.{name}].")

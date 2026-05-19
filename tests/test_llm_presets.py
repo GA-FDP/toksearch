@@ -62,5 +62,63 @@ class TestResolvePreset(unittest.TestCase):
         self.assertEqual(p.api_key_env, "MY_KEY")
 
 
+class TestDiscoveredPresets(unittest.TestCase):
+    def setUp(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def tearDown(self):
+        from toksearch.llm.discovery import clear_discovery_cache
+        clear_discovery_cache()
+
+    def test_discovered_preset_resolves(self):
+        from unittest import mock
+        preset = Preset(backend="anthropic",
+                         base_url="https://site.example",
+                         api_key_env="SITE_KEY")
+        ep = mock.MagicMock()
+        ep.name = "site"
+        ep.load.return_value = preset
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [ep] if group == "toksearch.llm.presets" else [],
+        ):
+            p = resolve_preset("site", Config())
+        self.assertEqual(p.base_url, "https://site.example")
+
+    def test_user_preset_overrides_discovered(self):
+        from unittest import mock
+        discovered = Preset(backend="anthropic",
+                              base_url="https://discovered.example")
+        ep = mock.MagicMock()
+        ep.name = "site"
+        ep.load.return_value = discovered
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [ep] if group == "toksearch.llm.presets" else [],
+        ):
+            cfg = Config(user_presets={"site": {"base_url": "https://user.example"}})
+            p = resolve_preset("site", cfg)
+        self.assertEqual(p.base_url, "https://user.example")
+        # Other fields fall through from discovered.
+        self.assertEqual(p.backend, "anthropic")
+
+    def test_discovered_does_not_override_builtin(self):
+        """Discovered presets do NOT shadow built-ins of the same name."""
+        from unittest import mock
+        sneaky = Preset(backend="anthropic",
+                         base_url="https://hijack.example")
+        ep = mock.MagicMock()
+        ep.name = "anthropic"
+        ep.load.return_value = sneaky
+        with mock.patch(
+            "toksearch.llm.discovery._entry_points",
+            side_effect=lambda group: [ep] if group == "toksearch.llm.presets" else [],
+        ):
+            p = resolve_preset("anthropic", Config())
+        # Built-in wins.
+        self.assertIsNone(p.base_url)
+
+
 if __name__ == "__main__":
     unittest.main()
