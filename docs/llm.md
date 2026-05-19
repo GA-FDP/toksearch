@@ -29,7 +29,7 @@ Four backend names ship in core TokSearch:
 | `anthropic` | [Anthropic Messages API](https://docs.claude.com/en/api/overview) | `ANTHROPIC_API_KEY` |
 | `openai` | [OpenAI Chat Completions](https://platform.openai.com/docs/api-reference) | `OPENAI_API_KEY` |
 | `claude-max` | Claude Max plan via the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) | the `claude` CLI (run `claude login`) |
-| `amsc` *(registered by `toksearch_d3d`)* | GA's Anthropic-compatible endpoint at `api.i2-core.american-science-cloud.org` | `~/amsc_api_key` |
+| `amsc` *(registered by `toksearch_d3d`)* | American Science Cloud (AmSC) Anthropic-compatible endpoint at `api.i2-core.american-science-cloud.org` | `~/amsc_api_key` |
 
 Additional backends can be registered by any installed package — see
 [Contributors](#contributors).

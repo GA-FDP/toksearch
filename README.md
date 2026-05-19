@@ -36,7 +36,7 @@ you> What's the peak |Ip| in MA?
 [output] 1.1325
 ```
 
-Backends: Anthropic API, OpenAI API, your Claude Max plan via the Claude Agent SDK, or GA's AmSC endpoint via `toksearch_d3d`. See the [LLM tutorial](https://ga-fdp.github.io/toksearch/LLM_Tutorial/) for an end-to-end walkthrough and the [LLM Interface reference](https://ga-fdp.github.io/toksearch/llm/) for the full API surface.
+Backends: Anthropic API, OpenAI API, your Claude Max plan via the Claude Agent SDK, or the American Science Cloud (AmSC) endpoint via `toksearch_d3d`. See the [LLM tutorial](https://ga-fdp.github.io/toksearch/LLM_Tutorial/) for an end-to-end walkthrough and the [LLM Interface reference](https://ga-fdp.github.io/toksearch/llm/) for the full API surface.
 
 
 ## Installation
