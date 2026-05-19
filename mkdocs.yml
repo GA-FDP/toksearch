@@ -20,6 +20,10 @@ repo_name: GA-FDP/toksearch
 repo_url: https://github.com/GA-FDP/toksearch
 edit_uri: ""
 
+# Internal planning docs (specs/plans/etc.) live under docs/superpowers/
+# but are not user-facing; exclude them from the site.
+exclude_docs: |
+  superpowers/
 
 plugins:
   - mkdocstrings:
