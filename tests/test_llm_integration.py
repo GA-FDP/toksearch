@@ -86,5 +86,21 @@ class TestOpenAIIntegration(unittest.TestCase):
         _assert_simple_arithmetic(result, sess)
 
 
+_HAS_CLAUDE_MAX = os.environ.get("TOKSEARCH_CLAUDE_MAX") == "yes"
+
+
+@unittest.skipUnless(_INTEGRATION_ON and _HAS_CLAUDE_MAX,
+                     "TOKSEARCH_INTEGRATION=yes and TOKSEARCH_CLAUDE_MAX=yes "
+                     "required; the `claude` CLI must be installed and "
+                     "logged in.")
+class TestClaudeMaxIntegration(unittest.TestCase):
+    def test_simple_arithmetic_end_to_end(self):
+        from toksearch.llm.backends.claude_sdk import ClaudeSDKBackend
+        backend = ClaudeSDKBackend()
+        sess = Session(backend=backend, max_iterations=5)
+        result = sess.send(PROMPT)
+        _assert_simple_arithmetic(result, sess)
+
+
 if __name__ == "__main__":
     unittest.main()
