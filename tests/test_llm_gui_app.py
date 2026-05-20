@@ -95,6 +95,23 @@ class TestChatFn(unittest.TestCase):
         last = yields[-1]
         self.assertIn("toksearch-quickstart", last[0].metadata["title"])
 
+    def test_tool_result_is_error_uses_error_title_prefix(self):
+        from toksearch.llm.gui.app import _build_chat_fn
+
+        class FakeSession:
+            def send(self, prompt, *, on_text, on_tool_call,
+                     on_tool_result, **_):
+                on_tool_call(_FakeCall(
+                    id="t1", name="run_python", thought="try a thing"))
+                on_tool_result(_FakeResult(
+                    id="t1", output="Traceback...", is_error=True))
+
+        fn = _build_chat_fn(FakeSession())
+        yields = self._drain(fn("do it", []))
+        last = yields[-1]
+        self.assertEqual(last[0].metadata["status"], "done")
+        self.assertTrue(last[0].metadata["title"].startswith("⛔"))
+
     def test_error_event_appends_red_message(self):
         from toksearch.llm.gui.app import _build_chat_fn
 
@@ -105,7 +122,10 @@ class TestChatFn(unittest.TestCase):
         fn = _build_chat_fn(BoomSession())
         yields = self._drain(fn("hi", []))
         last = yields[-1]
-        self.assertEqual(last[-1].metadata["status"], "error")
+        # Gradio's ChatMessage.metadata.status only accepts
+        # "pending"/"done"; the error marker lives in the title.
+        self.assertEqual(last[-1].metadata["status"], "done")
+        self.assertIn("⛔", last[-1].metadata["title"])
         self.assertIn("boom", last[-1].metadata["title"])
 
     def test_figure_event_renders_as_inline_plot_bubble(self):
