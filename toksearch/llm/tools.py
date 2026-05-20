@@ -59,9 +59,17 @@ _RUN_PYTHON_DESCRIPTION = (
     "Execute a Python code string. The execution namespace persists across "
     "calls within this session, so variables set in earlier calls are "
     "available later. The namespace is pre-populated with: toksearch, plt "
-    "(matplotlib.pyplot), pd (pandas), np (numpy). Returns captured stdout "
+    "(matplotlib.pyplot), pd (pandas), np (numpy), px (plotly.express), "
+    "go (plotly.graph_objects). Returns captured stdout "
     "and stderr. Populate 'thought' with a one-sentence description of what "
     "this code does and why."
+    "\n\nPrefer plotly (`px`, `go`) for visualizations — the GUI "
+    "renders them as interactive figures with zoom/pan/hover. Use "
+    "matplotlib (`plt`) only for cases plotly handles poorly "
+    "(animations, specialized scientific plots). Either way, call "
+    "`fig.show()` or `plt.show()` to send the figure to the side "
+    "pane in the GUI; in CLI mode the call is captured as text "
+    "output."
 )
 
 

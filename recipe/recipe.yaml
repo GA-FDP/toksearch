@@ -46,8 +46,11 @@ requirements:
     - anthropic >=0.34
     - openai >=1.50
     - claude-agent-sdk >=0.2
+    - gradio >=4
     - mcp >=1.23
     - matplotlib
+    - plotly
+    - python-kaleido
 
 tests:
   - script:

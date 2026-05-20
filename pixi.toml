@@ -27,7 +27,10 @@ anthropic = ">=0.34"
 openai = ">=1.50"
 matplotlib = "*"
 claude-agent-sdk = ">=0.2"
+gradio = ">=4"
 mcp = ">=1.23"
+plotly = "*"
+python-kaleido = "*"
 
 [tasks]
 build = "pip install -e . --no-deps"
