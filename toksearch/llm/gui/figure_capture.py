@@ -11,7 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Auto-capture for matplotlib and plotly figures from run_python."""
+"""Auto-capture for matplotlib and plotly figures from run_python.
+
+The figure-capture hooks publish to a module-level ``_active_figure_emitter``
+that callers swap for the duration of a chat turn. Before any turn is
+active the emitter is ``None`` and figures are silently dropped (matches
+CLI-only invocations of toksearch.llm).
+"""
 
 from typing import Any, Callable
 
@@ -24,6 +30,31 @@ OnFigure = Callable[[str, object], None]
 ``kind`` is the literal ``"matplotlib"`` or ``"plotly"``; payload is
 either a ``matplotlib.figure.Figure`` or a ``dict`` (plotly's
 fig_dict)."""
+
+
+_active_figure_emitter: OnFigure | None = None
+
+
+def _set_active_figure_emitter(emit_fn: OnFigure | None) -> None:
+    """Install the function the matplotlib + plotly hooks call.
+
+    Each chat turn installs an emitter that publishes onto its
+    per-turn queue, then restores the previous emitter on exit so
+    figures generated outside a turn are silently dropped.
+    """
+    global _active_figure_emitter
+    _active_figure_emitter = emit_fn
+
+
+def _dispatch_to_active_emitter(kind: str, payload: object) -> None:
+    """Forward a captured figure to whichever emitter is currently active.
+
+    Looked up at call time (not at closure-binding time) so a turn's
+    emitter installed AFTER ``wrap_run_python_handler`` /
+    ``install_plotly_renderer`` were called still wins.
+    """
+    if _active_figure_emitter is not None:
+        _active_figure_emitter(kind, payload)
 
 
 def wrap_run_python_handler(handler: ToolHandler,
