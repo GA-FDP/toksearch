@@ -72,16 +72,38 @@ def _plotly_iframe(fig, height: int = 500) -> str:
     context where the script does fire, restoring interactivity
     (zoom/pan/hover/legend).
 
+    ``config={"responsive": True}`` plus ``layout.autosize=True``
+    makes the plot reflow when the iframe (and thus the chat bubble)
+    resizes, so figures don't overflow horizontally. A small CSS
+    stanza zeroes the iframe body margin so plotly fills the whole
+    iframe rather than leaving a default browser gutter.
+
     plotly.js itself loads from the CDN so the iframe payload stays
     small (just chart data + a ``<script src="https://cdn.plot.ly/...">``
     reference); the CDN script caches across charts.
     """
     import html as _html
-    inner = fig.to_html(include_plotlyjs="cdn", full_html=True)
+    # Force autosize so the chart honors the iframe width rather than
+    # plotly's default fixed pixel width.
+    fig.update_layout(autosize=True)
+    inner = fig.to_html(
+        include_plotlyjs="cdn",
+        full_html=True,
+        config={"responsive": True},
+        default_height="100%",
+        default_width="100%",
+    )
+    # Zero the body margin inside the iframe so the chart fills it.
+    inner = inner.replace(
+        "<head>",
+        "<head><style>html,body{margin:0;padding:0;height:100%;}</style>",
+        1,
+    )
     escaped = _html.escape(inner, quote=True)
     return (
         f'<iframe srcdoc="{escaped}" '
-        f'style="width:100%; height:{height}px; border:none;" '
+        f'style="width:100%; height:{height}px; border:none; '
+        f'display:block;" '
         f'sandbox="allow-scripts"></iframe>'
     )
 
