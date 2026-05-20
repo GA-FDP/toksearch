@@ -27,7 +27,7 @@ import sys
 
 from .config import load_config
 from .errors import LLMConfigError, LLMError
-from .presets import resolve_preset
+from .presets import BUILTIN_PRESETS, resolve_preset
 from .backends import get_backend_class
 from .session import Session
 
@@ -136,9 +136,16 @@ class _ToolPrinter:
         # reflect what it learned from the tool.
 
 
+def _print_session_header(command_name, session, *, file=sys.stderr):
+    """One-line header announcing the resolved backend and model."""
+    print(f"toksearch {command_name} (backend: {session.backend.name}, "
+          f"model: {session.model})", file=file)
+
+
 def do_query(args):
     session = build_session(args)
     printer = _ToolPrinter(verbose=args.verbose)
+    _print_session_header("query", session)
     try:
         result = session.send(
             args.query,
@@ -168,8 +175,7 @@ Slash commands:
 def do_chat(args):
     session = build_session(args)
     printer = _ToolPrinter(verbose=args.verbose)
-    print(f"toksearch chat (backend: {session.backend.name}, "
-          f"model: {session.model})")
+    _print_session_header("chat", session, file=sys.stdout)
     print("Type /help for commands. Ctrl-D to exit.\n")
     while True:
         try:
@@ -191,6 +197,7 @@ def do_chat(args):
         try:
             session.send(
                 line,
+                on_text=lambda t: print(t, end="", flush=True),
                 on_tool_call=printer.tool_call,
                 on_tool_result=printer.tool_result,
             )
@@ -198,6 +205,54 @@ def do_chat(args):
             print(f"error: {e}", file=sys.stderr)
             continue
         print()  # spacer between turns
+
+
+# ----------------------------------------------------------------------
+# `toksearch backends`
+# ----------------------------------------------------------------------
+
+def do_backends(args):
+    """Print the names that ``--backend`` will accept.
+
+    Lists built-in presets, entry-point-discovered presets (e.g. amsc
+    from toksearch_d3d), and user presets defined under
+    ``[llm.presets.<name>]`` in ``~/.fdp/config.toml``. Marks the
+    current default.
+    """
+    from .discovery import discover_presets
+
+    cfg = load_config()
+    discovered = discover_presets()
+    user_presets = cfg.user_presets or {}
+
+    default_name = cfg.backend or "anthropic"
+
+    rows: list[tuple[str, str, str, str]] = []
+    for name, preset in BUILTIN_PRESETS.items():
+        rows.append((name, "built-in", preset.backend, preset.model or "-"))
+    for name, preset in discovered.items():
+        if name in BUILTIN_PRESETS:
+            continue  # built-ins shadow discovered of the same name
+        rows.append((name, "discovered", preset.backend, preset.model or "-"))
+    for name, kv in user_presets.items():
+        if name in BUILTIN_PRESETS or name in discovered:
+            continue  # user overrides are merged onto the base; don't double-list
+        rows.append((name, "user", str(kv.get("backend", "?")),
+                     str(kv.get("model", "-"))))
+    rows.sort()
+
+    if not rows:
+        print("No backend presets available.")
+        return
+
+    headers = ("name", "source", "backend", "model")
+    widths = [max(len(h), max(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths) + "  {}"
+    print(fmt.format(*headers, ""))
+    print("  ".join("-" * w for w in widths))
+    for name, source, backend, model in rows:
+        marker = "(default)" if name == default_name else ""
+        print(fmt.format(name, source, backend, model, marker).rstrip())
 
 
 # ----------------------------------------------------------------------
@@ -233,6 +288,12 @@ def main(argv=None):
     cp = sub.add_parser("chat", help="Interactive conversation.")
     _add_common(cp)
     cp.set_defaults(func=do_chat)
+
+    bp = sub.add_parser(
+        "backends",
+        help="List the names that --backend accepts (built-in, discovered, "
+             "and user presets).")
+    bp.set_defaults(func=do_backends)
 
     args = parser.parse_args(argv)
     args.func(args)
