@@ -62,16 +62,28 @@ def _to_plotly_figure(payload):
     return payload
 
 
-def _plotly_html(fig) -> str:
-    """Serialize a plotly Figure to a self-contained interactive HTML block.
+def _plotly_iframe(fig, height: int = 500) -> str:
+    """Render a plotly Figure inside an ``<iframe srcdoc="...">``.
 
-    ``include_plotlyjs="cdn"`` loads plotly.js once per page from a CDN
-    (small, cacheable). ``full_html=False`` produces just the chart
-    ``<div>`` + ``<script>`` snippet suitable for inlining inside a
-    chat bubble. Requires the host ``gr.Chatbot`` to have
-    ``sanitize_html=False`` so the embedded ``<script>`` runs.
+    The chatbot's HTML renderer strips ``<script>`` tags even with
+    ``sanitize_html=False``, so naively inlining ``fig.to_html(...)``
+    produces a div that never gets initialized by plotly.js. Wrapping
+    the full plotly HTML in an iframe runs it in its own browser
+    context where the script does fire, restoring interactivity
+    (zoom/pan/hover/legend).
+
+    plotly.js itself loads from the CDN so the iframe payload stays
+    small (just chart data + a ``<script src="https://cdn.plot.ly/...">``
+    reference); the CDN script caches across charts.
     """
-    return fig.to_html(include_plotlyjs="cdn", full_html=False)
+    import html as _html
+    inner = fig.to_html(include_plotlyjs="cdn", full_html=True)
+    escaped = _html.escape(inner, quote=True)
+    return (
+        f'<iframe srcdoc="{escaped}" '
+        f'style="width:100%; height:{height}px; border:none;" '
+        f'sandbox="allow-scripts"></iframe>'
+    )
 
 
 def _build_chat_fn(session):
@@ -152,12 +164,11 @@ def _build_chat_fn(session):
                 elif kind == "figure":
                     fig_kind, fig_payload = payload
                     if fig_kind == "plotly":
-                        # gr.Plot embedded in a ChatMessage renders
-                        # plotly as a static snapshot. gr.HTML with
-                        # plotly's self-contained html keeps the
-                        # figure interactive (zoom/pan/hover).
+                        # Wrap in an iframe so plotly's <script> runs in
+                        # its own browser context (the chatbot's HTML
+                        # renderer strips <script> tags otherwise).
                         fig = _to_plotly_figure(fig_payload)
-                        bubble_content = gr.HTML(_plotly_html(fig))
+                        bubble_content = gr.HTML(_plotly_iframe(fig))
                     else:
                         # Matplotlib isn't interactive anyway -- a
                         # static gr.Plot render is the right call.

@@ -128,10 +128,11 @@ class TestChatFn(unittest.TestCase):
         self.assertIn("⛔", last[-1].metadata["title"])
         self.assertIn("boom", last[-1].metadata["title"])
 
-    def test_plotly_figure_renders_as_interactive_html(self):
-        """plotly figures are inlined as gr.HTML so the chart stays
-        interactive (zoom/pan/hover). gr.Plot would render as a
-        static snapshot inside ChatMessage content."""
+    def test_plotly_figure_renders_in_an_iframe(self):
+        """plotly figures are inlined as gr.HTML containing an
+        <iframe srcdoc="..."> so the embedded plotly.js script
+        actually executes (the chatbot strips <script> tags from
+        directly-inlined HTML even with sanitize_html=False)."""
         from toksearch.llm.gui.app import _build_chat_fn
 
         class FakeSession:
@@ -145,11 +146,12 @@ class TestChatFn(unittest.TestCase):
         fn = _build_chat_fn(FakeSession())
         yields = self._drain(fn("plot", []))
         last = yields[-1]
-        self.assertEqual(len(last), 1)
         plot_bubble = last[0]
         self.assertIsInstance(plot_bubble.content, gr.HTML)
-        # plotly.js script reference should be present in the inlined html.
         html = plot_bubble.content.value
+        self.assertIn("<iframe", html)
+        self.assertIn("srcdoc=", html)
+        # The escaped srcdoc payload should reference plotly.
         self.assertIn("plotly", html.lower())
 
     def test_matplotlib_figure_renders_as_static_gr_plot(self):
