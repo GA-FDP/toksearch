@@ -173,6 +173,11 @@ Slash commands:
 
 
 def do_chat(args):
+    if getattr(args, "gui", False):
+        from .gui import launch_gui
+        launch_gui(args,
+                    open_browser=getattr(args, "open_browser", True))
+        return
     session = build_session(args)
     printer = _ToolPrinter(verbose=args.verbose)
     _print_session_header("chat", session, file=sys.stdout)
@@ -287,6 +292,12 @@ def main(argv=None):
 
     cp = sub.add_parser("chat", help="Interactive conversation.")
     _add_common(cp)
+    cp.add_argument("--gui", action="store_true",
+                     help="Launch the local Gradio GUI instead of the "
+                          "terminal REPL.")
+    cp.add_argument("--no-browser", dest="open_browser",
+                     action="store_false", default=True,
+                     help="When --gui is set, do not open a browser tab.")
     cp.set_defaults(func=do_chat)
 
     bp = sub.add_parser(

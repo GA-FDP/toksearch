@@ -179,5 +179,35 @@ class TestCliPackageFlag(unittest.TestCase):
         self.assertIsNone(ns.packages)
 
 
+class TestCliChatGuiFlag(unittest.TestCase):
+    def test_chat_gui_flag_delegates_to_launch_gui(self):
+        from toksearch.llm import cli
+
+        with mock.patch.object(sys, "argv",
+                                ["toksearch", "chat", "--gui"]), \
+             mock.patch("toksearch.llm.gui.launch_gui") as launch:
+            try:
+                cli.main()
+            except SystemExit:
+                pass
+        launch.assert_called_once()
+        kwargs = launch.call_args.kwargs
+        self.assertEqual(kwargs.get("open_browser"), True)
+
+    def test_chat_no_browser_passes_through(self):
+        from toksearch.llm import cli
+
+        with mock.patch.object(sys, "argv",
+                                ["toksearch", "chat", "--gui",
+                                 "--no-browser"]), \
+             mock.patch("toksearch.llm.gui.launch_gui") as launch:
+            try:
+                cli.main()
+            except SystemExit:
+                pass
+        kwargs = launch.call_args.kwargs
+        self.assertEqual(kwargs.get("open_browser"), False)
+
+
 if __name__ == "__main__":
     unittest.main()
