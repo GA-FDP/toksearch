@@ -160,12 +160,15 @@ class TestChatFn(unittest.TestCase):
         right choice."""
         import matplotlib
         matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        # Use the bare Figure constructor (not plt.figure()) so we
+        # don't register a figure with pyplot's global state — the
+        # matplotlib-capture test in test_llm_gui_figure_capture
+        # asserts on plt.get_fignums() and would see a leaked figure.
+        from matplotlib.figure import Figure
         from toksearch.llm.gui.app import _build_chat_fn
         import gradio as gr
 
-        # Pre-create a matplotlib Figure to publish.
-        fig = plt.figure()
+        fig = Figure()
 
         class FakeSession:
             def send(self, prompt, *, on_text, on_tool_call,
