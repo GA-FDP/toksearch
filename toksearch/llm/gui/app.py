@@ -125,14 +125,16 @@ def _build_chat_fn(session):
                     if idx is not None:
                         old = messages[idx]
                         body = _truncate(payload.output or "(no output)")
+                        # Gradio's ChatMessage.metadata.status only
+                        # accepts "pending" | "done"; encode error
+                        # state in the title (⛔ prefix) instead.
+                        title = old.metadata["title"]
+                        if payload.is_error and not title.startswith("⛔"):
+                            title = f"⛔ {title}"
                         messages[idx] = gr.ChatMessage(
                             role="assistant",
                             content=f"```\n{body}\n```",
-                            metadata={
-                                "title": old.metadata["title"],
-                                "status": ("error" if payload.is_error
-                                           else "done"),
-                            },
+                            metadata={"title": title, "status": "done"},
                         )
 
                 elif kind == "figure":
@@ -154,7 +156,7 @@ def _build_chat_fn(session):
                         role="assistant",
                         content=f"```\n{err_tb}\n```",
                         metadata={"title": f"⛔ {err_msg}",
-                                  "status": "error"},
+                                  "status": "done"},
                     ))
 
                 yield messages
