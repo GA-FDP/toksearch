@@ -128,16 +128,15 @@ class TestChatFn(unittest.TestCase):
         self.assertIn("⛔", last[-1].metadata["title"])
         self.assertIn("boom", last[-1].metadata["title"])
 
-    def test_figure_event_renders_as_inline_plot_bubble(self):
+    def test_plotly_figure_renders_as_interactive_html(self):
+        """plotly figures are inlined as gr.HTML so the chart stays
+        interactive (zoom/pan/hover). gr.Plot would render as a
+        static snapshot inside ChatMessage content."""
         from toksearch.llm.gui.app import _build_chat_fn
-        from toksearch.llm.gui.figure_capture import _active_figure_emitter
 
         class FakeSession:
             def send(self, prompt, *, on_text, on_tool_call,
                      on_tool_result, **_):
-                # Use the active emitter installed by chat_fn to
-                # publish a figure mid-turn (simulates what a real
-                # run_python call's matplotlib capture would do).
                 from toksearch.llm.gui import figure_capture as _fc
                 _fc._active_figure_emitter(
                     "plotly", {"data": [], "layout": {}})
@@ -148,7 +147,34 @@ class TestChatFn(unittest.TestCase):
         last = yields[-1]
         self.assertEqual(len(last), 1)
         plot_bubble = last[0]
-        # The content should be a gr.Plot component carrying a Figure.
+        self.assertIsInstance(plot_bubble.content, gr.HTML)
+        # plotly.js script reference should be present in the inlined html.
+        html = plot_bubble.content.value
+        self.assertIn("plotly", html.lower())
+
+    def test_matplotlib_figure_renders_as_static_gr_plot(self):
+        """Matplotlib figures stay on the gr.Plot path -- they aren't
+        interactive in the browser anyway, so a static render is the
+        right choice."""
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from toksearch.llm.gui.app import _build_chat_fn
+        import gradio as gr
+
+        # Pre-create a matplotlib Figure to publish.
+        fig = plt.figure()
+
+        class FakeSession:
+            def send(self, prompt, *, on_text, on_tool_call,
+                     on_tool_result, **_):
+                from toksearch.llm.gui import figure_capture as _fc
+                _fc._active_figure_emitter("matplotlib", fig)
+
+        fn = _build_chat_fn(FakeSession())
+        yields = self._drain(fn("plot", []))
+        last = yields[-1]
+        plot_bubble = last[0]
         self.assertIsInstance(plot_bubble.content, gr.Plot)
 
 

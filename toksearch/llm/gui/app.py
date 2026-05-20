@@ -62,6 +62,18 @@ def _to_plotly_figure(payload):
     return payload
 
 
+def _plotly_html(fig) -> str:
+    """Serialize a plotly Figure to a self-contained interactive HTML block.
+
+    ``include_plotlyjs="cdn"`` loads plotly.js once per page from a CDN
+    (small, cacheable). ``full_html=False`` produces just the chart
+    ``<div>`` + ``<script>`` snippet suitable for inlining inside a
+    chat bubble. Requires the host ``gr.Chatbot`` to have
+    ``sanitize_html=False`` so the embedded ``<script>`` runs.
+    """
+    return fig.to_html(include_plotlyjs="cdn", full_html=False)
+
+
 def _build_chat_fn(session):
     """Construct the streaming ChatInterface function for this Session."""
 
@@ -140,12 +152,19 @@ def _build_chat_fn(session):
                 elif kind == "figure":
                     fig_kind, fig_payload = payload
                     if fig_kind == "plotly":
+                        # gr.Plot embedded in a ChatMessage renders
+                        # plotly as a static snapshot. gr.HTML with
+                        # plotly's self-contained html keeps the
+                        # figure interactive (zoom/pan/hover).
                         fig = _to_plotly_figure(fig_payload)
+                        bubble_content = gr.HTML(_plotly_html(fig))
                     else:
-                        fig = fig_payload
+                        # Matplotlib isn't interactive anyway -- a
+                        # static gr.Plot render is the right call.
+                        bubble_content = gr.Plot(fig_payload)
                     messages.append(gr.ChatMessage(
                         role="assistant",
-                        content=gr.Plot(fig),
+                        content=bubble_content,
                     ))
 
                 elif kind == "error":
