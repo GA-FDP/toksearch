@@ -50,6 +50,13 @@ def _default_namespace() -> dict:
         ns["plt"] = plt
     except ImportError:
         pass
+    try:
+        import plotly.express as _px
+        import plotly.graph_objects as _go
+        ns["px"] = _px
+        ns["go"] = _go
+    except ImportError:
+        pass
     return ns
 
 
