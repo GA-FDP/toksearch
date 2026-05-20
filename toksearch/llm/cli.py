@@ -88,31 +88,63 @@ def _resolve_api_key(preset, cfg) -> str | None:
 # `toksearch query`
 # ----------------------------------------------------------------------
 
-def _print_tool_call(call):
-    print(f"\n[{call.name}] {call.thought or ''}".rstrip())
-    code = call.args.get("code")
-    if code:
-        for line in code.splitlines():
-            print(f"  {line}")
+class _ToolPrinter:
+    """Pretty-printer for tool calls and results.
 
+    Compact mode (default): one-line summary per call -- the LLM's
+    `thought` if present, otherwise a key arg fallback. Successful
+    results print nothing; errors show the first line. Verbose mode
+    (`-v`) prints the full code and full body, matching the previous
+    behavior.
+    """
 
-def _print_tool_result(result):
-    label = "[output]" if not result.is_error else "[error]"
-    body = result.output or ""
-    for line in body.splitlines():
-        print(f"  {line}")
-    if not body:
-        print(f"{label} (empty)")
+    _ARG_FALLBACKS = ("skill_name", "name", "query")
+
+    def __init__(self, verbose: bool):
+        self.verbose = verbose
+
+    def tool_call(self, call):
+        detail = (call.thought or "").strip()
+        if not detail:
+            for key in self._ARG_FALLBACKS:
+                value = call.args.get(key)
+                if value:
+                    detail = str(value)
+                    break
+        print(f"\n[{call.name}] {detail}".rstrip())
+        if self.verbose:
+            code = call.args.get("code")
+            if code:
+                for line in code.splitlines():
+                    print(f"  {line}")
+
+    def tool_result(self, result):
+        body = result.output or ""
+        if result.is_error:
+            first = body.splitlines()[0] if body else "(empty)"
+            print(f"  [error] {first}")
+            if self.verbose and body:
+                for line in body.splitlines()[1:]:
+                    print(f"  {line}")
+        elif self.verbose:
+            if not body:
+                print("  [output] (empty)")
+            else:
+                for line in body.splitlines():
+                    print(f"  {line}")
+        # Compact + success: print nothing -- the LLM's reply will
+        # reflect what it learned from the tool.
 
 
 def do_query(args):
     session = build_session(args)
+    printer = _ToolPrinter(verbose=args.verbose)
     try:
         result = session.send(
             args.query,
             on_text=lambda t: print(t, end="", flush=True),
-            on_tool_call=_print_tool_call,
-            on_tool_result=_print_tool_result,
+            on_tool_call=printer.tool_call,
+            on_tool_result=printer.tool_result,
         )
     except LLMError as e:
         print(f"\nerror: {e}", file=sys.stderr)
@@ -135,6 +167,7 @@ Slash commands:
 
 def do_chat(args):
     session = build_session(args)
+    printer = _ToolPrinter(verbose=args.verbose)
     print(f"toksearch chat (backend: {session.backend.name}, "
           f"model: {session.model})")
     print("Type /help for commands. Ctrl-D to exit.\n")
@@ -158,8 +191,8 @@ def do_chat(args):
         try:
             session.send(
                 line,
-                on_tool_call=_print_tool_call,
-                on_tool_result=_print_tool_result,
+                on_tool_call=printer.tool_call,
+                on_tool_result=printer.tool_result,
             )
         except LLMError as e:
             print(f"error: {e}", file=sys.stderr)
@@ -183,6 +216,9 @@ def _add_common(p):
                    default=None,
                    help="Restrict discovered contributors to the named "
                         "package(s). Repeat the flag to allow multiple.")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Show full tool-call code and tool-result bodies. "
+                        "Default prints a one-line summary per call.")
 
 
 def main(argv=None):
