@@ -45,3 +45,30 @@ def wrap_run_python_handler(handler: ToolHandler,
         return result
 
     return wrapped
+
+
+_RENDERER_NAME = "toksearch_gui"
+
+
+def install_plotly_renderer(on_figure: OnFigure) -> Callable[[], None]:
+    """Register a plotly renderer that fires ``on_figure("plotly", fig_dict)``.
+
+    Returns a callable that restores the previous default renderer
+    when invoked. Safe to call ``install_plotly_renderer`` multiple
+    times — the latest callback wins.
+    """
+    import plotly.io as pio
+    from plotly.io._base_renderers import ExternalRenderer
+
+    class _GuiRenderer(ExternalRenderer):
+        def render(self, fig_dict):
+            on_figure("plotly", fig_dict)
+
+    pio.renderers[_RENDERER_NAME] = _GuiRenderer()
+    previous = pio.renderers.default
+    pio.renderers.default = _RENDERER_NAME
+
+    def uninstall() -> None:
+        pio.renderers.default = previous
+
+    return uninstall

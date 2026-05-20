@@ -51,5 +51,38 @@ class TestMatplotlibCapture(unittest.TestCase):
         self.assertEqual(plt.get_fignums(), [])
 
 
+class TestPlotlyCapture(unittest.TestCase):
+    def test_install_renderer_routes_show_to_callback(self):
+        import plotly.graph_objects as go
+        from toksearch.llm.gui.figure_capture import install_plotly_renderer
+
+        emitted = []
+        on_figure = lambda kind, payload: emitted.append((kind, payload))
+
+        uninstall = install_plotly_renderer(on_figure)
+        try:
+            fig = go.Figure(data=[go.Scatter(x=[1, 2], y=[3, 4])])
+            fig.show()  # should hit our renderer
+        finally:
+            uninstall()
+
+        self.assertEqual(len(emitted), 1)
+        kind, payload = emitted[0]
+        self.assertEqual(kind, "plotly")
+        # payload is plotly's fig_dict (a dict with 'data' and 'layout')
+        self.assertIn("data", payload)
+        self.assertIn("layout", payload)
+
+    def test_uninstall_restores_previous_renderer(self):
+        import plotly.io as pio
+        from toksearch.llm.gui.figure_capture import install_plotly_renderer
+
+        before = pio.renderers.default
+        uninstall = install_plotly_renderer(lambda *a: None)
+        self.assertNotEqual(pio.renderers.default, before)
+        uninstall()
+        self.assertEqual(pio.renderers.default, before)
+
+
 if __name__ == "__main__":
     unittest.main()
