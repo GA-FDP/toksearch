@@ -153,6 +153,11 @@ class TestChatFn(unittest.TestCase):
         self.assertIn("srcdoc=", html)
         # The escaped srcdoc payload should reference plotly.
         self.assertIn("plotly", html.lower())
+        # The iframe must carry the fullscreen permission AND
+        # contain the injected fullscreen button + script.
+        self.assertIn('allow="fullscreen"', html)
+        self.assertIn("ts-fullscreen-btn", html)
+        self.assertIn("requestFullscreen", html)
 
     def test_matplotlib_figure_renders_as_static_gr_plot(self):
         """Matplotlib figures stay on the gr.Plot path -- they aren't
