@@ -21,6 +21,7 @@ via ``ChatMessage.metadata``), and inline plots
 (``ChatMessage(content=gr.Plot(fig))``).
 """
 
+import os
 import queue
 import sys
 import threading
@@ -32,6 +33,22 @@ from .figure_capture import _set_active_figure_emitter
 
 
 _ARG_FALLBACKS = ("skill_name", "name", "query")
+
+
+def _header_logo_path() -> str | None:
+    """Return a filesystem path to a header logo, or ``None``.
+
+    Honors ``$FDP_GUI_LOGO_PATH`` if set and pointing to an existing
+    file; otherwise no logo. Set by ``fdp chat --gui`` before
+    ``execvpe``ing into the toksearch CLI so the chat surface picks
+    up FDP branding automatically when running inside the platform.
+    Direct ``python -m toksearch.llm.gui`` invocations stay
+    unbranded unless the user exports the variable themselves.
+    """
+    path = os.environ.get("FDP_GUI_LOGO_PATH")
+    if path and os.path.isfile(path):
+        return path
+    return None
 
 
 def _tool_title(call) -> str:
@@ -226,7 +243,17 @@ def build_app(session, fn=None):
     UI wiring from the LLM call.
     """
     chat_fn = fn if fn is not None else _build_chat_fn(session)
+    logo_path = _header_logo_path()
     with gr.Blocks(title="toksearch chat") as blocks:
+        if logo_path:
+            gr.Image(
+                value=logo_path,
+                show_label=False,
+                container=False,
+                interactive=False,
+                buttons=[],
+                height=70,
+            )
         gr.ChatInterface(
             fn=chat_fn,
             chatbot=gr.Chatbot(
@@ -235,6 +262,6 @@ def build_app(session, fn=None):
                 # Permit gr.Plot content inside ChatMessages.
                 sanitize_html=False,
             ),
-            title="toksearch chat",
+            title=None if logo_path else "toksearch chat",
         )
     return blocks
