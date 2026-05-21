@@ -197,5 +197,77 @@ class TestBuildApp(unittest.TestCase):
         self.assertIsInstance(blocks, gr.Blocks)
 
 
+class TestHeaderLogo(unittest.TestCase):
+    """build_app honors FDP_GUI_LOGO_PATH for branding the header."""
+
+    def _noop_fn(self):
+        def fn(message, history):
+            yield []
+        return fn
+
+    def _walk(self, node):
+        yield node
+        for child in getattr(node, "children", None) or []:
+            yield from self._walk(child)
+
+    def test_no_env_var_no_image_component(self):
+        from toksearch.llm.gui.app import build_app
+        import gradio as gr
+        import os as _os
+
+        env = {k: v for k, v in _os.environ.items()
+               if k != "FDP_GUI_LOGO_PATH"}
+        with mock.patch.dict(_os.environ, env, clear=True):
+            blocks = build_app(session=mock.Mock(), fn=self._noop_fn())
+        images = [c for c in self._walk(blocks)
+                  if isinstance(c, gr.Image)]
+        self.assertEqual(images, [])
+
+    def test_env_var_pointing_at_real_file_adds_image(self):
+        import tempfile
+        from pathlib import Path
+        from toksearch.llm.gui.app import build_app
+        import gradio as gr
+        import os as _os
+
+        # Use any small extant file as a stand-in PNG; build_app only
+        # checks os.path.isfile, not the file's actual contents.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"\x89PNG\r\n\x1a\n")
+            logo = f.name
+        try:
+            with mock.patch.dict(_os.environ,
+                                  {"FDP_GUI_LOGO_PATH": logo}):
+                blocks = build_app(session=mock.Mock(),
+                                    fn=self._noop_fn())
+            images = [c for c in self._walk(blocks)
+                      if isinstance(c, gr.Image)]
+            self.assertEqual(len(images), 1)
+            # Gradio stages the file into its own gradio_cache dir at
+            # postprocess time, so the recorded path is a copy of the
+            # original. Verify by tail-matching the basename instead
+            # of comparing absolute paths.
+            value = images[0].value
+            path = value.get("path") if isinstance(value, dict) else value
+            self.assertTrue(path.endswith(_os.path.basename(logo)),
+                            f"image value {path!r} doesn't end with "
+                            f"basename of {logo!r}")
+        finally:
+            Path(logo).unlink()
+
+    def test_env_var_pointing_at_nonexistent_file_is_ignored(self):
+        from toksearch.llm.gui.app import build_app
+        import gradio as gr
+        import os as _os
+
+        with mock.patch.dict(_os.environ,
+                              {"FDP_GUI_LOGO_PATH":
+                               "/does/not/exist/logo.png"}):
+            blocks = build_app(session=mock.Mock(), fn=self._noop_fn())
+        images = [c for c in self._walk(blocks)
+                  if isinstance(c, gr.Image)]
+        self.assertEqual(images, [])
+
+
 if __name__ == "__main__":
     unittest.main()
