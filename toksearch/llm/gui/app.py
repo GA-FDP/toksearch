@@ -110,17 +110,46 @@ def _plotly_iframe(fig, height: int = 500) -> str:
         default_height="100%",
         default_width="100%",
     )
-    # Zero the body margin inside the iframe so the chart fills it.
-    inner = inner.replace(
-        "<head>",
-        "<head><style>html,body{margin:0;padding:0;height:100%;}</style>",
-        1,
-    )
+    # Inject style + a floating "⛶ Full screen" button. The button
+    # calls requestFullscreen() on the iframe's documentElement, which
+    # the parent iframe element grants via `allow="fullscreen"`.
+    _injected = """
+<style>
+  html,body { margin:0; padding:0; height:100%; }
+  #ts-fullscreen-btn {
+    position: fixed; top: 6px; right: 6px; z-index: 9999;
+    padding: 4px 10px; font: 12px/1 system-ui, sans-serif;
+    background: rgba(255,255,255,0.9); color: #333;
+    border: 1px solid #ccc; border-radius: 4px; cursor: pointer;
+    opacity: 0.7;
+  }
+  #ts-fullscreen-btn:hover { opacity: 1; }
+</style>
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  var btn = document.createElement('button');
+  btn.id = 'ts-fullscreen-btn';
+  btn.innerText = '⛶ Full screen';
+  btn.title = 'Expand this plot to full screen';
+  btn.onclick = function () {
+    var el = document.documentElement;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen();
+    }
+  };
+  document.body.appendChild(btn);
+});
+</script>
+"""
+    inner = inner.replace("<head>", "<head>" + _injected, 1)
     escaped = _html.escape(inner, quote=True)
     return (
         f'<iframe srcdoc="{escaped}" '
         f'style="width:100%; height:{height}px; border:none; '
         f'display:block;" '
+        f'allow="fullscreen" '
         f'sandbox="allow-scripts"></iframe>'
     )
 
