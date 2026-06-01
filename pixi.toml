@@ -38,6 +38,9 @@ test = { cmd = "cd tests && ./testit", depends-on = ["build"] }
 
 [pypi-dependencies]
 toksearch = { path = ".", editable = true }
+# For connect-d3drdb-migration: read the catalog via fdp_schema.
+# Switches to a conda dep before release (see plan Task 9).
+fdp_schema = { path = "../fdp_schema", editable = true }
 
 [feature.docs.dependencies]
 python = "3.10.*"

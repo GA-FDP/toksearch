@@ -504,6 +504,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.23.0-pyhcf101f3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
+      - pypi: ../fdp_schema
       - pypi: ./
   docs:
     channels:
@@ -1886,6 +1887,15 @@ packages:
   - pkg:pypi/fastar?source=hash-mapping
   size: 423329
   timestamp: 1776177827826
+- pypi: ../fdp_schema
+  name: fdp-schema
+  version: 0.1.0
+  sha256: a98625a0f453cf8e9551333e89655f0f66bde3016cd0eb605470fadf1d230105
+  requires_dist:
+  - pydantic>=2
+  - pyyaml
+  - pytest ; extra == 'test'
+  requires_python: '>=3.11'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-8.0.1-gpl_h43fde53_912.conda
   sha256: ace426e0372a8cea862ada112336fe04b5445f21e761c7042a33ec5900258af6
   md5: c1a58b1a35bc7e775f7fa61f4a2e8e75
