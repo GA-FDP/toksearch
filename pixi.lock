@@ -99,6 +99,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-cli-0.0.23-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/fastapi-core-0.136.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/fastar-0.11.0-py312h42cbcb6_0.conda
+      - conda: https://conda.anaconda.org/ga-fdp/noarch/fdp-schema-0.1.1-pyh4616a5c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-8.0.1-gpl_h43fde53_912.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ffmpy-0.3.0-pyhb6f538c_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/filelock-3.20.3-pyhd8ed1ab_0.conda
@@ -504,7 +505,6 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.23.0-pyhcf101f3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.2-h25fd6f3_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
-      - pypi: ../fdp_schema
       - pypi: ./
   docs:
     channels:
@@ -1887,15 +1887,17 @@ packages:
   - pkg:pypi/fastar?source=hash-mapping
   size: 423329
   timestamp: 1776177827826
-- pypi: ../fdp_schema
-  name: fdp-schema
-  version: 0.1.0
-  sha256: a98625a0f453cf8e9551333e89655f0f66bde3016cd0eb605470fadf1d230105
-  requires_dist:
-  - pydantic>=2
+- conda: https://conda.anaconda.org/ga-fdp/noarch/fdp-schema-0.1.1-pyh4616a5c_0.conda
+  sha256: 582eafedbb672c2ecf4132102836140c29595f581c836d20ecd1e01763ff2e1c
+  md5: 23c440db16774e11e6969f8fcaf50d55
+  depends:
+  - python >=3.11
+  - pydantic >=2
   - pyyaml
-  - pytest ; extra == 'test'
-  requires_python: '>=3.11'
+  - python
+  license: Apache-2.0
+  size: 20846
+  timestamp: 1780350126044
 - conda: https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-8.0.1-gpl_h43fde53_912.conda
   sha256: ace426e0372a8cea862ada112336fe04b5445f21e761c7042a33ec5900258af6
   md5: c1a58b1a35bc7e775f7fa61f4a2e8e75
