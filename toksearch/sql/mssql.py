@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import os
 import getpass
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import pymssql
+from fdp_schema import load_tokamak, Tokamak
 
 USER_HOME_DIR = str(Path.home())
 USERNAME = getpass.getuser()
@@ -96,3 +99,20 @@ def _resolve_credential(
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     file_user, file_pass = lines[0], lines[1]
     return (username if username is not None else file_user), file_pass
+
+
+@functools.cache
+def _discover_catalogs() -> dict[str, Tokamak]:
+    """Read and validate every YAML contributed via the
+    `fdp_schema.catalogs` entry-point group. Cached for process lifetime;
+    tests that patch `entry_points` must call `cache_clear()` in setUp."""
+    out: dict[str, Tokamak] = {}
+    for ep in entry_points(group="fdp_schema.catalogs"):
+        tk = load_tokamak(ep.load())
+        if tk.name in out:
+            raise RuntimeError(
+                f"Duplicate tokamak name {tk.name!r}: "
+                f"{ep.value} conflicts with a previous entry point"
+            )
+        out[tk.name] = tk
+    return out

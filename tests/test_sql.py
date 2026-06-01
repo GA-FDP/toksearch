@@ -141,3 +141,69 @@ class TestResolveCredential(unittest.TestCase):
         loc = self._locator(auth_kind=None)
         with self.assertRaisesRegex(RuntimeError, "credential source"):
             _resolve_credential(None, loc, None)
+
+
+class TestDiscoverCatalogs(unittest.TestCase):
+    """_discover_catalogs reads the fdp_schema.catalogs entry-point group
+    and parses each contributed YAML. Cached for process lifetime."""
+
+    def setUp(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        _discover_catalogs.cache_clear()
+
+    def _ep(self, name: str, yaml: str):
+        ep = mock.MagicMock()
+        ep.name = name
+        ep.value = f"mock:{name}"
+        src = mock.MagicMock()
+        src.read_text.return_value = yaml
+        ep.load.return_value = src
+        return ep
+
+    def test_returns_dict_keyed_by_tokamak_name(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        eps = [self._ep("d3d", "schema_version: 1\nname: d3d\n")]
+        with mock.patch("toksearch.sql.mssql.entry_points", return_value=eps):
+            result = _discover_catalogs()
+        self.assertEqual(set(result.keys()), {"d3d"})
+        self.assertEqual(result["d3d"].name, "d3d")
+
+    def test_loads_full_locator_data(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        eps = [self._ep("d3d", """
+schema_version: 1
+name: d3d
+locators:
+  - kind: sql
+    name: d3drdb
+    driver: mssql
+    host: d3drdb.gat.com
+    port: 8001
+    database: d3drdb
+""")]
+        with mock.patch("toksearch.sql.mssql.entry_points", return_value=eps):
+            result = _discover_catalogs()
+        loc = result["d3d"].locators[0]
+        self.assertEqual(loc.kind, "sql")
+        self.assertEqual(loc.host, "d3drdb.gat.com")
+
+    def test_duplicate_tokamak_name_raises(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        eps = [
+            self._ep("a", "schema_version: 1\nname: x\n"),
+            self._ep("b", "schema_version: 1\nname: x\n"),
+        ]
+        with mock.patch("toksearch.sql.mssql.entry_points", return_value=eps):
+            with self.assertRaisesRegex(RuntimeError, "Duplicate tokamak name"):
+                _discover_catalogs()
+
+    def test_result_is_cached(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        eps = [self._ep("d3d", "schema_version: 1\nname: d3d\n")]
+        with mock.patch(
+            "toksearch.sql.mssql.entry_points", return_value=eps
+        ) as ep_mock:
+            _discover_catalogs()
+            _discover_catalogs()
+            _discover_catalogs()
+        self.assertEqual(ep_mock.call_count, 1)
