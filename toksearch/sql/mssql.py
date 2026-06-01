@@ -116,3 +116,76 @@ def _discover_catalogs() -> dict[str, Tokamak]:
             )
         out[tk.name] = tk
     return out
+
+
+def connect_tokamak_sql(
+    tokamak: str,
+    name: str = "main",
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    db: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    password_file: str | None = None,
+):
+    """Connect to a tokamak's SQL database, reading defaults from the
+    catalog contributed via the `fdp_schema.catalogs` entry-point group.
+
+    Args:
+      tokamak: tokamak name registered via fdp_schema.catalogs (e.g. "d3d").
+      name: which SqlLocator within that tokamak. D3D ships "d3drdb".
+      host, port, db: catalog overrides. `db` maps to SqlLocator.database.
+      username, password, password_file: credential overrides.
+
+    Credential resolution:
+      1. Explicit `password` kwarg wins.
+      2. Otherwise `password_file` (kwarg if given, else locator.auth.path).
+      3. If neither resolves, raise RuntimeError.
+
+    Driver scope: only driver=="mssql" is supported in v1.
+
+    Raises:
+      KeyError: unknown tokamak, or no SqlLocator with the given name.
+      NotImplementedError: locator's driver is not "mssql".
+      RuntimeError: no credential source resolvable.
+    """
+    catalogs = _discover_catalogs()
+    if tokamak not in catalogs:
+        raise KeyError(
+            f"No tokamak named {tokamak!r}. Available: {sorted(catalogs)}"
+        )
+    tk = catalogs[tokamak]
+    sqls = [l for l in tk.locators if l.kind == "sql" and l.name == name]
+    if not sqls:
+        avail = sorted(l.name for l in tk.locators if l.kind == "sql")
+        raise KeyError(
+            f"No sql locator named {name!r} on tokamak {tokamak!r}. "
+            f"Available: {avail}"
+        )
+    loc = sqls[0]
+
+    if loc.driver != "mssql":
+        raise NotImplementedError(
+            f"connect_tokamak_sql: driver={loc.driver!r} on locator "
+            f"{name!r} is not supported in v1; only 'mssql' is implemented."
+        )
+
+    if loc.tdsver:
+        os.environ.setdefault("TDSVER", loc.tdsver)
+
+    eff_host = host if host is not None else loc.host
+    eff_port = port if port is not None else loc.port
+    eff_db   = db   if db   is not None else loc.database
+
+    if password is None:
+        username, password = _resolve_credential(username, loc, password_file)
+    elif username is None:
+        # Explicit password without username: preserve Phase 1's OS
+        # current-user default so pymssql doesn't receive None.
+        username = getpass.getuser()
+
+    return pymssql.connect(
+        eff_host, username, password, eff_db,
+        port=str(eff_port) if eff_port else None,
+    )

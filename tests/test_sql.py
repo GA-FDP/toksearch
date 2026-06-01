@@ -207,3 +207,185 @@ locators:
             _discover_catalogs()
             _discover_catalogs()
         self.assertEqual(ep_mock.call_count, 1)
+
+
+class TestConnectTokamakSql(unittest.TestCase):
+    """connect_tokamak_sql: catalog-aware mssql connect helper."""
+
+    YAML = """
+schema_version: 1
+name: testtok
+locators:
+  - kind: sql
+    name: testdb
+    driver: mssql
+    host: testdb.example.com
+    port: 8001
+    database: testdb
+    tdsver: "7.0"
+    auth: { kind: password_file, path: ~/.testdb.login }
+"""
+
+    def setUp(self):
+        from toksearch.sql.mssql import _discover_catalogs
+        _discover_catalogs.cache_clear()
+
+    def _patch_entry_points(self):
+        ep = mock.MagicMock()
+        ep.name = "testtok"
+        ep.value = "mock:testtok"
+        src = mock.MagicMock()
+        src.read_text.return_value = self.YAML
+        ep.load.return_value = src
+        return mock.patch(
+            "toksearch.sql.mssql.entry_points", return_value=[ep]
+        )
+
+    def test_calls_pymssql_with_catalog_values(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch(
+                "toksearch.sql.mssql._resolve_credential",
+                return_value=("u", "p"),
+            ):
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql("testtok", "testdb")
+        connect.assert_called_once_with(
+            "testdb.example.com", "u", "p", "testdb", port="8001"
+        )
+
+    def test_kwarg_overrides_catalog_host(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch(
+                "toksearch.sql.mssql._resolve_credential",
+                return_value=("u", "p"),
+            ):
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql("testtok", "testdb", host="other.example.com")
+        connect.assert_called_once_with(
+            "other.example.com", "u", "p", "testdb", port="8001"
+        )
+
+    def test_kwarg_db_overrides_catalog_database(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch(
+                "toksearch.sql.mssql._resolve_credential",
+                return_value=("u", "p"),
+            ):
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql("testtok", "testdb", db="code_rundb")
+        # db kwarg → 4th positional arg (database)
+        connect.assert_called_once_with(
+            "testdb.example.com", "u", "p", "code_rundb", port="8001"
+        )
+
+    def test_kwarg_port_overrides_catalog_port(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch(
+                "toksearch.sql.mssql._resolve_credential",
+                return_value=("u", "p"),
+            ):
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql("testtok", "testdb", port=9999)
+        connect.assert_called_once_with(
+            "testdb.example.com", "u", "p", "testdb", port="9999"
+        )
+
+    def test_tdsver_setdefault_does_not_override(self):
+        import os
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch.dict(os.environ, {"TDSVER": "8.0"}, clear=True):
+                with mock.patch(
+                    "toksearch.sql.mssql._resolve_credential",
+                    return_value=("u", "p"),
+                ):
+                    with mock.patch("pymssql.connect"):
+                        connect_tokamak_sql("testtok", "testdb")
+                # Pre-existing TDSVER kept.
+                self.assertEqual(os.environ["TDSVER"], "8.0")
+
+    def test_tdsver_set_when_not_in_env(self):
+        import os
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with mock.patch(
+                    "toksearch.sql.mssql._resolve_credential",
+                    return_value=("u", "p"),
+                ):
+                    with mock.patch("pymssql.connect"):
+                        connect_tokamak_sql("testtok", "testdb")
+                self.assertEqual(os.environ.get("TDSVER"), "7.0")
+
+    def test_explicit_password_skips_credential_file_read(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch(
+                "toksearch.sql.mssql._resolve_credential"
+            ) as resolve:
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql(
+                        "testtok", "testdb",
+                        username="bob", password="explicit",
+                    )
+        resolve.assert_not_called()
+        connect.assert_called_once_with(
+            "testdb.example.com", "bob", "explicit", "testdb", port="8001"
+        )
+
+    def test_explicit_password_without_username_defaults_to_os_user(self):
+        """Phase 1 connect_d3drdb signature was `username=USERNAME, password=None`.
+        When a caller now passes only `password=`, preserve the OS-current-user
+        default so pymssql doesn't receive None."""
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with mock.patch("getpass.getuser", return_value="osuser"):
+                with mock.patch("pymssql.connect") as connect:
+                    connect_tokamak_sql("testtok", "testdb", password="x")
+        connect.assert_called_once_with(
+            "testdb.example.com", "osuser", "x", "testdb", port="8001"
+        )
+
+    def test_unknown_tokamak_raises_keyerror_with_available_list(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with self.assertRaises(KeyError) as ctx:
+                connect_tokamak_sql("nonexistent", "testdb")
+        self.assertIn("Available", str(ctx.exception))
+        self.assertIn("testtok", str(ctx.exception))
+
+    def test_unknown_locator_name_raises_keyerror_with_available_list(self):
+        from toksearch.sql.mssql import connect_tokamak_sql
+        with self._patch_entry_points():
+            with self.assertRaises(KeyError) as ctx:
+                connect_tokamak_sql("testtok", "nonexistent")
+        self.assertIn("Available", str(ctx.exception))
+        self.assertIn("testdb", str(ctx.exception))
+
+    def test_unsupported_driver_raises_notimplementederror(self):
+        yaml = """
+schema_version: 1
+name: testtok
+locators:
+  - kind: sql
+    name: pgdb
+    driver: postgres
+    host: pg.example.com
+    database: pgdb
+"""
+        from toksearch.sql.mssql import connect_tokamak_sql
+        ep = mock.MagicMock()
+        ep.name = "testtok"
+        ep.value = "mock:testtok"
+        src = mock.MagicMock()
+        src.read_text.return_value = yaml
+        ep.load.return_value = src
+        with mock.patch(
+            "toksearch.sql.mssql.entry_points", return_value=[ep]
+        ):
+            with self.assertRaisesRegex(NotImplementedError, "postgres"):
+                connect_tokamak_sql("testtok", "pgdb")
