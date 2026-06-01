@@ -22,17 +22,6 @@ from pathlib import Path
 import pymssql
 from fdp_schema import load_tokamak, Tokamak
 
-USER_HOME_DIR = str(Path.home())
-USERNAME = getpass.getuser()
-DEFAULT_PASSWORD_FILE = os.path.join(USER_HOME_DIR, "D3DRDB.sybase_login")
-
-
-def _read_sybase_login_file(filename):
-    with open(filename, "r") as f:
-        username, password = [line.strip() for line in f.readlines()]
-    return username, password
-
-
 def connect_d3drdb(**overrides):
     """Deprecated. Use `toksearch_d3d.sql.connect_d3drdb` (or the
     generic `toksearch.sql.mssql.connect_tokamak_sql('d3d', 'd3drdb',
