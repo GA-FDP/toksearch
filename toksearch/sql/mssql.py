@@ -68,3 +68,31 @@ def connect_d3drdb(
 
     conn = pymssql.connect(host, username, password, db, port=str(port))
     return conn
+
+
+def _resolve_credential(
+    username: str | None, loc, password_file_override: str | None,
+) -> tuple[str, str]:
+    """Resolve (username, password) for an mssql SqlLocator.
+
+    Reads a two-line password file (username on line 1, password on
+    line 2) from `password_file_override` if given, else from
+    `loc.auth.path`. Returns `(file_user, file_pass)` unless `username`
+    is explicitly provided, in which case the explicit value wins.
+
+    Raises:
+      RuntimeError: no credential source resolvable.
+    """
+    pf = password_file_override
+    if pf is None and loc.auth and loc.auth.kind == "password_file":
+        pf = loc.auth.path
+    if not pf:
+        raise RuntimeError(
+            f"No credential source for locator {loc.name!r}. "
+            f"Pass `password=` explicitly, or provide a password_file "
+            f"(catalog auth.path or `password_file=` kwarg)."
+        )
+    text = Path(os.path.expanduser(pf)).read_text()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    file_user, file_pass = lines[0], lines[1]
+    return (username if username is not None else file_user), file_pass
