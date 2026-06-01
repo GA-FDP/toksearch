@@ -15,6 +15,7 @@
 import functools
 import os
 import getpass
+import warnings
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -32,45 +33,26 @@ def _read_sybase_login_file(filename):
     return username, password
 
 
-def connect_d3drdb(
-    username=USERNAME,
-    password=None,
-    host="d3drdb.gat.com",
-    db="d3drdb",
-    port=8001,
-    password_file=DEFAULT_PASSWORD_FILE,
-):
-    """
-    Connect to the d3drdb
-
-    Keyword Parameters:
-        host (str): Defaults to 'd3drdb.gat.com'
-        port (int): Defaults to 8001
-        db (str): Name of the db (e.g. d3drdb, confinement). Defaults to d3drdb
-        username (str): Defaults to current user
-        password (str): Defaults to None. If not set, an attempt will be made
-            to read a password file
-       password_file (str): Full path the a password file, formatted with
-            username on the first line and password on the second line.
-
-    Returns:
-        Python DB API compliant Connection object
-
-    Can be used to return a Connection object directly, or used
-    as a context manager.
-    Examples:
-       conn = connect_d3drdb()
-
-       with connect_d3drdb() as conn:
-           # Do stuff with conn
-
-    """
-
-    if password is None:
-        username, password = _read_sybase_login_file(password_file)
-
-    conn = pymssql.connect(host, username, password, db, port=str(port))
-    return conn
+def connect_d3drdb(**overrides):
+    """Deprecated. Use `toksearch_d3d.sql.connect_d3drdb` (or the
+    generic `toksearch.sql.mssql.connect_tokamak_sql('d3d', 'd3drdb',
+    **overrides)`) instead."""
+    warnings.warn(
+        "toksearch.sql.mssql.connect_d3drdb is deprecated. Use "
+        "toksearch_d3d.sql.connect_d3drdb instead (or "
+        "toksearch.sql.mssql.connect_tokamak_sql for non-D3D tokamaks).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        from toksearch_d3d.sql import connect_d3drdb as _impl
+    except ImportError as e:
+        raise ImportError(
+            "toksearch.sql.mssql.connect_d3drdb requires toksearch_d3d "
+            "to be installed. Either `conda install toksearch_d3d` or "
+            "migrate to toksearch.sql.mssql.connect_tokamak_sql."
+        ) from e
+    return _impl(**overrides)
 
 
 def _resolve_credential(
