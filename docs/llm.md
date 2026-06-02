@@ -142,6 +142,14 @@ the backends, datasets, and API exploration. Device packages add their own:
 `toksearch_d3d` contributes skills for `PtDataSignal`, `ImasSignal`, FDP CLI,
 and a DIII-D quickstart.
 
+Skills are served via a **standalone MCP server** launched as a subprocess when
+`Session` is constructed: `python -m toksearch.llm.mcp`. Each `SKILL.md` is
+exposed as a `skill://<name>` MCP resource (and via a `read_skill` tool). The
+`toksearch.llm.skills` entry-point group remains the discovery source; extra
+directories can be added via the `TOKSEARCH_SKILL_DIRS` env var
+(os.pathsep-delimited). An external MCP client can also connect to the server
+directly to browse or read skills independently of `Session`.
+
 ## Show-then-run
 
 The REPL prints each `run_python` block's `thought` and code **before**
