@@ -109,7 +109,6 @@ class TestLookupDocs(unittest.TestCase):
     """
 
     def _stub_session(self, bodies):
-        from types import SimpleNamespace
         return SimpleNamespace(
             _skills_client=_StubClient(bodies),
             skills={k: None for k in bodies},
