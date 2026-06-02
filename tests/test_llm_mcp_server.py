@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 from toksearch.llm.mcp.server import build_server, discover_filtered_skills
@@ -114,6 +116,7 @@ def test_packages_none_includes_all_entry_point_dirs(monkeypatch):
         assert {"kept", "dropped"} <= set(skills)
 
 
+@pytest.mark.timeout(30)
 def test_module_launches_over_stdio():
     """`python -m toksearch.llm.mcp` starts and serves resources via stdio."""
     from mcp import ClientSession
