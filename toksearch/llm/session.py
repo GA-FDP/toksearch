@@ -23,7 +23,7 @@ from .backends.base import Backend, Callbacks
 from .events import TurnComplete
 from .messages import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from .prompts import build_system_prompt
-from .tools import LOOKUP_DOCS, RUN_PYTHON, ToolOutput, discover_skills
+from .tools import LOOKUP_DOCS, RUN_PYTHON, ToolOutput
 
 
 def _default_namespace() -> dict:
@@ -72,10 +72,7 @@ class Session:
         packages: list[str] | None = None,
         extra_skill_dirs: list[Path] | None = None,
     ):
-        from .discovery import (
-            discover_namespace_contributors,
-            discover_skill_dirs,
-        )
+        from .discovery import discover_namespace_contributors
         self.backend = backend
         self.model = model or backend.default_model
         self.max_iterations = max_iterations
@@ -89,15 +86,20 @@ class Session:
             namespace_entries.append((name, desc))
         if extra_namespace:
             self.namespace.update(extra_namespace)
-        # ---- Skills: discovered + extras ----
-        skill_dirs: list[Path] = []
-        for name, d in discover_skill_dirs():
-            if packages is not None and name not in packages:
-                continue
-            skill_dirs.append(d)
-        if extra_skill_dirs:
-            skill_dirs.extend(extra_skill_dirs)
-        self.skills = discover_skills(skill_dirs)
+        # ---- Skills: standalone MCP server (see docs spec 2026-06-02) ----
+        from .mcp.client import SkillsMcpClient
+        from .errors import LLMSkillsError
+        try:
+            self._skills_client = SkillsMcpClient(
+                extra_dirs=list(extra_skill_dirs or []),
+                packages=packages,
+            )
+            self.skills = self._skills_client.list_skills()
+        except LLMSkillsError:
+            raise
+        except Exception as e:   # noqa: BLE001
+            raise LLMSkillsError(
+                f"Failed to load skills via MCP server: {e}") from e
         # ---- Tools (fixed in PR 1) ----
         self.tool_specs = [RUN_PYTHON, LOOKUP_DOCS]
         self._tools_by_name = {t.name: t for t in self.tool_specs}
@@ -132,6 +134,13 @@ class Session:
         """Clear history and reset the namespace to its initial pre-populated state."""
         self.namespace = _default_namespace()
         self.history = []
+
+    def close(self) -> None:
+        """Tear down the skills MCP server subprocess."""
+        client = getattr(self, "_skills_client", None)
+        if client is not None:
+            client.close()
+            self._skills_client = None
 
     # ---- Hooks called by backends (semi-private) ----
 

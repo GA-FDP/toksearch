@@ -215,5 +215,35 @@ class TestCoreSelfRegistration(unittest.TestCase):
         self.assertIn("Pipeline", sess.system_prompt)  # from __llm_description__
 
 
+class TestSessionSkillsViaMcp(unittest.TestCase):
+    """Session loads skills through the standalone MCP server."""
+
+    def _make_skill(self, root, name, description, body):
+        from pathlib import Path
+        d = Path(root) / name
+        d.mkdir()
+        (d / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n")
+
+    def test_session_lists_and_reads_skill(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from toksearch.llm import Session
+        from toksearch.llm.backends.fake import FakeBackend
+        with TemporaryDirectory() as tmp:
+            self._make_skill(tmp, "demo", "Demo skill", "DEMO BODY")
+            sess = Session(backend=FakeBackend(),
+                           extra_skill_dirs=[Path(tmp)],
+                           packages=[])  # exclude entry-point skills
+            try:
+                self.assertIn("demo", sess.skills)
+                self.assertEqual(sess.skills["demo"].description, "Demo skill")
+                self.assertIn("Demo skill", sess.system_prompt)
+                body = sess._skills_client.read_skill("demo")
+                self.assertIn("DEMO BODY", body)
+            finally:
+                sess.close()
+
+
 if __name__ == "__main__":
     unittest.main()
