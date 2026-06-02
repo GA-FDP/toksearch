@@ -237,6 +237,25 @@ class TestSessionSkillsViaMcp(unittest.TestCase):
         (d / "SKILL.md").write_text(
             f"---\nname: {name}\ndescription: {description}\n---\n\n{body}\n")
 
+    def test_send_lookup_docs_flows_through_mcp(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from toksearch.llm import Session
+        from toksearch.llm.backends.fake import FakeBackend
+        with TemporaryDirectory() as tmp:
+            self._make_skill(tmp, "demo", "Demo skill", "DEMO BODY")
+            turns = [
+                _tool_use("lookup_docs", {"skill_name": "demo"}),
+                _text("done"),
+            ]
+            sess = Session(backend=FakeBackend(scripted_turns=turns),
+                           extra_skill_dirs=[Path(tmp)], packages=[])
+            self.addCleanup(sess.close)
+            results = []
+            sess.send("read the demo skill",
+                      on_tool_result=lambda r: results.append(r.output))
+            self.assertTrue(any("DEMO BODY" in r for r in results))
+
     def test_session_lists_and_reads_skill(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
