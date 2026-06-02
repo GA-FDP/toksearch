@@ -41,6 +41,7 @@ class TestSessionBasics(unittest.TestCase):
     def test_send_returns_turn_complete(self):
         backend = FakeBackend(scripted_turns=[_text("hello")])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         out = sess.send("hi")
         self.assertEqual(out.stop_reason, "end_turn")
         self.assertEqual(out.final_text, "hello")
@@ -48,6 +49,7 @@ class TestSessionBasics(unittest.TestCase):
     def test_namespace_pre_populated(self):
         backend = FakeBackend(scripted_turns=[_text("ok")])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         # toksearch and numpy are required; pandas and matplotlib are optional
         # in the test env (they live in the [llm] extra).
         self.assertIn("toksearch", sess.namespace)
@@ -56,6 +58,7 @@ class TestSessionBasics(unittest.TestCase):
     def test_extra_namespace_merged(self):
         backend = FakeBackend(scripted_turns=[_text("ok")])
         sess = Session(backend=backend, extra_namespace={"answer": 42})
+        self.addCleanup(sess.close)
         self.assertEqual(sess.namespace["answer"], 42)
 
 
@@ -68,6 +71,7 @@ class TestSessionPersistence(unittest.TestCase):
             _text("read"),
         ])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         sess.send("set x")
         sess.send("read x")
         self.assertEqual(sess.namespace["x"], 99)
@@ -78,6 +82,7 @@ class TestSessionPersistence(unittest.TestCase):
             _text("done"),
         ])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         sess.send("set x")
         self.assertIn("x", sess.namespace)
         self.assertGreater(len(sess.history), 0)
@@ -95,6 +100,7 @@ class TestSessionCallbacks(unittest.TestCase):
             _text("done"),
         ])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         order = []
         sess.send("go",
                   on_tool_call=lambda c: order.append(("call", c.name)),
@@ -108,6 +114,7 @@ class TestSessionCallbacks(unittest.TestCase):
             _tool_use("run_python", {"code": "print('x')", "thought": "x"}),
         ])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         out = sess.send("go", confirm=lambda call: False)
         self.assertEqual(out.stop_reason, "interrupted")
 
@@ -116,6 +123,7 @@ class TestSessionTools(unittest.TestCase):
     def test_run_python_and_lookup_docs_registered(self):
         backend = FakeBackend(scripted_turns=[_text("ok")])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         names = {t.name for t in sess.tool_specs}
         self.assertEqual(names, {"run_python", "lookup_docs"})
 
@@ -145,6 +153,7 @@ class TestSessionDiscovery(unittest.TestCase):
         ):
             backend = FakeBackend(scripted_turns=[_text("ok")])
             sess = Session(backend=backend)
+            self.addCleanup(sess.close)
         self.assertIn("fake_pkg", sess.namespace)
         self.assertIs(sess.namespace["fake_pkg"], fake)
         # The catalog line should mention the description.
@@ -165,6 +174,7 @@ class TestSessionDiscovery(unittest.TestCase):
         ):
             backend = FakeBackend(scripted_turns=[_text("ok")])
             sess = Session(backend=backend, packages=["aaa"])
+            self.addCleanup(sess.close)
         self.assertIn("aaa", sess.namespace)
         self.assertNotIn("bbb", sess.namespace)
 
@@ -180,6 +190,7 @@ class TestSessionDiscovery(unittest.TestCase):
         ):
             backend = FakeBackend(scripted_turns=[_text("ok")])
             sess = Session(backend=backend, packages=[])
+            self.addCleanup(sess.close)
         self.assertNotIn("aaa", sess.namespace)
 
 
@@ -211,6 +222,7 @@ class TestCoreSelfRegistration(unittest.TestCase):
     def test_session_system_prompt_mentions_toksearch(self):
         backend = FakeBackend(scripted_turns=[_text("ok")])
         sess = Session(backend=backend)
+        self.addCleanup(sess.close)
         self.assertIn("toksearch", sess.system_prompt)
         self.assertIn("Pipeline", sess.system_prompt)  # from __llm_description__
 
