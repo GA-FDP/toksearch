@@ -29,6 +29,16 @@ from toksearch.llm.tools import (
 )
 
 
+class _StubClient:
+    def __init__(self, bodies):
+        self._bodies = bodies
+
+    def read_skill(self, name):
+        if name not in self._bodies:
+            raise ValueError(f"Unknown skill: {name!r}")
+        return self._bodies[name]
+
+
 def _stub_session(namespace: dict | None = None):
     return SimpleNamespace(namespace=namespace if namespace is not None else {})
 
@@ -91,15 +101,19 @@ class TestRunPython(unittest.TestCase):
 
 
 class TestLookupDocs(unittest.TestCase):
-    """``lookup_docs`` reads SKILL.md bodies from the Session's skill registry.
+    """``lookup_docs`` reads SKILL.md bodies via the Session's skills MCP client.
 
-    The handler accesses ``session.skills`` (a dict[name -> Skill]) which the
-    real Session builds at __init__ from ``extra_skill_dirs`` + the core
-    ``toksearch/skills/`` directory.  These tests stub that mapping.
+    The handler calls ``session._skills_client.read_skill(name)`` and falls
+    back to an error listing ``session.skills`` keys on failure.  These tests
+    stub both attributes.
     """
 
-    def _stub_session(self, skills):
-        return SimpleNamespace(skills=skills)
+    def _stub_session(self, bodies):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            _skills_client=_StubClient(bodies),
+            skills={k: None for k in bodies},
+        )
 
     def test_unknown_skill_is_error(self):
         from toksearch.llm.tools import LOOKUP_DOCS
@@ -109,13 +123,11 @@ class TestLookupDocs(unittest.TestCase):
         self.assertIn("missing", out.text)
 
     def test_known_skill_returns_body(self):
-        from toksearch.llm.tools import LOOKUP_DOCS, Skill
-        s = self._stub_session({"foo": Skill(name="foo",
-                                             description="d",
-                                             body="Hello body.")})
+        from toksearch.llm.tools import LOOKUP_DOCS
+        s = self._stub_session({"foo": "FOO BODY"})
         out = LOOKUP_DOCS.handler({"skill_name": "foo"}, s)
         self.assertFalse(out.is_error)
-        self.assertEqual(out.text, "Hello body.")
+        self.assertIn("FOO BODY", out.text)
 
     def test_lookup_docs_spec_shape(self):
         from toksearch.llm.tools import LOOKUP_DOCS
