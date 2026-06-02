@@ -284,5 +284,30 @@ class TestHeaderLogo(unittest.TestCase):
         self.assertEqual(images, [])
 
 
+class TestGuiSessionMcpSkillCatalog(unittest.TestCase):
+    """Session exposes skills through MCP so the GUI can render a catalog."""
+
+    def test_gui_session_exposes_mcp_skill_catalog(self):
+        import tempfile
+        from pathlib import Path
+        from toksearch.llm import Session
+        from toksearch.llm.backends.fake import FakeBackend
+
+        with tempfile.TemporaryDirectory() as tmp:
+            skill_dir = Path(tmp) / "guiskill"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: guiskill\ndescription: GUI skill\n---\n\nGUI BODY\n"
+            )
+            # extra_skill_dirs receives the *parent* directory that contains
+            # the named skill subdirectory (same convention as _make_skill).
+            sess = Session(backend=FakeBackend(), extra_skill_dirs=[Path(tmp)],
+                           packages=[])
+            self.addCleanup(sess.close)
+            # The catalog the GUI renders/uses comes through MCP.
+            self.assertIn("guiskill", sess.skills)
+            self.assertIn("GUI skill", sess.system_prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
