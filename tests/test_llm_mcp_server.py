@@ -14,6 +14,8 @@
 """Tests for the standalone skills MCP server (in-memory, no subprocess)."""
 
 import asyncio
+import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -110,3 +112,30 @@ def test_packages_none_includes_all_entry_point_dirs(monkeypatch):
         )
         skills = discover_filtered_skills(packages=None)
         assert {"kept", "dropped"} <= set(skills)
+
+
+def test_module_launches_over_stdio():
+    """`python -m toksearch.llm.mcp` starts and serves resources via stdio."""
+    from mcp import ClientSession
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _make_skill(root, "alpha", "Alpha skill", "ALPHA BODY")
+        env = dict(os.environ)
+        env["TOKSEARCH_SKILL_DIRS"] = str(root)
+        env["TOKSEARCH_SKILL_PACKAGES"] = ""  # exclude entry-point skills
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "toksearch.llm.mcp"],
+            env=env,
+        )
+
+        async def go():
+            async with stdio_client(params) as (r, w):
+                async with ClientSession(r, w) as sess:
+                    await sess.initialize()
+                    listed = await sess.list_resources()
+                    return {str(x.uri) for x in listed.resources}
+        uris = asyncio.run(go())
+        assert "skill://alpha" in uris
