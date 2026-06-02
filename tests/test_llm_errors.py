@@ -52,5 +52,13 @@ class TestErrorHierarchy(unittest.TestCase):
             self.assertEqual(str(e), "503 service unavailable")
 
 
+class TestLLMSkillsError(unittest.TestCase):
+    def test_skills_error_is_llm_error(self):
+        from toksearch.llm.errors import LLMError, LLMSkillsError
+        self.assertTrue(issubclass(LLMSkillsError, LLMError))
+        with self.assertRaises(LLMError):
+            raise LLMSkillsError("boom")
+
+
 if __name__ == "__main__":
     unittest.main()
