@@ -13,15 +13,11 @@
 # limitations under the License.
 """toksearch.llm.mcp — standalone MCP server for documentation skills."""
 
-from .client import SkillMeta
-
-# TODO(Task 2/4): re-enable once SkillsMcpClient (Task 4) and build_server (Task 2) exist
-# from .client import SkillMeta, SkillsMcpClient
-# from .server import build_server
+from .client import SkillMeta, SkillsMcpClient
+from .server import build_server
 
 __all__ = [
     "SkillMeta",
-    # TODO(Task 2/4): re-enable
-    # "SkillsMcpClient",
-    # "build_server",
+    "SkillsMcpClient",
+    "build_server",
 ]
