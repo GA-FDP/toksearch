@@ -41,3 +41,7 @@ class LLMRateLimitError(LLMError):
 
 class LLMUserAbort(LLMError, KeyboardInterrupt):
     """User interrupted the conversation (e.g. ctrl-C between tool calls)."""
+
+
+class LLMSkillsError(LLMError):
+    """Raised when the skills MCP server cannot be spawned or queried."""
