@@ -144,20 +144,23 @@ def _print_session_header(command_name, session, *, file=sys.stderr):
 
 def do_query(args):
     session = build_session(args)
-    printer = _ToolPrinter(verbose=args.verbose)
-    _print_session_header("query", session)
     try:
-        result = session.send(
-            args.query,
-            on_text=lambda t: print(t, end="", flush=True),
-            on_tool_call=printer.tool_call,
-            on_tool_result=printer.tool_result,
-        )
-    except LLMError as e:
-        print(f"\nerror: {e}", file=sys.stderr)
-        sys.exit(1)
-    print()  # final newline
-    sys.exit(0 if result.stop_reason == "end_turn" else 2)
+        printer = _ToolPrinter(verbose=args.verbose)
+        _print_session_header("query", session)
+        try:
+            result = session.send(
+                args.query,
+                on_text=lambda t: print(t, end="", flush=True),
+                on_tool_call=printer.tool_call,
+                on_tool_result=printer.tool_result,
+            )
+        except LLMError as e:
+            print(f"\nerror: {e}", file=sys.stderr)
+            sys.exit(1)
+        print()  # final newline
+        sys.exit(0 if result.stop_reason == "end_turn" else 2)
+    finally:
+        session.close()
 
 
 # ----------------------------------------------------------------------
@@ -179,37 +182,40 @@ def do_chat(args):
                     open_browser=getattr(args, "open_browser", True))
         return
     session = build_session(args)
-    printer = _ToolPrinter(verbose=args.verbose)
-    _print_session_header("chat", session, file=sys.stdout)
-    print("Type /help for commands. Ctrl-D to exit.\n")
-    while True:
-        try:
-            line = input("you> ").strip()
-        except EOFError:
-            print()
-            return
-        if not line:
-            continue
-        if line == "/quit":
-            return
-        if line == "/help":
-            print(_HELP_TEXT)
-            continue
-        if line == "/reset":
-            session.reset()
-            print("(session cleared)")
-            continue
-        try:
-            session.send(
-                line,
-                on_text=lambda t: print(t, end="", flush=True),
-                on_tool_call=printer.tool_call,
-                on_tool_result=printer.tool_result,
-            )
-        except LLMError as e:
-            print(f"error: {e}", file=sys.stderr)
-            continue
-        print()  # spacer between turns
+    try:
+        printer = _ToolPrinter(verbose=args.verbose)
+        _print_session_header("chat", session, file=sys.stdout)
+        print("Type /help for commands. Ctrl-D to exit.\n")
+        while True:
+            try:
+                line = input("you> ").strip()
+            except EOFError:
+                print()
+                return
+            if not line:
+                continue
+            if line == "/quit":
+                return
+            if line == "/help":
+                print(_HELP_TEXT)
+                continue
+            if line == "/reset":
+                session.reset()
+                print("(session cleared)")
+                continue
+            try:
+                session.send(
+                    line,
+                    on_text=lambda t: print(t, end="", flush=True),
+                    on_tool_call=printer.tool_call,
+                    on_tool_result=printer.tool_result,
+                )
+            except LLMError as e:
+                print(f"error: {e}", file=sys.stderr)
+                continue
+            print()  # spacer between turns
+    finally:
+        session.close()
 
 
 # ----------------------------------------------------------------------
