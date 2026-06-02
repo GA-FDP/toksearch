@@ -334,6 +334,7 @@ New + updated tests, mirroring `tests/test_llm_*.py`:
    `list_resources()` results conveniently enough to carry the package name for
    the `packages` filter, or do we fall back to name-set filtering? (Resolve in
    the plan's first task by spiking the API.)
+   **Resolved (implementation):** the packages filter is applied server-side via the TOKSEARCH_SKILL_PACKAGES env var; resource meta is not used. URI scheme remains skill://<name>.
 2. Should `Session.close()` be surfaced in the CLI/GUI teardown explicitly, or
    is atexit reaping sufficient for interactive use? (Lean: atexit is enough;
    add explicit `close()` in the GUI's shutdown path if tests show orphans.)
