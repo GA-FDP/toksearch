@@ -26,6 +26,12 @@ from ..discovery import discover_skill_dirs
 from ..tools import Skill, discover_skills
 
 
+def _make_reader(body: str):
+    def _read() -> str:
+        return body
+    return _read
+
+
 def discover_filtered_skills(
     extra_dirs: list[Path] | None = None,
     packages: list[str] | None = None,
@@ -35,6 +41,10 @@ def discover_filtered_skills(
     ``packages`` (entry-point names) filters the entry-point dirs only;
     ``extra_dirs`` are always included.  ``packages=None`` means no filter;
     ``packages=[]`` excludes all entry-point dirs.
+
+    On a skill-name collision, ``extra_dirs`` take precedence over
+    entry-point dirs because they are appended last and ``discover_skills``
+    uses last-wins dict assignment.
     """
     pairs = discover_skill_dirs()  # [(entry_point_name, Path), ...]
     if packages is not None:
@@ -54,10 +64,6 @@ def build_server(
     skills = discover_filtered_skills(extra_dirs=extra_dirs, packages=packages)
 
     for name, skill in skills.items():
-        def _make_reader(body: str):
-            def _read() -> str:
-                return body
-            return _read
         mcp.resource(
             f"skill://{name}",
             name=name,

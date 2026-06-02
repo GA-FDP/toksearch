@@ -95,3 +95,18 @@ def test_packages_filter_applies_to_entry_point_dirs(monkeypatch):
         )
         skills = discover_filtered_skills(packages=["aaa"])
         assert set(skills) == {"kept"}
+
+
+def test_packages_none_includes_all_entry_point_dirs(monkeypatch):
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        keep = root / "keep_pkg"; keep.mkdir()
+        drop = root / "drop_pkg"; drop.mkdir()
+        _make_skill(keep, "kept", "Kept", "KEPT BODY")
+        _make_skill(drop, "dropped", "Dropped", "DROPPED BODY")
+        monkeypatch.setattr(
+            "toksearch.llm.mcp.server.discover_skill_dirs",
+            lambda: [("aaa", keep), ("bbb", drop)],
+        )
+        skills = discover_filtered_skills(packages=None)
+        assert {"kept", "dropped"} <= set(skills)
