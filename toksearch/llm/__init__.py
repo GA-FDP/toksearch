@@ -37,6 +37,7 @@ from .errors import (
     LLMBackendError,
     LLMRateLimitError,
     LLMUserAbort,
+    LLMSkillsError,
 )
 from .events import TextDelta, ToolCall, ToolResult, TurnComplete
 from .config import Config, load_config
@@ -53,6 +54,6 @@ __all__ = [
     "Preset", "BUILTIN_PRESETS", "resolve_preset",
     "TextDelta", "ToolCall", "ToolResult", "TurnComplete",
     "LLMError", "LLMConfigError", "LLMAuthError",
-    "LLMBackendError", "LLMRateLimitError", "LLMUserAbort",
+    "LLMBackendError", "LLMRateLimitError", "LLMUserAbort", "LLMSkillsError",
     "CORE_SKILLS_DIR",
 ]
