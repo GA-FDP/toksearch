@@ -250,11 +250,14 @@ class TestSessionSkillsViaMcp(unittest.TestCase):
             ]
             sess = Session(backend=FakeBackend(scripted_turns=turns),
                            extra_skill_dirs=[Path(tmp)], packages=[])
-            self.addCleanup(sess.close)
-            results = []
-            sess.send("read the demo skill",
-                      on_tool_result=lambda r: results.append(r.output))
-            self.assertTrue(any("DEMO BODY" in r for r in results))
+            try:
+                results = []
+                sess.send("read the demo skill",
+                          on_tool_result=lambda r: results.append(r.output))
+                self.assertTrue(results, "expected at least one tool result")
+                self.assertTrue(any("DEMO BODY" in r for r in results))
+            finally:
+                sess.close()
 
     def test_session_lists_and_reads_skill(self):
         from tempfile import TemporaryDirectory
