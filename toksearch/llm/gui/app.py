@@ -95,16 +95,22 @@ def _plotly_iframe(fig, height: int = 500) -> str:
     stanza zeroes the iframe body margin so plotly fills the whole
     iframe rather than leaving a default browser gutter.
 
-    plotly.js itself loads from the CDN so the iframe payload stays
-    small (just chart data + a ``<script src="https://cdn.plot.ly/...">``
-    reference); the CDN script caches across charts.
+    plotly.js is embedded **inline** in the iframe (``include_plotlyjs=True``)
+    rather than referenced from the CDN. FDP commonly runs on air-gapped /
+    network-restricted lab compute where ``cdn.plot.ly`` is unreachable; a CDN
+    reference there silently fails to load plotly.js and the figure renders
+    blank (while matplotlib, a static PNG, still works). Inlining makes each
+    figure self-contained and offline-correct. Trade-off: ~several MB of
+    plotly.js per figure — fine over localhost, but a chat with many plots
+    grows the page; a future optimization could serve plotly.js once from the
+    Gradio static route.
     """
     import html as _html
     # Force autosize so the chart honors the iframe width rather than
     # plotly's default fixed pixel width.
     fig.update_layout(autosize=True)
     inner = fig.to_html(
-        include_plotlyjs="cdn",
+        include_plotlyjs=True,
         full_html=True,
         config={"responsive": True},
         default_height="100%",
