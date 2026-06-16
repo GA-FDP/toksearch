@@ -153,6 +153,16 @@ class TestChatFn(unittest.TestCase):
         self.assertIn("srcdoc=", html)
         # The escaped srcdoc payload should reference plotly.
         self.assertIn("plotly", html.lower())
+        # Offline-correct: the plotly.js *library* must be embedded inline,
+        # NOT loaded from the CDN. FDP runs on air-gapped/network-restricted
+        # compute where cdn.plot.ly is unreachable and a CDN-referenced
+        # figure would render blank. The embedded library's version banner
+        # ("plotly.js vX.Y.Z") is present only when inlined, and the payload
+        # is correspondingly large. (Note: the library *source* itself
+        # mentions cdn.plot.ly for topojson/image-export defaults, so we
+        # can't simply assert the substring is absent.)
+        self.assertIn("plotly.js v", html)
+        self.assertGreater(len(html), 1_000_000)
         # The iframe must carry the fullscreen permission AND
         # contain the injected fullscreen button + script.
         self.assertIn('allow="fullscreen"', html)
