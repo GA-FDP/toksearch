@@ -32,10 +32,10 @@ def _heavy_modules_after(snippet):
     code = (
         f"{snippet}\n"
         "import sys, json\n"
+        f"HEAVY = {HEAVY_PREFIXES!r}\n"
         "loaded = sorted(\n"
         "    m for m in sys.modules\n"
-        "    if m == 'ray' or m == 'pyspark'\n"
-        "    or m.startswith('ray.') or m.startswith('pyspark.')\n"
+        "    if any(m == p or m.startswith(p + '.') for p in HEAVY)\n"
         ")\n"
         "print(json.dumps(loaded))\n"
     )
