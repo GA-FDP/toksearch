@@ -20,6 +20,8 @@ data in a series of steps, including both predefined methods and arbitrary
 user-defined functions.
 """
 
+from __future__ import annotations
+
 import os
 import copy
 import importlib
@@ -34,7 +36,7 @@ import numpy as np
 import itertools
 import xarray as xr
 import multiprocessing
-from typing import List, Optional, Callable, Union, Type, Iterable
+from typing import List, Optional, Callable, Union, Type, Iterable, TYPE_CHECKING
 
 
 from ..utilities.utilities import (
@@ -62,12 +64,20 @@ from ..record.record_set import RecordSet
 
 
 from ..backend.multiprocessing import MultiprocessingRecordSet, MultiprocessingConfig
-from ..backend.ray import RayRecordSet, RayConfig
-
-from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
-from pyspark.context import SparkContext
-
 from ..backend.serial import SerialRecordSet
+
+# Ray and Spark are heavy optional backends: Ray alone adds ~2.6s to
+# `import toksearch` (via its jsonschema -> rfc3987 dependency chain), and
+# pyspark ~0.3s. They are imported lazily inside compute_ray()/compute_spark()
+# so the common serial/multiprocessing workflows don't pay that cost. These
+# TYPE_CHECKING-only imports keep the method annotations resolvable for type
+# checkers and IDEs without importing anything at runtime. Any method that
+# uses one of these symbols at runtime must repeat the import locally in its
+# body (see compute_ray/compute_spark).
+if TYPE_CHECKING:
+    from ..backend.ray import RayRecordSet, RayConfig
+    from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
+    from pyspark.context import SparkContext
 
 from .pipeline_source import PipelineSource
 
@@ -393,6 +403,8 @@ class Pipeline:
         Returns:
             RayRecordSet: The record set
         """
+        from ..backend.ray import RayRecordSet, RayConfig
+
         config = RayConfig(
             numparts=numparts,
             placement_group_func=placement_group_func,
@@ -420,6 +432,8 @@ class Pipeline:
         Returns:
             SparkRecordSet: The record set
         """
+        from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
+
         config = ToksearchSparkConfig(sc=sc, numparts=numparts, cache=cache)
         return self.compute(SparkRecordSet, config=config)
 
