@@ -44,13 +44,28 @@ class AnthropicBackend(_ToolLoopBackend):
         self._max_tokens = max_tokens
         self._client = None  # lazy; tests inject a mock
 
+    # The SDK raises TypeError ("Could not resolve authentication method")
+    # when no key is available — at construction in older versions, at
+    # request time in newer ones. Both sites translate it via this helper so
+    # the CLI prints remedies instead of a traceback.
+    @staticmethod
+    def _missing_key_error(e: TypeError) -> LLMAuthError:
+        return LLMAuthError(
+            "No Anthropic API key found. Either export ANTHROPIC_API_KEY, "
+            "set anthropic_api_key in the [llm] table of ~/.fdp/config.toml, "
+            "or use --backend claude-max to authenticate via the claude CLI."
+        )
+
     def _build_client(self):
         kwargs = {}
         if self._api_key is not None:
             kwargs["api_key"] = self._api_key
         if self._base_url is not None:
             kwargs["base_url"] = self._base_url
-        self._client = anthropic.Anthropic(**kwargs)
+        try:
+            self._client = anthropic.Anthropic(**kwargs)
+        except TypeError as e:
+            raise self._missing_key_error(e) from e
         return self._client
 
     def _ensure_client(self):
@@ -119,6 +134,8 @@ class AnthropicBackend(_ToolLoopBackend):
                 messages=self._history_to_native(history),
                 tools=[self._spec_to_native(t) for t in tools],
             )
+        except TypeError as e:
+            raise self._missing_key_error(e) from e
         except anthropic.AuthenticationError as e:
             raise LLMAuthError(
                 "Anthropic auth failed. Set ANTHROPIC_API_KEY or pass "
