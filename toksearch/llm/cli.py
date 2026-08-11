@@ -35,9 +35,10 @@ from .session import Session
 def build_session(args) -> Session:
     """Construct a Session from parsed CLI args."""
     cfg = load_config()
-    # Default backend is "anthropic" in PR 1; PR 4 will register the "amsc"
-    # preset (via toksearch_d3d entry point) and the default will move to
-    # "amsc" to preserve the existing fdp query behavior for GA-on-prem users.
+    # The default backend is deliberately deployment-level, not
+    # device-driven (fdp decoupled backend choice from the device catalog):
+    # flag > $FDP_LLM_BACKEND/config.toml > built-in "anthropic". Sites
+    # wanting a different default (e.g. amsc) set it in config.toml.
     backend_name = args.backend or cfg.backend or "anthropic"
     preset = resolve_preset(backend_name, cfg)
     backend_cls = get_backend_class(preset.backend)
