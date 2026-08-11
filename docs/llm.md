@@ -65,9 +65,14 @@ DIII-D environment, the `fdp` script wraps the same commands with the
 FDP environment pre-configured (XRootD plugin, MDSplus tree paths, etc.):
 
 ```bash
-fdp query "Fetch ip for shot 200000 and report peak in MA."  # default: --backend amsc
+fdp query "Fetch ip for shot 200000 and report peak in MA."
 fdp chat                                                       # interactive
 ```
+
+The backend default is deployment-level, not device-driven: `--backend` →
+`$FDP_LLM_BACKEND` → `~/.fdp/config.toml [llm].backend` → built-in
+`anthropic`. GA on-prem users who want AmSC by default should set
+`backend = "amsc"` in `config.toml` (or `export FDP_LLM_BACKEND=amsc`).
 
 ### Python
 
