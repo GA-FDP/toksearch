@@ -48,7 +48,7 @@ requirements:
     - openai >=1.50
     - claude-agent-sdk >=0.2
     - gradio >=4
-    - mcp >=1.23
+    - mcp >=1.23,<2
     - matplotlib
     - plotly
     - python-kaleido
