@@ -48,6 +48,9 @@ requirements:
     - openai >=1.50
     - claude-agent-sdk >=0.2
     - gradio >=4
+    # toksearch's own mcp code runs under 1.x and 2.x; the <2 ceiling is
+    # held only by claude-agent-sdk (create_sdk_mcp_server uses the 1.x
+    # lowlevel API). Relax once claude-agent-sdk supports mcp 2.
     - mcp >=1.23,<2
     - matplotlib
     - plotly

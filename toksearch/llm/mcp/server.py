@@ -20,7 +20,13 @@ resource, with a ``read_skill`` tool for clients that don't read resources.
 
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+try:
+    # mcp 1.x ships the high-level server as vendored FastMCP.
+    from mcp.server.fastmcp import FastMCP as _McpServer
+except ImportError:
+    # mcp >= 2.0 removes mcp.server.fastmcp; the renamed MCPServer keeps
+    # the same resource()/tool()/run() surface.
+    from mcp.server import MCPServer as _McpServer
 
 from ..discovery import discover_skill_dirs
 from ..tools import Skill, discover_skills
@@ -58,9 +64,9 @@ def discover_filtered_skills(
 def build_server(
     extra_dirs: list[Path] | None = None,
     packages: list[str] | None = None,
-) -> FastMCP:
-    """Build a FastMCP server exposing discovered skills as resources + tool."""
-    mcp = FastMCP("toksearch-skills")
+) -> _McpServer:
+    """Build an MCP server exposing discovered skills as resources + tool."""
+    mcp = _McpServer("toksearch-skills")
     skills = discover_filtered_skills(extra_dirs=extra_dirs, packages=packages)
 
     for name, skill in skills.items():
