@@ -7347,14 +7347,14 @@ packages:
   timestamp: 1764695075374
 - pypi: ./
   name: toksearch
-  version: 2.7.2+0.gd93cff5.dirty
-  sha256: 191e44f87fbe93f8bc9c0b7425df83d3a8fdb40b1efe03f0f6eb3727392abda2
+  version: 2.8.1+20.g67d385b
+  sha256: cb594b0acae3aee03eaed1ba38aeef128969e335e0b77dbbc20031f8389f808b
   requires_dist:
   - anthropic>=0.34 ; extra == 'llm'
   - openai>=1.50 ; extra == 'llm'
   - matplotlib ; extra == 'llm'
   - claude-agent-sdk>=0.2 ; extra == 'llm'
-  - mcp>=1.23 ; extra == 'llm'
+  - mcp>=1.23,<2 ; extra == 'llm'
 - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.0-pyhcf101f3_0.conda
   sha256: 62940c563de45790ba0f076b9f2085a842a65662268b02dd136a8e9b1eaf47a8
   md5: 72e780e9aa2d0a3295f59b1874e3768b
