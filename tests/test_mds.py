@@ -176,14 +176,25 @@ class TestMdsTreePath(unittest.TestCase):
 class TestMdsSignal(unittest.TestCase):
 
     def test_remote_location_grabbed_from_environment(self):
+        # A URL in TOKSEARCH_MDS_DEFAULT is a server, not a tree path. It used
+        # to become a treepath of the literal string "remote://fake.gat.com",
+        # which no tree can be opened from -- so setting the environment
+        # variable to a server silently produced a local signal that could only
+        # fail later.
         server = "fake.gat.com"
         default_location = f"remote://{server}"
 
         with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
             sig = MdsSignal("blah", "efit01")
-        self.assertIsInstance(sig.sig, MdsLocalSignal)
-        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
-        self.assertEqual(sig.sig.treepath.paths["efit01"], default_location)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, server)
+
+    def test_fdp_location_grabbed_from_environment(self):
+        url = "fdp://origin.example.org:8443/mdsip"
+        with set_env("TOKSEARCH_MDS_DEFAULT", url):
+            sig = MdsSignal("blah", "efit01")
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
 
     def test_local_location_grabbed_from_environment(self):
         default_location = "/some/fake/path"
@@ -219,6 +230,46 @@ class TestMdsSignal(unittest.TestCase):
             sig = MdsSignal("blah", "efit01", location=None)
         self.assertIsInstance(sig.sig.treepath, MdsTreePath)
         self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+    def test_fdp_location_is_remote_and_keeps_the_whole_url(self):
+        # The scheme selects the MDSplus transport and the path is the relay's
+        # prefix on the origin, so unlike 'remote://' neither may be dropped.
+        # Before this was handled, urlparse's path was taken as a treepath and
+        # the host was discarded: the signal became a LOCAL read of "/mdsip".
+        url = "fdp://origin.example.org:8443/mdsip"
+        sig = MdsSignal("blah", "efit01", location=url)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
+
+    def test_fdp_location_without_a_path(self):
+        url = "fdp://origin.example.org:8443"
+        sig = MdsSignal("blah", "efit01", location=url)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
+
+    def test_other_mdsplus_transport_schemes_are_remote(self):
+        for url in ("tcp://a.gat.com:8000", "tcpv6://a.gat.com", "udt://a.gat.com"):
+            with self.subTest(url=url):
+                sig = MdsSignal("blah", "efit01", location=url)
+                self.assertIsInstance(sig.sig, MdsRemoteSignal)
+                self.assertEqual(sig.sig.server, url)
+
+    def test_unknown_scheme_raises_rather_than_becoming_a_treepath(self):
+        # Silently dropping the host turns a mistyped server into a local read
+        # that fails much later, somewhere less informative.
+        for url in ("pelican://osg-htc.org:443/fdp-d3d/x", "http://example.org/x"):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    MdsSignal("blah", "efit01", location=url)
+
+    def test_host_double_colon_path_is_a_treepath(self):
+        # urlparse reads 'atlas.gat.com::/trees' as scheme 'atlas.gat.com'
+        # (dots are legal in a scheme), so this must be settled before any
+        # scheme dispatch or it looks like a server.
+        location = "atlas.gat.com::/trees"
+        sig = MdsSignal("blah", "efit01", location=location)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+        self.assertEqual(sig.sig.treepath, location)
 
 
 class GenericTestMdsSignal(ABC):

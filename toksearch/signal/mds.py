@@ -26,6 +26,12 @@ the MdsRemoteSignal class is used to fetch data from a remote server. The
 MdsSignal class determines which class to use based on the location argument
 provided to the constructor.
 
+A location is read as a server when it carries a URL scheme, and as a tree path
+otherwise. 'remote://host' names a server reached over MDSplus's default
+transport, while a scheme in MDSIP_TRANSPORT_SCHEMES -- notably 'fdp://', which
+reaches an FDP Pelican origin over HTTPS -- names the transport itself and is
+passed to MDSplus.Connection whole.
+
 Behind the scenes, the MdsLocalSignal uses the MdsTreeRegistry class to manage
 MDSplus trees on a local disk. The MdsRemoteSignal uses the MdsConnectionRegistry
 class to manage connections to remote servers.
@@ -51,6 +57,24 @@ from .signal import Signal
 from ..utilities.utilities import set_env
 
 _log = logging.getLogger(__name__)
+
+
+# URL schemes that name an MDSplus *transport*, so a location using one is a
+# connection string rather than a tree path.
+#
+# MDSplus picks the transport from the scheme itself: parse_host() splits
+# <scheme>://<host>, and LoadIo() dlopens "libMdsIp" + SCHEME.upper() + ".so"
+# and resolves the symbol Io. 'fdp' comes from the mdsip-fdp package
+# (GA-FDP/xrdoss-mdsplus) and tunnels mdsip over a Pelican origin's HTTPS port;
+# the rest ship with MDSplus.
+#
+# This is an allowlist rather than "any scheme" because LoadIo does not report
+# an unknown scheme as an error -- it silently returns the ssh-tunnel routines.
+# A typo would therefore try to ssh somewhere instead of failing, and a tree
+# path that happens to look like a URL would be quietly misread as a server.
+MDSIP_TRANSPORT_SCHEMES = frozenset(
+    {"fdp", "tcp", "tcpv6", "udt", "udtv6", "gsi", "ssh"}
+)
 
 
 def _dim_of_expression(expression, dim=0):
@@ -229,9 +253,22 @@ class MdsSignal(Signal):
                 also specify a remote server by specifying the location as
                 'remote://some.server'
 
+                - If a URL with an MDSplus transport scheme is given, it is used
+                as a connection string in full. In particular 'fdp://' reaches an
+                FDP Pelican origin over HTTPS, e.g.
+                'fdp://fdp-d3d-origin.nationalresearchplatform.org:8443/mdsip',
+                where the path is the relay's prefix on that origin. This
+                requires the mdsip-fdp package, which supplies the transport
+                MDSplus loads for the scheme. See MDSIP_TRANSPORT_SCHEMES.
+
                 - If an MdsTreePath object is provided, then the signal data is
                 fetched from a local disk according to the path specifications in
                 the MdsTreePath object.
+
+                A location carrying a scheme that is none of the above raises
+                ValueError rather than being read as a tree path, since dropping
+                the host silently would otherwise turn a mistyped server into a
+                local read.
             dims: See documentation for the Signal class. Defaults to ('times',)
             data_order: See documentation for the Signal class. Defaults to the same
                 as dims.
@@ -266,6 +303,14 @@ class MdsSignal(Signal):
 
                 default_location = os.getenv("TOKSEARCH_MDS_DEFAULT", None)
                 if default_location:
+                    if "://" in default_location:
+                        # A connection string, not a tree path. Dispatch it the
+                        # same way an explicit location= would be, so that
+                        # pointing a whole workflow at a server through the
+                        # environment behaves like pointing one signal at it.
+                        return cls.create_local_or_remote_signal(
+                            expression, treename, default_location, **kwargs
+                        )
                     path_kwargs = {treename: default_location}
 
             location = MdsTreePath(**path_kwargs)
@@ -274,21 +319,42 @@ class MdsSignal(Signal):
         if isinstance(location, MdsTreePath):
             return MdsLocalSignal(expression, treename, treepath=location, **kwargs)
 
+        # Anything without '://' is a tree path, not a URL, and is passed
+        # through untouched. That covers plain directories and MDSplus's own
+        # 'host::' / 'host::/path' syntax -- which must be settled before
+        # urlparse gets involved, because it reads 'abc::' as scheme 'abc' and
+        # 'atlas.gat.com::/trees' as scheme 'atlas.gat.com' (dots are legal in
+        # a scheme), either of which would otherwise be mistaken for a server.
+        if "://" not in location:
+            return MdsLocalSignal(
+                expression, treename, treepath=(location or None), **kwargs
+            )
+
         parsed_location = urlparse(location)
-        is_remote = parsed_location.scheme == "remote"
+        scheme = parsed_location.scheme.lower()
 
-        if is_remote:
-            server = parsed_location.netloc
-            sig = MdsRemoteSignal(expression, treename, server, **kwargs)
-        else:
-            if location.endswith("::"):
-                treepath = location
-            else:
-                temp_treepath = parsed_location.path
-                treepath = None if temp_treepath == "" else temp_treepath
-            sig = MdsLocalSignal(expression, treename, treepath=treepath, **kwargs)
+        if scheme == "remote":
+            # toksearch's own marker, not an MDSplus scheme: connect to this
+            # server over whatever transport MDSplus defaults to. The scheme is
+            # dropped and only the host is passed on.
+            return MdsRemoteSignal(
+                expression, treename, parsed_location.netloc, **kwargs
+            )
 
-        return sig
+        if scheme in MDSIP_TRANSPORT_SCHEMES:
+            # An MDSplus connection string. The WHOLE url goes to
+            # MDSplus.Connection: the scheme selects the transport, and the path
+            # is meaningful to it -- for fdp:// it is the relay's prefix on the
+            # origin, e.g. fdp://origin.example.org:8443/mdsip -- so neither the
+            # scheme nor the path may be dropped the way 'remote://' drops them.
+            return MdsRemoteSignal(expression, treename, location, **kwargs)
+
+        raise ValueError(
+            f"Unrecognized scheme {scheme!r} in MdsSignal location {location!r}. "
+            f"Use 'remote://<server>' for a plain mdsip server, one of "
+            f"{sorted(MDSIP_TRANSPORT_SCHEMES)} for a specific MDSplus "
+            f"transport, or a path with no scheme for a tree path."
+        )
 
 
     def gather(self, shot):
@@ -370,7 +436,10 @@ class MdsRemoteSignal(Signal):
         Arguments:
             expression: The tdi expression to fetch data from
             treename: The name of the tree to fetch from
-            server: The name of the remote server (e.g. atlas.gat.com)
+            server: What to hand MDSplus.Connection. Either a bare host
+                (e.g. atlas.gat.com), which uses MDSplus's default transport, or
+                a full connection URL whose scheme selects one
+                (e.g. fdp://origin.example.org:8443/mdsip).
             dims: See documentation for the Signal class. Defaults to ('times',)
             data_order: See documentation for the Signal class. Defaults to the same
                 as dims.

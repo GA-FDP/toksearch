@@ -6,6 +6,11 @@ platforms = ["linux-64"]
 [dependencies]
 python = ">=3.11,<3.13"
 mdsplus-xrdcl = ">=1,<2"
+# Supplies libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
+# A dev/test dependency only, deliberately NOT in the conda recipe's run
+# requirements: MdsSignal's fdp:// support is an optional capability, and
+# toksearch is used at sites that have no FDP origin to reach.
+mdsip-fdp = ">=0.1.0"
 numpy = ">=1.20, <2"
 pymssql = "*"
 ray-core = "*"
