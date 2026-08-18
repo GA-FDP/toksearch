@@ -396,9 +396,23 @@ class MdsConnectionRegistry(object):
         return MdsConnectionRegistry.__instance
 
     def __getstate__(self):
-        _dict = self.__dict__
-        _dict["_connection_map"] = {}
-        return _dict
+        # MDSplus connections can't be pickled, and whoever unpickles this has
+        # to dial its own anyway. Copy before clearing: self.__dict__ IS the
+        # live singleton's dict, so blanking the map in place would drop the
+        # connections belonging to the process doing the pickling.
+        state = dict(self.__dict__)
+        state["_connection_map"] = {}
+        return state
+
+    def __setstate__(self, state):
+        # __new__ returns the receiving process's singleton, so restoring state
+        # wholesale would clobber connections that process has already opened.
+        # Everything else is restored; the connection map stays local.
+        state = dict(state)
+        state.pop("_connection_map", None)
+        existing = self.__dict__.get("_connection_map")
+        self.__dict__.update(state)
+        self.__dict__["_connection_map"] = {} if existing is None else existing
 
     def connect(self, server):
         conn = self._connection_map.get(server, None)
@@ -561,9 +575,20 @@ class MdsTreeRegistry(object):
         return MdsTreeRegistry.__instance
 
     def __getstate__(self):
-        _dict = self.__dict__
-        _dict["_tree_map"] = {}
-        return _dict
+        # Open trees can't be pickled. As with MdsConnectionRegistry, copy
+        # before clearing so serializing the registry doesn't close over the
+        # trees the pickling process still has open.
+        state = dict(self.__dict__)
+        state["_tree_map"] = {}
+        return state
+
+    def __setstate__(self, state):
+        # The receiving process keeps whatever trees it already had open.
+        state = dict(state)
+        state.pop("_tree_map", None)
+        existing = self.__dict__.get("_tree_map")
+        self.__dict__.update(state)
+        self.__dict__["_tree_map"] = {} if existing is None else existing
 
     def open_tree(self, treename, shot, treepath=None):
         tree = self._get_tree(treename, shot)
