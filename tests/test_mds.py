@@ -820,9 +820,13 @@ class _FakeConnection:
         self.gets = []
         self.executes = 0
         self.opened = []
+        self.closes = 0
 
     def openTree(self, treename, shot):
         self.opened.append((treename, shot))
+
+    def closeAllTrees(self):
+        self.closes += 1
 
     def get(self, expression):
         self.gets.append(expression)
@@ -846,10 +850,15 @@ class TestMdsRemoteBatchedGather(unittest.TestCase):
             dims=dims, fetch_units=fetch_units,
         )
 
+    def tearDown(self):
+        MdsConnectionRegistry()._connection_map.pop("fake.host:9999", None)
+
     def _connection(self, sig, **kwargs):
         values = {expr: f"value-of-{expr}" for _, _, expr in sig._gather_plan()}
         connection = _FakeConnection(values, **kwargs)
-        sig.connect = lambda: connection
+        # _do_gather asks the registry for its connection, so that is where a
+        # stand-in has to go.
+        MdsConnectionRegistry()._connection_map[sig.server] = connection
         return connection
 
     def test_plan_covers_data_then_dims_then_units(self):
@@ -920,3 +929,92 @@ class TestMdsRemoteBatchedGather(unittest.TestCase):
         sig._do_gather(1234)
         self.assertEqual(connection.executes, 1)
         self.assertEqual(len(connection.gets), 8)
+
+
+class TestMdsRemoteOpenTreeDedup(unittest.TestCase):
+    """openTree only sets the connection's current tree, and signals sharing a
+    server share one connection -- so opening per signal costs a round trip
+    per signal for a tree the previous one just opened.
+    """
+
+    SERVER = "fake.host:9999"
+
+    def tearDown(self):
+        MdsConnectionRegistry()._connection_map.pop(self.SERVER, None)
+
+    def _signals(self, expressions, treename="efit01"):
+        return [
+            MdsRemoteSignal(expression, treename, self.SERVER,
+                            dims=("times",), fetch_units=False)
+            for expression in expressions
+        ]
+
+    def _install(self, sigs):
+        values = {
+            expression: f"value-of-{expression}"
+            for sig in sigs
+            for _, _, expression in sig._gather_plan()
+        }
+        connection = _FakeConnection(values)
+        MdsConnectionRegistry()._connection_map[self.SERVER] = connection
+        return connection
+
+    def test_signals_sharing_a_tree_open_it_once(self):
+        sigs = self._signals([r"\a", r"\b", r"\c"])
+        connection = self._install(sigs)
+
+        for sig in sigs:
+            sig._do_gather(1234)
+
+        self.assertEqual(connection.opened, [("efit01", 1234)])
+
+    def test_a_new_shot_reopens(self):
+        sigs = self._signals([r"\a", r"\b"])
+        connection = self._install(sigs)
+
+        for shot in (1234, 1235):
+            for sig in sigs:
+                sig._do_gather(shot)
+
+        self.assertEqual(connection.opened,
+                         [("efit01", 1234), ("efit01", 1235)])
+
+    def test_a_different_tree_reopens(self):
+        first = self._signals([r"\a"], treename="efit01")[0]
+        second = self._signals([r"\b"], treename="d3d")[0]
+        connection = self._install([first, second])
+
+        first._do_gather(1234)
+        second._do_gather(1234)
+        first._do_gather(1234)
+
+        self.assertEqual(
+            connection.opened,
+            [("efit01", 1234), ("d3d", 1234), ("efit01", 1234)],
+        )
+
+    def test_cleanup_shot_means_the_next_fetch_reopens(self):
+        sig = self._signals([r"\a"])[0]
+        connection = self._install([sig])
+
+        sig._do_gather(1234)
+        sig.cleanup_shot(1234)
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.closes, 1)
+        self.assertEqual(connection.opened,
+                         [("efit01", 1234), ("efit01", 1234)])
+
+    def test_a_failed_fetch_does_not_leave_the_tree_assumed_open(self):
+        # If a fetch fails the tree may be gone, so the next signal must not
+        # skip its open on the strength of the failed one.
+        sigs = self._signals([r"\a", r"\b"])
+        connection = self._install(sigs)
+        connection.fail.add(r"\a")
+
+        with self.assertRaises(_FakeMdsError):
+            sigs[0]._do_gather(1234)
+        sigs[1]._do_gather(1234)
+
+        self.assertEqual(connection.opened,
+                         [("efit01", 1234), ("efit01", 1234)])
