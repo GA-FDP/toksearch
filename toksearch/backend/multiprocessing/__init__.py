@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import atexit
 import os
 
 from dataclasses import dataclass
@@ -26,12 +27,50 @@ from ...signal.signal import SignalRegistry
 
 DEFAULT_NUM_WORKERS = max(os.cpu_count() // 2, 1)
 
+_cleanup_registered = False
+
+
+def _cleanup_signals():
+    """Release whatever signals this process still has registered.
+
+    Best effort: this runs during interpreter shutdown, where raising would
+    do nothing but add noise on the way out.
+    """
+    try:
+        SignalRegistry().cleanup()
+    except Exception:
+        pass
+
+
+def _register_cleanup():
+    """Arrange for signal cleanup to run once, when this process exits.
+
+    Signal.cleanup() releases what is shared between shots -- for a remote
+    MDSplus signal, the server connection. joblib offers no end-of-work hook
+    inside a worker, and cleanup() must not be called per record or per batch:
+    loky reuses a worker, and its connection, across batches and across whole
+    pipeline runs, so disconnecting at either boundary would trade a large
+    reconnect cost for nothing.
+
+    Process exit is the last moment those resources are still ours to release,
+    and loky shuts its workers down cleanly rather than killing them, so an
+    atexit handler registered here does run. Without this, nothing in a worker
+    ever called cleanup() and the connection was simply dropped when the
+    process died.
+    """
+    global _cleanup_registered
+    if not _cleanup_registered:
+        _cleanup_registered = True
+        atexit.register(_cleanup_signals)
+
 
 class _Mapper:
     def __init__(self, operations):
         self.operations = operations
 
     def __call__(self, record):
+        _register_cleanup()
+
         # joblib unpickles a fresh copy of the operations -- and so fresh Signal
         # objects -- for every batch it dispatches. Signals register themselves
         # with the process-global SignalRegistry when fetched, and
