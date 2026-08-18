@@ -81,6 +81,11 @@ def _dim_of_expression(expression, dim=0):
     return "dim_of({}, {})".format(expression, dim)
 
 
+# Set on a Connection to record the tree it currently has open. Kept on the
+# connection so it dies with it -- see MdsConnectionRegistry.open_tree.
+_CURRENT_TREE = "_toksearch_current_tree"
+
+
 class _BatchedGatherFailed(Exception):
     """Internal: the batched fetch was unusable, so fall back to one at a time.
 
@@ -439,6 +444,39 @@ class MdsConnectionRegistry(object):
             self._connection_map[server] = conn
         return conn
 
+    def open_tree(self, server, treename, shot):
+        """Open a tree on the server's connection, if it isn't already open.
+
+        Signals sharing a server share a connection, and openTree only sets
+        that connection's current tree. Several signals reading one tree --
+        the ordinary case in a pipeline -- would otherwise each spend a round
+        trip opening what the previous one just opened.
+
+        The marker lives on the connection rather than on this registry so it
+        cannot outlive what it describes: connections are deliberately left
+        out of the registry's pickled state, so a marker kept here could
+        travel to a process whose connection has none of those trees open.
+        """
+        connection = self.connect(server)
+        if getattr(connection, _CURRENT_TREE, None) != (treename, shot):
+            connection.openTree(treename, shot)
+            setattr(connection, _CURRENT_TREE, (treename, shot))
+        return connection
+
+    def close_all_trees(self, server):
+        """Close every tree open on the server's connection."""
+        connection = self.connect(server)
+        try:
+            connection.closeAllTrees()
+        finally:
+            setattr(connection, _CURRENT_TREE, None)
+
+    def invalidate_open_tree(self, server):
+        """Stop assuming anything is open on this server's connection."""
+        connection = self._connection_map.get(server, None)
+        if connection is not None:
+            setattr(connection, _CURRENT_TREE, None)
+
     def disconnect(self, server):
         """Drop the cached connection for a server and close it.
 
@@ -615,18 +653,24 @@ class MdsRemoteSignal(Signal):
         return self._assemble(plan, values)
 
     def _do_gather(self, shot):
-        connection = self.connect()
-        connection.openTree(self.treename, shot)
+        registry = MdsConnectionRegistry()
+        connection = registry.open_tree(self.server, self.treename, shot)
 
         plan = self._gather_plan()
 
-        if self._use_getmany:
-            try:
-                return self._gather_batched(connection, plan)
-            except _BatchedGatherFailed:
-                pass
+        try:
+            if self._use_getmany:
+                try:
+                    return self._gather_batched(connection, plan)
+                except _BatchedGatherFailed:
+                    pass
 
-        return self._gather_serial(connection, plan)
+            return self._gather_serial(connection, plan)
+        except Exception:
+            # Whatever went wrong, the tree may no longer be open. Don't let
+            # the next signal skip its openTree on the strength of this one.
+            registry.invalidate_open_tree(self.server)
+            raise
 
 
     def cleanup_shot(self, shot):
@@ -636,8 +680,7 @@ class MdsRemoteSignal(Signal):
             shot (int): The shot number to close the tree for
         """
         try:
-            connection = self.connect()
-            connection.closeAllTrees()
+            MdsConnectionRegistry().close_all_trees(self.server)
         except:
             pass
 
