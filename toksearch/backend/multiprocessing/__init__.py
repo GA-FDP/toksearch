@@ -21,6 +21,7 @@ from joblib import Parallel, delayed
 from ...record.record_set import RecordSet
 from ...record import Record
 from ...pipeline.pipeline_funcs import _map_single, _map_multiple
+from ...signal.signal import SignalRegistry
 
 
 DEFAULT_NUM_WORKERS = max(os.cpu_count() // 2, 1)
@@ -31,6 +32,21 @@ class _Mapper:
         self.operations = operations
 
     def __call__(self, record):
+        # joblib unpickles a fresh copy of the operations -- and so fresh Signal
+        # objects -- for every batch it dispatches. Signals register themselves
+        # with the process-global SignalRegistry when fetched, and
+        # cleanup_shot() sweeps everything the registry holds once per record.
+        # Without this reset the registry gains a set of signals per batch for
+        # the life of the worker, so the per-record sweep grows without bound.
+        # Where cleanup_shot() is a network round trip (MdsRemoteSignal issues
+        # closeAllTrees) that makes a run cost quadratic in the shot count.
+        #
+        # Resetting scopes the registry to the record being mapped, matching the
+        # scoping _map_multiple gets from its trailing cleanup(). reset() only
+        # drops references; it does not call Signal.cleanup(), so shared
+        # resources like the MdsConnectionRegistry connection survive and are
+        # still reused from record to record.
+        SignalRegistry().reset()
         return _map_single(record, self.operations)
 
 
