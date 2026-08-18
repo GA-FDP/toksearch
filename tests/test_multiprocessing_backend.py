@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest import mock
 
+import toksearch.backend.multiprocessing as mp_backend
 from toksearch.backend.multiprocessing import _Mapper
 from toksearch.pipeline.pipeline_funcs import _SafeFetch
 from toksearch.record import Record
@@ -103,3 +109,96 @@ class TestMapperRegistryScoping(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Run as its own process, because the behaviour under test only happens when
+# one exits: the workers must release what they hold before they go.
+_PIPELINE_SCRIPT = """
+import os
+import sys
+
+from toksearch import Pipeline
+from toksearch.signal.mock_signal import MockSignal
+
+MARKS = sys.argv[1]
+
+
+class MarkerSignal(MockSignal):
+    def cleanup(self):
+        path = os.path.join(MARKS, "cleanup-%d" % os.getpid())
+        open(path, "w").close()
+
+
+if __name__ == "__main__":
+    open(os.path.join(MARKS, "parent-%d" % os.getpid()), "w").close()
+    pipe = Pipeline(list(range(40)))
+    pipe.fetch("sig", MarkerSignal())
+    pipe.keep([])
+    pipe.compute_multiprocessing(num_workers=2)
+"""
+
+
+class TestWorkerCleanup(unittest.TestCase):
+    """cleanup() has to actually run in the workers.
+
+    Nothing on this path used to call it. The backend dispatches _map_single
+    per record, which only calls cleanup_shot; _map_multiple, which does the
+    cleanup(), is used by the other backends. Whatever a worker held -- a
+    remote MDSplus connection above all -- was just dropped when it died.
+    """
+
+    def test_cleanup_runs_in_the_workers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marks = os.path.join(tmp, "marks")
+            os.makedirs(marks)
+            script = os.path.join(tmp, "run_pipeline.py")
+            with open(script, "w") as fh:
+                fh.write(_PIPELINE_SCRIPT)
+
+            subprocess.run([sys.executable, script, marks],
+                           check=True, timeout=600)
+
+            written = os.listdir(marks)
+            parents = [f for f in written if f.startswith("parent-")]
+            cleaned = [f for f in written if f.startswith("cleanup-")]
+            parent_pid = parents[0].split("-", 1)[1]
+
+            self.assertTrue(cleaned, "cleanup() never ran in any worker")
+            # The workers, not the process that launched them.
+            self.assertNotIn(f"cleanup-{parent_pid}", cleaned)
+
+
+class TestWorkerCleanupRegistration(unittest.TestCase):
+
+    def setUp(self):
+        self._saved = mp_backend._cleanup_registered
+        mp_backend._cleanup_registered = False
+        SignalRegistry().reset()
+
+    def tearDown(self):
+        mp_backend._cleanup_registered = self._saved
+        SignalRegistry().reset()
+
+    def test_registers_once_however_many_records(self):
+        registered = []
+        with mock.patch.object(mp_backend.atexit, "register",
+                               side_effect=registered.append):
+            mapper = _Mapper([_SafeFetch("sig", MockSignal())])
+            for shot in range(5):
+                mapper(Record(shot))
+
+        self.assertEqual(len(registered), 1)
+
+    def test_the_handler_releases_registered_signals(self):
+        sig = MockSignal()
+        SignalRegistry().register(sig)
+
+        mp_backend._cleanup_signals()
+
+        self.assertNotIn(sig, SignalRegistry())
+
+    def test_the_handler_does_not_raise_at_shutdown(self):
+        # It runs during interpreter shutdown; throwing there only adds noise.
+        with mock.patch.object(SignalRegistry, "cleanup",
+                               side_effect=RuntimeError("boom")):
+            mp_backend._cleanup_signals()
