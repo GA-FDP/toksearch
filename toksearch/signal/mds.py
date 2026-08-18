@@ -81,6 +81,16 @@ def _dim_of_expression(expression, dim=0):
     return "dim_of({}, {})".format(expression, dim)
 
 
+class _BatchedGatherFailed(Exception):
+    """Internal: the batched fetch was unusable, so fall back to one at a time.
+
+    Raised either because the server could not run the batch at all, or
+    because an expression in it failed. In both cases the remedy is the same --
+    refetch one expression at a time, so the caller sees the real MDSplus
+    exception.
+    """
+
+
 def _units_of_expression(expression, dim=0):
     exp = "units({})"
     if dim == -1:
@@ -479,6 +489,10 @@ class MdsRemoteSignal(Signal):
 
         self._shot_state = {}
 
+        # Cleared if the server turns out not to support batched gets, so the
+        # attempt is not repeated for every shot.
+        self._use_getmany = True
+
         self.set_dims(dims, data_order)
 
     def connect(self) -> mds.Connection:
@@ -520,37 +534,99 @@ class MdsRemoteSignal(Signal):
             MdsConnectionRegistry().disconnect(self.server)
             return self._do_gather(shot)
 
+    def _gather_plan(self):
+        """The expressions this signal needs, as (slot, name, expression).
+
+        ``slot`` says where the value belongs in the result -- "data", a
+        dimension, or a units entry. Both gather paths build their work from
+        this one list so they cannot drift apart.
+        """
+        plan = [("data", None, self.expression)]
+
+        dims = self.dims or []
+        for i, dim in enumerate(dims):
+            plan.append(("dim", dim, _dim_of_expression(self.expression, dim=i)))
+
+        if self.with_units:
+            plan.append(
+                ("units", "data", _units_of_expression(self.expression, dim=-1))
+            )
+            for i, dim in enumerate(dims):
+                plan.append(
+                    ("units", dim, _units_of_expression(self.expression, dim=i))
+                )
+
+        return plan
+
+    @staticmethod
+    def _assemble(plan, values):
+        """Fold values, in plan order, into the dict gather() returns."""
+        results = {}
+        units = {}
+        for (slot, name, _expression), value in zip(plan, values):
+            if slot == "data":
+                results["data"] = value
+            elif slot == "dim":
+                results[name] = value
+            else:
+                units[name] = value
+
+        if units:
+            results["units"] = units
+
+        return results
+
+    def _gather_serial(self, connection, plan):
+        """One round trip per expression."""
+        values = [connection.get(expression).value for _, _, expression in plan]
+        return self._assemble(plan, values)
+
+    def _gather_batched(self, connection, plan):
+        """One round trip for the whole plan.
+
+        The data, its dimensions and all of the units are independent
+        expressions against a tree the server already has open, so asking for
+        them one at a time costs a round trip each for no reason. On a remote
+        server that is most of the cost of a fetch.
+        """
+        getter = connection.getMany()
+        for i, (_slot, _name, expression) in enumerate(plan):
+            getter.append(f"e{i}", expression)
+
+        try:
+            result = getter.execute()
+        except Exception:
+            # Most likely a server without GetManyExecute. Stop trying rather
+            # than paying for the attempt on every shot; the serial path will
+            # re-raise anything that is actually a connection problem.
+            self._use_getmany = False
+            raise _BatchedGatherFailed()
+
+        values = []
+        for i in range(len(plan)):
+            if "value" not in result[f"e{i}"]:
+                # A failed entry carries no exception type and no message worth
+                # reading -- MDSplus reports it as "Unknown exception". Refetch
+                # serially so the caller gets the real error, which gather()
+                # needs in order to tell MDSplusERROR from a tree error.
+                raise _BatchedGatherFailed()
+            values.append(getter.get(f"e{i}").value)
+
+        return self._assemble(plan, values)
+
     def _do_gather(self, shot):
         connection = self.connect()
         connection.openTree(self.treename, shot)
 
-        results = {}
-        results["data"] = connection.get(self.expression).value
+        plan = self._gather_plan()
 
-        dims = self.dims
-        dims_dict = {}
-        if not dims:
-            dims = []
-        for i, dim in enumerate(dims):
-            dim_expression = _dim_of_expression(self.expression, dim=i)
-            results[dim] = connection.get(dim_expression).value
+        if self._use_getmany:
+            try:
+                return self._gather_batched(connection, plan)
+            except _BatchedGatherFailed:
+                pass
 
-
-        if self.with_units:
-            units = {}
-            units["data"] = connection.get(
-                _units_of_expression(self.expression, dim=-1)
-            ).value
-            dims = self.dims
-            if not dims:
-                dims = []
-            for i, dim in enumerate(dims):
-                units_expression = _units_of_expression(self.expression, dim=i)
-                units[dim] = connection.get(units_expression).value
-
-            results["units"] = units
-
-        return results
+        return self._gather_serial(connection, plan)
 
 
     def cleanup_shot(self, shot):

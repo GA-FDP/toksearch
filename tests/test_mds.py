@@ -27,6 +27,7 @@ import subprocess
 
 
 from toksearch.signal.mds import (
+    _BatchedGatherFailed,
     MdsConnectionRegistry,
     MdsTreeRegistry,
     MdsTreePath,
@@ -389,6 +390,52 @@ class TestMdsRemoteSignal(GenericTestMdsSignal, unittest.TestCase):
     #    self.assertEqual(results['units']['times']," ")
 
 
+    def test_batched_and_serial_gather_agree(self):
+        """The two paths must return the same thing, against a real server.
+
+        Skips on a server that cannot run GetManyExecute. The mdsip server
+        this suite starts is one: it fails with LIB-F-KEYNOTFOU regardless of
+        MDS_PATH, so batching cannot be exercised here. That is precisely the
+        case _do_gather falls back for, and it is covered hermetically by
+        TestMdsRemoteBatchedGather.
+        """
+        sig = self.signal()
+        connection = sig.connect()
+        connection.openTree(DEFAULT_TREE, DEFAULT_SHOT)
+        plan = sig._gather_plan()
+
+        serial = sig._gather_serial(connection, plan)
+        try:
+            batched = sig._gather_batched(connection, plan)
+        except _BatchedGatherFailed:
+            self.skipTest("server does not support GetManyExecute")
+
+        self.assertEqual(sorted(serial), sorted(batched))
+        for key, expected in serial.items():
+            got = batched[key]
+            if isinstance(expected, dict):
+                self.assertEqual(expected, got)
+            else:
+                np.testing.assert_array_equal(expected, got)
+
+
+
+    def test_do_gather_agrees_with_serial(self):
+        """Holds whether or not the server can batch, since _do_gather falls back."""
+        sig = self.signal()
+        connection = sig.connect()
+        connection.openTree(DEFAULT_TREE, DEFAULT_SHOT)
+        expected = sig._gather_serial(connection, sig._gather_plan())
+
+        got = sig._do_gather(DEFAULT_SHOT)
+
+        self.assertEqual(sorted(expected), sorted(got))
+        for key, value in expected.items():
+            if isinstance(value, dict):
+                self.assertEqual(value, got[key])
+            else:
+                np.testing.assert_array_equal(value, got[key])
+
 class TestMdsLocalSignal(GenericTestMdsSignal, unittest.TestCase):
     def _signal(self, expression, tree, dims, fetch_units, data_order):
         return MdsLocalSignal(
@@ -717,3 +764,159 @@ class TestMdsCleanupShotKey(unittest.TestCase):
     def test_mds_signal_delegates_to_the_underlying_signal(self):
         sig = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
         self.assertEqual(sig.cleanup_shot_key(), sig.sig.cleanup_shot_key())
+
+
+class _Value:
+    """Stand-in for an MDSplus Data object: both gather paths unwrap .value."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+class _FakeMdsError(Exception):
+    """Stand-in for a typed MDSplus exception, which only the serial path raises."""
+
+
+class _FakeGetMany:
+    def __init__(self, connection):
+        self.connection = connection
+        self.items = []
+        self.result = None
+
+    def append(self, name, expression):
+        self.items.append((name, expression))
+
+    def execute(self):
+        self.connection.executes += 1
+        if self.connection.execute_raises:
+            raise RuntimeError("server has no GetManyExecute")
+        self.result = {}
+        for name, expression in self.items:
+            if expression in self.connection.fail:
+                # How MDSplus reports a failed entry: no type, no useful text.
+                self.result[name] = {
+                    "error": "%MDSPLUS-E-Unknown, Unknown exception"
+                }
+            else:
+                self.result[name] = {
+                    "value": _Value(self.connection.values[expression])
+                }
+        return self.result
+
+    def get(self, name):
+        entry = self.result[name]
+        if "value" not in entry:
+            raise _FakeMdsError(name)
+        return entry["value"]
+
+
+class _FakeConnection:
+    """Counts round trips so a test can tell one batched call from several."""
+
+    def __init__(self, values, fail=(), execute_raises=False):
+        self.values = values
+        self.fail = set(fail)
+        self.execute_raises = execute_raises
+        self.gets = []
+        self.executes = 0
+        self.opened = []
+
+    def openTree(self, treename, shot):
+        self.opened.append((treename, shot))
+
+    def get(self, expression):
+        self.gets.append(expression)
+        if expression in self.fail:
+            raise _FakeMdsError(expression)
+        return _Value(self.values[expression])
+
+    def getMany(self):
+        return _FakeGetMany(self)
+
+
+class TestMdsRemoteBatchedGather(unittest.TestCase):
+    """Data, dims and units are independent expressions against an already-open
+    tree, so fetching them one at a time costs a round trip each for nothing."""
+
+    EXPRESSION = r"\ipmhd"
+
+    def _signal(self, fetch_units=True, dims=("times",)):
+        return MdsRemoteSignal(
+            self.EXPRESSION, "efit01", "fake.host:9999",
+            dims=dims, fetch_units=fetch_units,
+        )
+
+    def _connection(self, sig, **kwargs):
+        values = {expr: f"value-of-{expr}" for _, _, expr in sig._gather_plan()}
+        connection = _FakeConnection(values, **kwargs)
+        sig.connect = lambda: connection
+        return connection
+
+    def test_plan_covers_data_then_dims_then_units(self):
+        sig = self._signal(dims=("times", "space"))
+        slots = [(slot, name) for slot, name, _ in sig._gather_plan()]
+        self.assertEqual(
+            slots,
+            [("data", None), ("dim", "times"), ("dim", "space"),
+             ("units", "data"), ("units", "times"), ("units", "space")],
+        )
+
+    def test_plan_omits_units_when_not_requested(self):
+        sig = self._signal(fetch_units=False)
+        slots = [(slot, name) for slot, name, _ in sig._gather_plan()]
+        self.assertEqual(slots, [("data", None), ("dim", "times")])
+
+    def test_batched_gather_is_a_single_round_trip(self):
+        sig = self._signal()
+        connection = self._connection(sig)
+
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 1)
+        self.assertEqual(connection.gets, [])
+
+    def test_serial_gather_is_a_round_trip_per_expression(self):
+        sig = self._signal()
+        connection = self._connection(sig)
+        sig._use_getmany = False
+
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 0)
+        self.assertEqual(len(connection.gets), 4)
+
+    def test_batched_and_serial_agree(self):
+        for fetch_units in (True, False):
+            with self.subTest(fetch_units=fetch_units):
+                sig = self._signal(fetch_units=fetch_units)
+                self._connection(sig)
+                batched = sig._do_gather(1234)
+                sig._use_getmany = False
+                serial = sig._do_gather(1234)
+                self.assertEqual(batched, serial)
+
+    def test_failed_entry_falls_back_so_the_real_error_surfaces(self):
+        # A failed entry carries no exception type and no readable message, and
+        # gather() keys its retry on the type, so the fetch is redone one at a
+        # time to raise the real thing.
+        sig = self._signal()
+        connection = self._connection(sig, fail=[self.EXPRESSION])
+
+        with self.assertRaises(_FakeMdsError):
+            sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 1)
+        self.assertIn(self.EXPRESSION, connection.gets)
+
+    def test_server_without_getmany_is_not_asked_twice(self):
+        sig = self._signal()
+        connection = self._connection(sig, execute_raises=True)
+
+        sig._do_gather(1234)
+        self.assertEqual(connection.executes, 1)
+        self.assertFalse(sig._use_getmany)
+        self.assertEqual(len(connection.gets), 4)
+
+        sig._do_gather(1234)
+        self.assertEqual(connection.executes, 1)
+        self.assertEqual(len(connection.gets), 8)
