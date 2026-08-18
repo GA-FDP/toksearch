@@ -279,6 +279,22 @@ class Signal(ABC):
         """
         pass
 
+    def cleanup_shot_key(self):
+        """Identify the resource that cleanup_shot() acts on.
+
+        SignalRegistry.cleanup_shot() sweeps every registered signal once per
+        record. Signals that share a backing resource need only one of those
+        calls between them -- several remote signals on one server share a
+        single connection, and closeAllTrees() on it closes the trees for all
+        of them. Returning equal keys lets the registry make the call once
+        instead of once per signal, which on a remote connection is the
+        difference between one network round trip per record and several.
+
+        The default keys on the signal itself, so signals that share nothing,
+        or that have not said what they share, keep being cleaned individually.
+        """
+        return id(self)
+
     @abstractmethod
     def cleanup(self):
         """Close down any resources that are shared amongst multiple shots.
@@ -347,7 +363,12 @@ class SignalRegistry:
         """
 
         with _gc_disabled():
+            cleaned = set()
             for signal in self.signals:
+                key = signal.cleanup_shot_key()
+                if key in cleaned:
+                    continue
+                cleaned.add(key)
                 try:
                     signal.cleanup_shot(shot)
                 except Exception as e:

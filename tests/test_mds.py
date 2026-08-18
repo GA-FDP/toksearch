@@ -566,3 +566,49 @@ class TestMdsTreeRegistry(unittest.TestCase):
                 tree = registry.open_tree(treename, shot, treepath=None)
         except mds.TreeNOPATH:
             self.fail("open_tree failed to open tree using environment")
+
+
+class TestMdsCleanupShotKey(unittest.TestCase):
+    """cleanup_shot() on a remote signal is a network round trip.
+
+    SignalRegistry sweeps every registered signal once per record, so signals
+    that share the resource being cleaned have to advertise that or the sweep
+    pays for the same close several times over.
+    """
+
+    def test_remote_signals_on_one_server_share_a_key(self):
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_treename_is_not_part_of_the_remote_key(self):
+        # closeAllTrees() closes every tree open on the connection, whichever
+        # signal opened it, so two trees on one server are still one close.
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "d3d", location="remote://atlas.gat.com")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_different_servers_do_not_share_a_key(self):
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "efit01", location="remote://other.gat.com")
+        self.assertNotEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_signals_share_a_key_by_treename(self):
+        a = MdsSignal("a", "efit01", location="/some/path")
+        b = MdsSignal("b", "efit01", location="/some/path")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_signals_on_different_trees_do_not_share_a_key(self):
+        # Local trees are closed per treename, so these are two closes.
+        a = MdsSignal("a", "efit01", location="/some/path")
+        b = MdsSignal("b", "d3d", location="/some/path")
+        self.assertNotEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_and_remote_keys_do_not_collide(self):
+        local = MdsSignal("a", "efit01", location="/some/path")
+        remote = MdsSignal("a", "efit01", location="remote://efit01")
+        self.assertNotEqual(local.cleanup_shot_key(), remote.cleanup_shot_key())
+
+    def test_mds_signal_delegates_to_the_underlying_signal(self):
+        sig = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(sig.cleanup_shot_key(), sig.sig.cleanup_shot_key())
