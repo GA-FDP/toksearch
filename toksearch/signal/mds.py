@@ -221,6 +221,10 @@ class MdsLocalSignal(Signal):
         """
         MdsTreeRegistry().close_tree(self.treename, shot)
 
+    def cleanup_shot_key(self):
+        """Trees are held per treename, so one close per treename is enough."""
+        return ("mds_local_tree", self.treename)
+
     def cleanup(self):
         """Close all trees"""
         MdsTreeRegistry().close_all_trees()
@@ -380,6 +384,10 @@ class MdsSignal(Signal):
             shot (int): The shot number to close the tree for
         """
         self.sig.cleanup_shot(shot)
+
+    def cleanup_shot_key(self):
+        """Defer to the local or remote signal actually doing the cleanup."""
+        return self.sig.cleanup_shot_key()
 
     def cleanup(self):
         """Close all trees or disconnect from the remote server"""
@@ -542,6 +550,15 @@ class MdsRemoteSignal(Signal):
             connection.closeAllTrees()
         except:
             pass
+
+    def cleanup_shot_key(self):
+        """Signals sharing a server share a connection -- and one round trip.
+
+        MdsConnectionRegistry hands out one connection per server, and
+        closeAllTrees() closes every tree open on it regardless of which
+        signal opened it, so the treename is deliberately not part of the key.
+        """
+        return ("mds_remote_connection", self.server)
 
     def cleanup(self):
         """Disconnect from the remote server"""
