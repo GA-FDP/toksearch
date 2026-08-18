@@ -14,6 +14,7 @@
 
 import unittest
 import sys
+import pickle
 import os
 import tempfile
 import numpy as np
@@ -461,6 +462,64 @@ class TestMdsConnectionRegistry(unittest.TestCase):
         registry.disconnect("never.connected:1234")
 
 
+    def test_pickling_does_not_drop_the_live_connection_cache(self):
+        # __getstate__ used to hand back self.__dict__ itself and blank the
+        # map on it, so merely serializing the registry dropped the pickling
+        # process's own connections.
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        registry._connection_map["fake.host:9999"] = mock.MagicMock()
+        before = dict(registry._connection_map)
+        try:
+            pickle.dumps(registry)
+            self.assertEqual(registry._connection_map, before)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_connections_are_not_serialized(self):
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        registry._connection_map["fake.host:9999"] = mock.MagicMock()
+        try:
+            self.assertEqual(registry.__getstate__()["_connection_map"], {})
+            # A MagicMock cannot be pickled, so getting through dumps at all
+            # is itself proof the connections were left out.
+            pickle.dumps(registry)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_unpickling_keeps_the_receiving_process_cache(self):
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        blob = pickle.dumps(registry)
+        conn = mock.MagicMock()
+        registry._connection_map["fake.host:9999"] = conn
+        try:
+            restored = pickle.loads(blob)
+            # Unpickling returns this process's singleton, so a restore that
+            # replaced _connection_map would be clearing a live cache.
+            self.assertIs(restored, registry)
+            self.assertIs(restored._connection_map["fake.host:9999"], conn)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_non_connection_state_survives_a_round_trip(self):
+        # Only the connections are process-local; anything else the registry
+        # may carry should still travel.
+        registry = MdsConnectionRegistry()
+        registry.__dict__["_probe"] = 42
+        try:
+            blob = pickle.dumps(registry)
+            del registry.__dict__["_probe"]
+            pickle.loads(blob)
+            self.assertEqual(registry.__dict__.get("_probe"), 42)
+        finally:
+            registry.__dict__.pop("_probe", None)
+
+
 class TestMdsRemoteSignalRetry(unittest.TestCase):
     """Verify that MdsRemoteSignal.gather retries on MDSplusERROR.
 
@@ -520,6 +579,52 @@ class TestMdsRemoteSignalRetry(unittest.TestCase):
         ), self._mock.patch.object(MdsConnectionRegistry, "disconnect"):
             with self.assertRaises(MDSplusERROR):
                 self.signal.gather(123)
+
+
+class TestMdsTreeRegistryPickling(unittest.TestCase):
+    """Same defect as MdsConnectionRegistry: __getstate__ blanked the live map.
+
+    Here the casualty is the open-tree cache, dropped without being closed.
+    """
+
+    def tearDown(self):
+        MdsTreeRegistry().reset()
+
+    def test_pickling_does_not_drop_the_live_tree_cache(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        sentinel = mock.MagicMock()
+        registry._tree_map["faketree"] = {1234: sentinel}
+
+        pickle.dumps(registry)
+
+        self.assertIs(registry._tree_map["faketree"][1234], sentinel)
+
+    def test_trees_are_not_serialized(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        registry._tree_map["faketree"] = {1234: mock.MagicMock()}
+
+        self.assertEqual(registry.__getstate__()["_tree_map"], {})
+        pickle.dumps(registry)
+
+    def test_unpickling_keeps_the_receiving_process_trees(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        blob = pickle.dumps(registry)
+        sentinel = mock.MagicMock()
+        registry._tree_map["faketree"] = {1234: sentinel}
+
+        restored = pickle.loads(blob)
+
+        self.assertIs(restored, registry)
+        self.assertIs(restored._tree_map["faketree"][1234], sentinel)
 
 
 class TestMdsTreeRegistry(unittest.TestCase):
