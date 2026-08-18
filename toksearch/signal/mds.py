@@ -464,8 +464,16 @@ class MdsConnectionRegistry(object):
         return connection
 
     def close_all_trees(self, server):
-        """Close every tree open on the server's connection."""
-        connection = self.connect(server)
+        """Close every tree open on the server's connection.
+
+        Does nothing if the server was never connected: there is nothing to
+        close, and opening a connection in order to close trees on it would be
+        worse than useless.
+        """
+        connection = self._connection_map.get(server, None)
+        if connection is None:
+            return
+
         try:
             connection.closeAllTrees()
         finally:
@@ -674,29 +682,52 @@ class MdsRemoteSignal(Signal):
 
 
     def cleanup_shot(self, shot):
-        """Close all trees for the given shot
+        """Nothing to release per shot on a remote server.
+
+        A remote tree is not a per-shot resource. Opening the next shot of the
+        same tree replaces the previous one rather than adding to it: open file
+        descriptors were measured flat from 20 opens through 100, closeAllTrees
+        costs the same after one open as after a thousand, and 1500 consecutive
+        opens without a close ran clean on both atlas and the mdsip relay. The
+        set of open trees is bounded by the number of distinct tree names, not
+        shots.
+
+        Closing here therefore spent a round trip per record releasing nothing
+        -- about 8% of the per-shot cost against the relay. The trees are
+        closed in cleanup() instead, at the end of the run.
+
+        This is specific to remote signals. MdsLocalSignal does hold per-shot
+        state -- MdsTreeRegistry keeps an open Tree per (treename, shot) -- and
+        still closes here.
 
         Arguments:
-            shot (int): The shot number to close the tree for
+            shot (int): The shot number, unused.
         """
-        try:
-            MdsConnectionRegistry().close_all_trees(self.server)
-        except:
-            pass
 
     def cleanup_shot_key(self):
-        """Signals sharing a server share a connection -- and one round trip.
+        """The connection is what per-shot cleanup would act on.
 
-        MdsConnectionRegistry hands out one connection per server, and
-        closeAllTrees() closes every tree open on it regardless of which
-        signal opened it, so the treename is deliberately not part of the key.
+        Nothing is released per shot any more (see cleanup_shot), so this only
+        keeps the registry from calling a no-op once per signal. It stays
+        because the answer -- one connection per server, shared by every signal
+        on it -- is what makes that true, and is what any per-shot work
+        restored here would have to be grouped by.
         """
         return ("mds_remote_connection", self.server)
 
     def cleanup(self):
-        """Disconnect from the remote server"""
+        """Close any open trees and disconnect from the remote server.
+
+        Dropping the connection would release the trees on its own, but closing
+        them explicitly keeps the release a decision rather than a side effect.
+        """
+        registry = MdsConnectionRegistry()
         try:
-            MdsConnectionRegistry().disconnect(self.server)
+            registry.close_all_trees(self.server)
+        except:
+            pass
+        try:
+            registry.disconnect(self.server)
         except:
             pass
 

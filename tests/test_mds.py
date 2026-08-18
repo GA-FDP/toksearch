@@ -821,12 +821,16 @@ class _FakeConnection:
         self.executes = 0
         self.opened = []
         self.closes = 0
+        self.disconnected = False
 
     def openTree(self, treename, shot):
         self.opened.append((treename, shot))
 
     def closeAllTrees(self):
         self.closes += 1
+
+    def disconnect(self):
+        self.disconnected = True
 
     def get(self, expression):
         self.gets.append(expression)
@@ -993,7 +997,9 @@ class TestMdsRemoteOpenTreeDedup(unittest.TestCase):
             [("efit01", 1234), ("d3d", 1234), ("efit01", 1234)],
         )
 
-    def test_cleanup_shot_means_the_next_fetch_reopens(self):
+    def test_cleanup_shot_releases_nothing(self):
+        # A remote tree is not a per-shot resource -- the next shot's open
+        # replaces it -- so closing per record spent a round trip for nothing.
         sig = self._signals([r"\a"])[0]
         connection = self._install([sig])
 
@@ -1001,9 +1007,28 @@ class TestMdsRemoteOpenTreeDedup(unittest.TestCase):
         sig.cleanup_shot(1234)
         sig._do_gather(1234)
 
+        self.assertEqual(connection.closes, 0)
+        self.assertEqual(connection.opened, [("efit01", 1234)])
+
+    def test_cleanup_closes_the_trees_and_disconnects(self):
+        sig = self._signals([r"\a"])[0]
+        connection = self._install([sig])
+
+        sig._do_gather(1234)
+        sig.cleanup()
+
         self.assertEqual(connection.closes, 1)
-        self.assertEqual(connection.opened,
-                         [("efit01", 1234), ("efit01", 1234)])
+        self.assertTrue(connection.disconnected)
+
+    def test_cleanup_does_not_dial_a_connection_to_close_trees(self):
+        # cleanup() on a signal that never fetched must not open a connection
+        # purely so that it has something to close.
+        sig = self._signals([r"\a"])[0]
+        MdsConnectionRegistry()._connection_map.pop(self.SERVER, None)
+
+        sig.cleanup()
+
+        self.assertNotIn(self.SERVER, MdsConnectionRegistry()._connection_map)
 
     def test_a_failed_fetch_does_not_leave_the_tree_assumed_open(self):
         # If a fetch fails the tree may be gone, so the next signal must not
