@@ -25,6 +25,16 @@ requirements:
   run:
     - python
     - mdsplus-xrdcl >=1,<2
+    # libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
+    # A protocol, not a device: DIII-D is served this way today and C-Mod is
+    # next, so this is not DIII-D-specific plumbing riding along in core
+    # toksearch. Without it, an fdp:// location fails at connect with
+    # "Protocol FDP is not supported" on stderr and a bare "Error connecting"
+    # exception -- which, inside a Pipeline worker, loses the useful half.
+    #
+    # It is built once per MDSplus provider; the mdsplus-xrdcl pin above selects
+    # the matching variant.
+    - mdsip-fdp >=0.1.0
     - fdp-schema >=0.1.1
     - numpy >=1.20, <2
     - pymssql
@@ -48,7 +58,7 @@ requirements:
     - openai >=1.50
     - claude-agent-sdk >=0.2
     - gradio >=4
-    - mcp >=1.23
+    - mcp >=1.23,<2
     - matplotlib
     - plotly
     - python-kaleido

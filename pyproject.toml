@@ -23,7 +23,7 @@ llm = [
     "openai>=1.50",
     "matplotlib",
     "claude-agent-sdk>=0.2",
-    "mcp>=1.23",
+    "mcp>=1.23,<2",
 ]
 
 [project.entry-points."toksearch.llm.namespace"]

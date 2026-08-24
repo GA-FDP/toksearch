@@ -6,6 +6,9 @@ platforms = ["linux-64"]
 [dependencies]
 python = ">=3.11,<3.13"
 mdsplus-xrdcl = ">=1,<2"
+# Supplies libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
+# Also a run requirement of the conda package -- see recipe/recipe.yaml.
+mdsip-fdp = ">=0.1.0"
 numpy = ">=1.20, <2"
 pymssql = "*"
 ray-core = "*"
@@ -28,7 +31,7 @@ openai = ">=1.50"
 matplotlib = "*"
 claude-agent-sdk = ">=0.2"
 gradio = ">=4"
-mcp = ">=1.23"
+mcp = ">=1.23,<2"
 plotly = "*"
 python-kaleido = "*"
 fdp-schema = ">=0.1.1"

@@ -18,7 +18,12 @@ the list of contributed packages and the catalog of available skills — are
 built from the Session's installed contributors at construction time.
 """
 
-from .tools import Skill
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .mcp.client import SkillMeta
 
 
 _KERNEL = """\
@@ -35,7 +40,7 @@ session - variables from earlier calls are available in later ones.
 
 
 def build_system_prompt(
-    skills: dict[str, Skill],
+    skills: dict[str, SkillMeta],
     namespace_entries: list[tuple[str, str]],
 ) -> str:
     """Build the system prompt from the registered contributors.
@@ -43,7 +48,8 @@ def build_system_prompt(
     Parameters
     ----------
     skills:
-        Mapping of skill name to ``Skill`` (from ``tools.discover_skills``).
+        Mapping of skill name to ``SkillMeta`` (from the skills MCP client /
+        ``Session.skills``).
     namespace_entries:
         List of ``(name, description)`` for each package contributed to the
         run_python namespace (core toksearch + any extras).

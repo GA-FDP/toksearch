@@ -134,5 +134,40 @@ class TestAnthropicBaseUrl(unittest.TestCase):
                 "https://custom.example")
 
 
+class TestAnthropicMissingKey(unittest.TestCase):
+    # With no key available the SDK raises TypeError ("Could not resolve
+    # authentication method") — at request time in current versions, at
+    # construction in older ones. Both sites must translate it into
+    # LLMAuthError so the CLI prints remedies, not a traceback.
+
+    def _assert_remedies(self, exc):
+        msg = str(exc)
+        self.assertIn("ANTHROPIC_API_KEY", msg)
+        self.assertIn("config.toml", msg)
+        self.assertIn("claude-max", msg)
+
+    def test_request_time_typeerror_translated(self):
+        backend = AnthropicBackend(api_key=None)
+        backend._client = mock.MagicMock()
+        backend._client.messages.create.side_effect = TypeError(
+            "Could not resolve authentication method.")
+        with self.assertRaises(LLMAuthError) as ctx:
+            backend._send_request(system_prompt="s", history=[],
+                                  tools=[], model="m")
+        self._assert_remedies(ctx.exception)
+
+    def test_construction_time_typeerror_translated(self):
+        backend = AnthropicBackend(api_key=None)
+        # Patch through the backend module's own reference so this works
+        # whether `anthropic` is the stub above or the real SDK.
+        with mock.patch(
+            "toksearch.llm.backends.anthropic.anthropic.Anthropic",
+            side_effect=TypeError("Could not resolve authentication method."),
+        ):
+            with self.assertRaises(LLMAuthError) as ctx:
+                backend._ensure_client()
+        self._assert_remedies(ctx.exception)
+
+
 if __name__ == "__main__":
     unittest.main()

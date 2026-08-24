@@ -14,6 +14,7 @@
 
 import unittest
 import sys
+import pickle
 import os
 import tempfile
 import numpy as np
@@ -26,6 +27,7 @@ import subprocess
 
 
 from toksearch.signal.mds import (
+    _BatchedGatherFailed,
     MdsConnectionRegistry,
     MdsTreeRegistry,
     MdsTreePath,
@@ -176,14 +178,25 @@ class TestMdsTreePath(unittest.TestCase):
 class TestMdsSignal(unittest.TestCase):
 
     def test_remote_location_grabbed_from_environment(self):
+        # A URL in TOKSEARCH_MDS_DEFAULT is a server, not a tree path. It used
+        # to become a treepath of the literal string "remote://fake.gat.com",
+        # which no tree can be opened from -- so setting the environment
+        # variable to a server silently produced a local signal that could only
+        # fail later.
         server = "fake.gat.com"
         default_location = f"remote://{server}"
 
         with set_env("TOKSEARCH_MDS_DEFAULT", default_location):
             sig = MdsSignal("blah", "efit01")
-        self.assertIsInstance(sig.sig, MdsLocalSignal)
-        self.assertIsInstance(sig.sig.treepath, MdsTreePath)
-        self.assertEqual(sig.sig.treepath.paths["efit01"], default_location)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, server)
+
+    def test_fdp_location_grabbed_from_environment(self):
+        url = "fdp://origin.example.org:8443/mdsip"
+        with set_env("TOKSEARCH_MDS_DEFAULT", url):
+            sig = MdsSignal("blah", "efit01")
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
 
     def test_local_location_grabbed_from_environment(self):
         default_location = "/some/fake/path"
@@ -219,6 +232,46 @@ class TestMdsSignal(unittest.TestCase):
             sig = MdsSignal("blah", "efit01", location=None)
         self.assertIsInstance(sig.sig.treepath, MdsTreePath)
         self.assertIsInstance(sig.sig, MdsLocalSignal)
+
+    def test_fdp_location_is_remote_and_keeps_the_whole_url(self):
+        # The scheme selects the MDSplus transport and the path is the relay's
+        # prefix on the origin, so unlike 'remote://' neither may be dropped.
+        # Before this was handled, urlparse's path was taken as a treepath and
+        # the host was discarded: the signal became a LOCAL read of "/mdsip".
+        url = "fdp://origin.example.org:8443/mdsip"
+        sig = MdsSignal("blah", "efit01", location=url)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
+
+    def test_fdp_location_without_a_path(self):
+        url = "fdp://origin.example.org:8443"
+        sig = MdsSignal("blah", "efit01", location=url)
+        self.assertIsInstance(sig.sig, MdsRemoteSignal)
+        self.assertEqual(sig.sig.server, url)
+
+    def test_other_mdsplus_transport_schemes_are_remote(self):
+        for url in ("tcp://a.gat.com:8000", "tcpv6://a.gat.com", "udt://a.gat.com"):
+            with self.subTest(url=url):
+                sig = MdsSignal("blah", "efit01", location=url)
+                self.assertIsInstance(sig.sig, MdsRemoteSignal)
+                self.assertEqual(sig.sig.server, url)
+
+    def test_unknown_scheme_raises_rather_than_becoming_a_treepath(self):
+        # Silently dropping the host turns a mistyped server into a local read
+        # that fails much later, somewhere less informative.
+        for url in ("pelican://osg-htc.org:443/fdp-d3d/x", "http://example.org/x"):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    MdsSignal("blah", "efit01", location=url)
+
+    def test_host_double_colon_path_is_a_treepath(self):
+        # urlparse reads 'atlas.gat.com::/trees' as scheme 'atlas.gat.com'
+        # (dots are legal in a scheme), so this must be settled before any
+        # scheme dispatch or it looks like a server.
+        location = "atlas.gat.com::/trees"
+        sig = MdsSignal("blah", "efit01", location=location)
+        self.assertIsInstance(sig.sig, MdsLocalSignal)
+        self.assertEqual(sig.sig.treepath, location)
 
 
 class GenericTestMdsSignal(ABC):
@@ -337,6 +390,52 @@ class TestMdsRemoteSignal(GenericTestMdsSignal, unittest.TestCase):
     #    self.assertEqual(results['units']['times']," ")
 
 
+    def test_batched_and_serial_gather_agree(self):
+        """The two paths must return the same thing, against a real server.
+
+        Skips on a server that cannot run GetManyExecute. The mdsip server
+        this suite starts is one: it fails with LIB-F-KEYNOTFOU regardless of
+        MDS_PATH, so batching cannot be exercised here. That is precisely the
+        case _do_gather falls back for, and it is covered hermetically by
+        TestMdsRemoteBatchedGather.
+        """
+        sig = self.signal()
+        connection = sig.connect()
+        connection.openTree(DEFAULT_TREE, DEFAULT_SHOT)
+        plan = sig._gather_plan()
+
+        serial = sig._gather_serial(connection, plan)
+        try:
+            batched = sig._gather_batched(connection, plan)
+        except _BatchedGatherFailed:
+            self.skipTest("server does not support GetManyExecute")
+
+        self.assertEqual(sorted(serial), sorted(batched))
+        for key, expected in serial.items():
+            got = batched[key]
+            if isinstance(expected, dict):
+                self.assertEqual(expected, got)
+            else:
+                np.testing.assert_array_equal(expected, got)
+
+
+
+    def test_do_gather_agrees_with_serial(self):
+        """Holds whether or not the server can batch, since _do_gather falls back."""
+        sig = self.signal()
+        connection = sig.connect()
+        connection.openTree(DEFAULT_TREE, DEFAULT_SHOT)
+        expected = sig._gather_serial(connection, sig._gather_plan())
+
+        got = sig._do_gather(DEFAULT_SHOT)
+
+        self.assertEqual(sorted(expected), sorted(got))
+        for key, value in expected.items():
+            if isinstance(value, dict):
+                self.assertEqual(value, got[key])
+            else:
+                np.testing.assert_array_equal(value, got[key])
+
 class TestMdsLocalSignal(GenericTestMdsSignal, unittest.TestCase):
     def _signal(self, expression, tree, dims, fetch_units, data_order):
         return MdsLocalSignal(
@@ -410,6 +509,64 @@ class TestMdsConnectionRegistry(unittest.TestCase):
         registry.disconnect("never.connected:1234")
 
 
+    def test_pickling_does_not_drop_the_live_connection_cache(self):
+        # __getstate__ used to hand back self.__dict__ itself and blank the
+        # map on it, so merely serializing the registry dropped the pickling
+        # process's own connections.
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        registry._connection_map["fake.host:9999"] = mock.MagicMock()
+        before = dict(registry._connection_map)
+        try:
+            pickle.dumps(registry)
+            self.assertEqual(registry._connection_map, before)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_connections_are_not_serialized(self):
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        registry._connection_map["fake.host:9999"] = mock.MagicMock()
+        try:
+            self.assertEqual(registry.__getstate__()["_connection_map"], {})
+            # A MagicMock cannot be pickled, so getting through dumps at all
+            # is itself proof the connections were left out.
+            pickle.dumps(registry)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_unpickling_keeps_the_receiving_process_cache(self):
+        from unittest import mock
+
+        registry = MdsConnectionRegistry()
+        blob = pickle.dumps(registry)
+        conn = mock.MagicMock()
+        registry._connection_map["fake.host:9999"] = conn
+        try:
+            restored = pickle.loads(blob)
+            # Unpickling returns this process's singleton, so a restore that
+            # replaced _connection_map would be clearing a live cache.
+            self.assertIs(restored, registry)
+            self.assertIs(restored._connection_map["fake.host:9999"], conn)
+        finally:
+            registry._connection_map.pop("fake.host:9999", None)
+
+    def test_non_connection_state_survives_a_round_trip(self):
+        # Only the connections are process-local; anything else the registry
+        # may carry should still travel.
+        registry = MdsConnectionRegistry()
+        registry.__dict__["_probe"] = 42
+        try:
+            blob = pickle.dumps(registry)
+            del registry.__dict__["_probe"]
+            pickle.loads(blob)
+            self.assertEqual(registry.__dict__.get("_probe"), 42)
+        finally:
+            registry.__dict__.pop("_probe", None)
+
+
 class TestMdsRemoteSignalRetry(unittest.TestCase):
     """Verify that MdsRemoteSignal.gather retries on MDSplusERROR.
 
@@ -471,6 +628,52 @@ class TestMdsRemoteSignalRetry(unittest.TestCase):
                 self.signal.gather(123)
 
 
+class TestMdsTreeRegistryPickling(unittest.TestCase):
+    """Same defect as MdsConnectionRegistry: __getstate__ blanked the live map.
+
+    Here the casualty is the open-tree cache, dropped without being closed.
+    """
+
+    def tearDown(self):
+        MdsTreeRegistry().reset()
+
+    def test_pickling_does_not_drop_the_live_tree_cache(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        sentinel = mock.MagicMock()
+        registry._tree_map["faketree"] = {1234: sentinel}
+
+        pickle.dumps(registry)
+
+        self.assertIs(registry._tree_map["faketree"][1234], sentinel)
+
+    def test_trees_are_not_serialized(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        registry._tree_map["faketree"] = {1234: mock.MagicMock()}
+
+        self.assertEqual(registry.__getstate__()["_tree_map"], {})
+        pickle.dumps(registry)
+
+    def test_unpickling_keeps_the_receiving_process_trees(self):
+        from unittest import mock
+
+        registry = MdsTreeRegistry()
+        registry.reset()
+        blob = pickle.dumps(registry)
+        sentinel = mock.MagicMock()
+        registry._tree_map["faketree"] = {1234: sentinel}
+
+        restored = pickle.loads(blob)
+
+        self.assertIs(restored, registry)
+        self.assertIs(restored._tree_map["faketree"][1234], sentinel)
+
+
 class TestMdsTreeRegistry(unittest.TestCase):
     def test_get_tree_returns_none_with_empty_map(self):
         registry = MdsTreeRegistry()
@@ -515,3 +718,328 @@ class TestMdsTreeRegistry(unittest.TestCase):
                 tree = registry.open_tree(treename, shot, treepath=None)
         except mds.TreeNOPATH:
             self.fail("open_tree failed to open tree using environment")
+
+
+class TestMdsCleanupShotKey(unittest.TestCase):
+    """cleanup_shot() on a remote signal is a network round trip.
+
+    SignalRegistry sweeps every registered signal once per record, so signals
+    that share the resource being cleaned have to advertise that or the sweep
+    pays for the same close several times over.
+    """
+
+    def test_remote_signals_on_one_server_share_a_key(self):
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_treename_is_not_part_of_the_remote_key(self):
+        # closeAllTrees() closes every tree open on the connection, whichever
+        # signal opened it, so two trees on one server are still one close.
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "d3d", location="remote://atlas.gat.com")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_different_servers_do_not_share_a_key(self):
+        a = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal("b", "efit01", location="remote://other.gat.com")
+        self.assertNotEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_signals_share_a_key_by_treename(self):
+        a = MdsSignal("a", "efit01", location="/some/path")
+        b = MdsSignal("b", "efit01", location="/some/path")
+        self.assertEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_signals_on_different_trees_do_not_share_a_key(self):
+        # Local trees are closed per treename, so these are two closes.
+        a = MdsSignal("a", "efit01", location="/some/path")
+        b = MdsSignal("b", "d3d", location="/some/path")
+        self.assertNotEqual(a.cleanup_shot_key(), b.cleanup_shot_key())
+
+    def test_local_and_remote_keys_do_not_collide(self):
+        local = MdsSignal("a", "efit01", location="/some/path")
+        remote = MdsSignal("a", "efit01", location="remote://efit01")
+        self.assertNotEqual(local.cleanup_shot_key(), remote.cleanup_shot_key())
+
+    def test_mds_signal_delegates_to_the_underlying_signal(self):
+        sig = MdsSignal("a", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(sig.cleanup_shot_key(), sig.sig.cleanup_shot_key())
+
+
+class _Value:
+    """Stand-in for an MDSplus Data object: both gather paths unwrap .value."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+class _FakeMdsError(Exception):
+    """Stand-in for a typed MDSplus exception, which only the serial path raises."""
+
+
+class _FakeGetMany:
+    def __init__(self, connection):
+        self.connection = connection
+        self.items = []
+        self.result = None
+
+    def append(self, name, expression):
+        self.items.append((name, expression))
+
+    def execute(self):
+        self.connection.executes += 1
+        if self.connection.execute_raises:
+            raise RuntimeError("server has no GetManyExecute")
+        self.result = {}
+        for name, expression in self.items:
+            if expression in self.connection.fail:
+                # How MDSplus reports a failed entry: no type, no useful text.
+                self.result[name] = {
+                    "error": "%MDSPLUS-E-Unknown, Unknown exception"
+                }
+            else:
+                self.result[name] = {
+                    "value": _Value(self.connection.values[expression])
+                }
+        return self.result
+
+    def get(self, name):
+        entry = self.result[name]
+        if "value" not in entry:
+            raise _FakeMdsError(name)
+        return entry["value"]
+
+
+class _FakeConnection:
+    """Counts round trips so a test can tell one batched call from several."""
+
+    def __init__(self, values, fail=(), execute_raises=False):
+        self.values = values
+        self.fail = set(fail)
+        self.execute_raises = execute_raises
+        self.gets = []
+        self.executes = 0
+        self.opened = []
+        self.closes = 0
+        self.disconnected = False
+
+    def openTree(self, treename, shot):
+        self.opened.append((treename, shot))
+
+    def closeAllTrees(self):
+        self.closes += 1
+
+    def disconnect(self):
+        self.disconnected = True
+
+    def get(self, expression):
+        self.gets.append(expression)
+        if expression in self.fail:
+            raise _FakeMdsError(expression)
+        return _Value(self.values[expression])
+
+    def getMany(self):
+        return _FakeGetMany(self)
+
+
+class TestMdsRemoteBatchedGather(unittest.TestCase):
+    """Data, dims and units are independent expressions against an already-open
+    tree, so fetching them one at a time costs a round trip each for nothing."""
+
+    EXPRESSION = r"\ipmhd"
+
+    def _signal(self, fetch_units=True, dims=("times",)):
+        return MdsRemoteSignal(
+            self.EXPRESSION, "efit01", "fake.host:9999",
+            dims=dims, fetch_units=fetch_units,
+        )
+
+    def tearDown(self):
+        MdsConnectionRegistry()._connection_map.pop("fake.host:9999", None)
+
+    def _connection(self, sig, **kwargs):
+        values = {expr: f"value-of-{expr}" for _, _, expr in sig._gather_plan()}
+        connection = _FakeConnection(values, **kwargs)
+        # _do_gather asks the registry for its connection, so that is where a
+        # stand-in has to go.
+        MdsConnectionRegistry()._connection_map[sig.server] = connection
+        return connection
+
+    def test_plan_covers_data_then_dims_then_units(self):
+        sig = self._signal(dims=("times", "space"))
+        slots = [(slot, name) for slot, name, _ in sig._gather_plan()]
+        self.assertEqual(
+            slots,
+            [("data", None), ("dim", "times"), ("dim", "space"),
+             ("units", "data"), ("units", "times"), ("units", "space")],
+        )
+
+    def test_plan_omits_units_when_not_requested(self):
+        sig = self._signal(fetch_units=False)
+        slots = [(slot, name) for slot, name, _ in sig._gather_plan()]
+        self.assertEqual(slots, [("data", None), ("dim", "times")])
+
+    def test_batched_gather_is_a_single_round_trip(self):
+        sig = self._signal()
+        connection = self._connection(sig)
+
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 1)
+        self.assertEqual(connection.gets, [])
+
+    def test_serial_gather_is_a_round_trip_per_expression(self):
+        sig = self._signal()
+        connection = self._connection(sig)
+        sig._use_getmany = False
+
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 0)
+        self.assertEqual(len(connection.gets), 4)
+
+    def test_batched_and_serial_agree(self):
+        for fetch_units in (True, False):
+            with self.subTest(fetch_units=fetch_units):
+                sig = self._signal(fetch_units=fetch_units)
+                self._connection(sig)
+                batched = sig._do_gather(1234)
+                sig._use_getmany = False
+                serial = sig._do_gather(1234)
+                self.assertEqual(batched, serial)
+
+    def test_failed_entry_falls_back_so_the_real_error_surfaces(self):
+        # A failed entry carries no exception type and no readable message, and
+        # gather() keys its retry on the type, so the fetch is redone one at a
+        # time to raise the real thing.
+        sig = self._signal()
+        connection = self._connection(sig, fail=[self.EXPRESSION])
+
+        with self.assertRaises(_FakeMdsError):
+            sig._do_gather(1234)
+
+        self.assertEqual(connection.executes, 1)
+        self.assertIn(self.EXPRESSION, connection.gets)
+
+    def test_server_without_getmany_is_not_asked_twice(self):
+        sig = self._signal()
+        connection = self._connection(sig, execute_raises=True)
+
+        sig._do_gather(1234)
+        self.assertEqual(connection.executes, 1)
+        self.assertFalse(sig._use_getmany)
+        self.assertEqual(len(connection.gets), 4)
+
+        sig._do_gather(1234)
+        self.assertEqual(connection.executes, 1)
+        self.assertEqual(len(connection.gets), 8)
+
+
+class TestMdsRemoteOpenTreeDedup(unittest.TestCase):
+    """openTree only sets the connection's current tree, and signals sharing a
+    server share one connection -- so opening per signal costs a round trip
+    per signal for a tree the previous one just opened.
+    """
+
+    SERVER = "fake.host:9999"
+
+    def tearDown(self):
+        MdsConnectionRegistry()._connection_map.pop(self.SERVER, None)
+
+    def _signals(self, expressions, treename="efit01"):
+        return [
+            MdsRemoteSignal(expression, treename, self.SERVER,
+                            dims=("times",), fetch_units=False)
+            for expression in expressions
+        ]
+
+    def _install(self, sigs):
+        values = {
+            expression: f"value-of-{expression}"
+            for sig in sigs
+            for _, _, expression in sig._gather_plan()
+        }
+        connection = _FakeConnection(values)
+        MdsConnectionRegistry()._connection_map[self.SERVER] = connection
+        return connection
+
+    def test_signals_sharing_a_tree_open_it_once(self):
+        sigs = self._signals([r"\a", r"\b", r"\c"])
+        connection = self._install(sigs)
+
+        for sig in sigs:
+            sig._do_gather(1234)
+
+        self.assertEqual(connection.opened, [("efit01", 1234)])
+
+    def test_a_new_shot_reopens(self):
+        sigs = self._signals([r"\a", r"\b"])
+        connection = self._install(sigs)
+
+        for shot in (1234, 1235):
+            for sig in sigs:
+                sig._do_gather(shot)
+
+        self.assertEqual(connection.opened,
+                         [("efit01", 1234), ("efit01", 1235)])
+
+    def test_a_different_tree_reopens(self):
+        first = self._signals([r"\a"], treename="efit01")[0]
+        second = self._signals([r"\b"], treename="d3d")[0]
+        connection = self._install([first, second])
+
+        first._do_gather(1234)
+        second._do_gather(1234)
+        first._do_gather(1234)
+
+        self.assertEqual(
+            connection.opened,
+            [("efit01", 1234), ("d3d", 1234), ("efit01", 1234)],
+        )
+
+    def test_cleanup_shot_releases_nothing(self):
+        # A remote tree is not a per-shot resource -- the next shot's open
+        # replaces it -- so closing per record spent a round trip for nothing.
+        sig = self._signals([r"\a"])[0]
+        connection = self._install([sig])
+
+        sig._do_gather(1234)
+        sig.cleanup_shot(1234)
+        sig._do_gather(1234)
+
+        self.assertEqual(connection.closes, 0)
+        self.assertEqual(connection.opened, [("efit01", 1234)])
+
+    def test_cleanup_closes_the_trees_and_disconnects(self):
+        sig = self._signals([r"\a"])[0]
+        connection = self._install([sig])
+
+        sig._do_gather(1234)
+        sig.cleanup()
+
+        self.assertEqual(connection.closes, 1)
+        self.assertTrue(connection.disconnected)
+
+    def test_cleanup_does_not_dial_a_connection_to_close_trees(self):
+        # cleanup() on a signal that never fetched must not open a connection
+        # purely so that it has something to close.
+        sig = self._signals([r"\a"])[0]
+        MdsConnectionRegistry()._connection_map.pop(self.SERVER, None)
+
+        sig.cleanup()
+
+        self.assertNotIn(self.SERVER, MdsConnectionRegistry()._connection_map)
+
+    def test_a_failed_fetch_does_not_leave_the_tree_assumed_open(self):
+        # If a fetch fails the tree may be gone, so the next signal must not
+        # skip its open on the strength of the failed one.
+        sigs = self._signals([r"\a", r"\b"])
+        connection = self._install(sigs)
+        connection.fail.add(r"\a")
+
+        with self.assertRaises(_FakeMdsError):
+            sigs[0]._do_gather(1234)
+        sigs[1]._do_gather(1234)
+
+        self.assertEqual(connection.opened,
+                         [("efit01", 1234), ("efit01", 1234)])

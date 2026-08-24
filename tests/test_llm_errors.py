@@ -22,13 +22,14 @@ from toksearch.llm.errors import (
     LLMBackendError,
     LLMRateLimitError,
     LLMUserAbort,
+    LLMSkillsError,
 )
 
 
 class TestErrorHierarchy(unittest.TestCase):
     def test_all_inherit_from_llm_error(self):
         for cls in (LLMConfigError, LLMAuthError, LLMBackendError,
-                    LLMRateLimitError, LLMUserAbort):
+                    LLMRateLimitError, LLMUserAbort, LLMSkillsError):
             self.assertTrue(issubclass(cls, LLMError),
                             f"{cls.__name__} must inherit LLMError")
 
@@ -50,6 +51,13 @@ class TestErrorHierarchy(unittest.TestCase):
             raise LLMBackendError("503 service unavailable")
         except LLMBackendError as e:
             self.assertEqual(str(e), "503 service unavailable")
+
+
+class TestLLMSkillsError(unittest.TestCase):
+    def test_skills_error_is_llm_error(self):
+        self.assertTrue(issubclass(LLMSkillsError, LLMError))
+        with self.assertRaises(LLMError):
+            raise LLMSkillsError("boom")
 
 
 if __name__ == "__main__":

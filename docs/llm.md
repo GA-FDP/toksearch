@@ -65,9 +65,14 @@ DIII-D environment, the `fdp` script wraps the same commands with the
 FDP environment pre-configured (XRootD plugin, MDSplus tree paths, etc.):
 
 ```bash
-fdp query "Fetch ip for shot 200000 and report peak in MA."  # default: --backend amsc
+fdp query "Fetch ip for shot 200000 and report peak in MA."
 fdp chat                                                       # interactive
 ```
+
+The backend default is deployment-level, not device-driven: `--backend` →
+`$FDP_LLM_BACKEND` → `~/.fdp/config.toml [llm].backend` → built-in
+`anthropic`. GA on-prem users who want AmSC by default should set
+`backend = "amsc"` in `config.toml` (or `export FDP_LLM_BACKEND=amsc`).
 
 ### Python
 
@@ -141,6 +146,14 @@ Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
 `toksearch_d3d` contributes skills for `PtDataSignal`, `ImasSignal`, FDP CLI,
 and a DIII-D quickstart.
+
+Skills are served via a **standalone MCP server** launched as a subprocess when
+`Session` is constructed: `python -m toksearch.llm.mcp`. Each `SKILL.md` is
+exposed as a `skill://<name>` MCP resource (and via a `read_skill` tool). The
+`toksearch.llm.skills` entry-point group remains the discovery source; extra
+directories can be added via the `TOKSEARCH_SKILL_DIRS` env var
+(os.pathsep-delimited). An external MCP client can also connect to the server
+directly to browse or read skills independently of `Session`.
 
 ## Show-then-run
 

@@ -72,6 +72,41 @@ class TestSignalRegistry(unittest.TestCase):
         # Should not raise an error
         self.assertIn(sig, reg)
 
+    def test_cleanup_shot_dedupes_signals_sharing_a_resource(self):
+        # One connection behind three signals is still one thing to close.
+        reg = SignalRegistry()
+        reg.reset()
+        sigs = [_SharedResourceSignal("conn") for _ in range(3)]
+        for sig in sigs:
+            reg.register(sig)
+
+        reg.cleanup_shot(1234)
+
+        self.assertEqual(sum(s.cleanup_shot_calls for s in sigs), 1)
+
+    def test_cleanup_shot_visits_each_distinct_resource(self):
+        reg = SignalRegistry()
+        reg.reset()
+        sigs = [_SharedResourceSignal(name) for name in ("a", "b", "c")]
+        for sig in sigs:
+            reg.register(sig)
+
+        reg.cleanup_shot(1234)
+
+        self.assertEqual(sum(s.cleanup_shot_calls for s in sigs), 3)
+
+    def test_cleanup_shot_does_not_dedupe_by_default(self):
+        # A signal that has not said what it shares is cleaned on its own.
+        reg = SignalRegistry()
+        reg.reset()
+        sigs = [_SharedResourceSignal() for _ in range(3)]
+        for sig in sigs:
+            reg.register(sig)
+
+        reg.cleanup_shot(1234)
+
+        self.assertEqual(sum(s.cleanup_shot_calls for s in sigs), 3)
+
     def test_register_same_signal_twice(self):
         reg = SignalRegistry()
         reg.reset()
@@ -80,6 +115,27 @@ class TestSignalRegistry(unittest.TestCase):
         reg.register(sig)
         self.assertIn(sig, reg)
         self.assertEqual(len(reg.signals), 1)
+
+
+class _SharedResourceSignal(MockSignal):
+    """MockSignal that counts cleanup_shot calls and can share a resource.
+
+    Passing the same ``resource`` to two of these makes them look, to the
+    registry, like two signals backed by one connection.
+    """
+
+    def __init__(self, resource=None, **kwargs):
+        super().__init__(**kwargs)
+        self.resource = resource
+        self.cleanup_shot_calls = 0
+
+    def cleanup_shot(self, shot):
+        self.cleanup_shot_calls += 1
+
+    def cleanup_shot_key(self):
+        if self.resource is None:
+            return super().cleanup_shot_key()
+        return ("resource", self.resource)
 
 
 class TestDimensionedSignal(unittest.TestCase):

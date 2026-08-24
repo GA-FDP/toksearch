@@ -181,14 +181,15 @@ _LOOKUP_DOCS_DESCRIPTION = (
 
 def _lookup_docs_handler(args: dict, session) -> ToolOutput:
     name = args["skill_name"]
-    skill = session.skills.get(name)
-    if skill is None:
+    try:
+        body = session._skills_client.read_skill(name)
+    except Exception as e:   # noqa: BLE001 -- unknown skill or transport error
         available = sorted(session.skills)
         return ToolOutput(
-            text=f"Unknown skill: {name!r}. Available: {available}",
+            text=f"Unknown skill: {name!r}. Available: {available} ({e})",
             is_error=True,
         )
-    return ToolOutput(text=skill.body, is_error=False)
+    return ToolOutput(text=body, is_error=False)
 
 
 LOOKUP_DOCS = ToolSpec(
