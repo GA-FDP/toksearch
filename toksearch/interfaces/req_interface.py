@@ -74,9 +74,9 @@ def _fetch_tree_group_via_server(server, treename, shot, reqs):
     for req in reqs:
         try:
             results[_req_key(req)] = many.get(req.mds_path).data()
-        except MdsIpException as e:
+        except MdsIpException:
             # This is needed to propagate the %TREE-E-NODATA exception which is not properly raised if many.get fails
-            results[_req_key(req)] = MDSplus.mdsExceptions.MdsException(MDSplus.Data.data(fetched_data[req.mds_path][str('error')]))
+            results[_req_key(req)] = MDSplus.mdsExceptions.MdsException(MDSplus.Data.data(fetched_data[req.mds_path]["error"]))
     return results
 
 
