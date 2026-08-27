@@ -121,14 +121,14 @@ class TestFetchManyFromReq(unittest.TestCase):
     def test_fdp_failure_falls_back_to_atlas(self):
         reqs = [FakeReq("BT", 12345, "TREE_A")]
 
-        # Stands in for _fetch_tree_group_via_server: the FDP thin client is
-        # down, so only the follow-up atlas attempt returns data.
-        def _fdp_down_then_atlas_ok(server, treename, shot, group):
-            if server == ri._FDP_THINCLIENT_SERVER:
-                raise RuntimeError("fdp down")
-            return {r.as_key(): "atlas-batch" for r in group}
-
-        self.mock_tree.side_effect = _fdp_down_then_atlas_ok
+        # One entry per expected attempt: the FDP thin client is down, the
+        # follow-up atlas attempt returns data. Sequenced rather than dispatched
+        # on the server argument so the raise happens inside mock rather than in
+        # a test-local function, which debuggers flag as user-unhandled.
+        self.mock_tree.side_effect = [
+            RuntimeError("fdp down"),
+            {reqs[0].as_key(): "atlas-batch"},
+        ]
 
         # assertLogs both captures the expected "trying next server" warning --
         # keeping it out of the test output, where it reads as a failure -- and
