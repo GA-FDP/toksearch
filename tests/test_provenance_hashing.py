@@ -1,3 +1,17 @@
+# Copyright 2026 General Atomics
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import unittest
 
 from toksearch.provenance.hashing import canonical_json, sha256_of, callable_spec
@@ -49,12 +63,21 @@ class TestCallableSpec(unittest.TestCase):
         self.assertEqual(spec["module"], __name__)
 
     def test_captures_source_hash(self):
-        spec = callable_spec(_example_func)
-        self.assertEqual(len(spec["source_sha256"]), 64)
+        import hashlib
+        import inspect
+
+        expected = hashlib.sha256(
+            inspect.getsource(_example_func).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(callable_spec(_example_func)["source_sha256"], expected)
 
     def test_source_hash_is_none_when_source_unavailable(self):
+        # A lambda built by eval has no retrievable source: inspect.getsource
+        # raises OSError. The key must still be present, and its value None --
+        # asserting only that the key exists would let a regression that
+        # populates it with a stale digest pass unnoticed.
         spec = callable_spec(eval("lambda x: x"))
-        self.assertIn("source_sha256", spec)
+        self.assertIsNone(spec["source_sha256"])
 
     def test_builtin_does_not_raise(self):
         spec = callable_spec(len)
