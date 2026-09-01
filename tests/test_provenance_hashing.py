@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
 import unittest
 
 from toksearch.provenance.hashing import canonical_json, sha256_of, callable_spec
@@ -19,6 +20,17 @@ from toksearch.provenance.hashing import canonical_json, sha256_of, callable_spe
 
 def _example_func(x):
     return x + 1
+
+
+class _CallableObject:
+    """An instance used as a map function -- has no __name__."""
+
+    def __call__(self, record):
+        return record
+
+
+class _Plain:
+    """No custom __repr__, so its default repr embeds a memory address."""
 
 
 class TestCanonicalJson(unittest.TestCase):
@@ -32,7 +44,8 @@ class TestCanonicalJson(unittest.TestCase):
 
     def test_non_serializable_falls_back_to_repr_string(self):
         out = canonical_json({"a": object()})
-        self.assertIn("object object at", out)
+        self.assertIn("object object", out)
+        self.assertNotIn("0x", out)
 
     def test_nested_dicts_are_also_sorted(self):
         a = {"outer": {"z": 1, "y": 2}}
@@ -82,3 +95,75 @@ class TestCallableSpec(unittest.TestCase):
     def test_builtin_does_not_raise(self):
         spec = callable_spec(len)
         self.assertEqual(spec["name"], "len")
+
+
+class TestDeterminismAcrossRuns(unittest.TestCase):
+    """The properties everything downstream rests on.
+
+    Each of these fails against a naive ``default=repr`` implementation. They
+    exist because a fingerprint that changes between runs silently breaks
+    input-artifact dedup: CMF records two runs over identical data as two
+    different inputs, and the lineage graph stops connecting.
+    """
+
+    def test_partial_name_has_no_memory_address(self):
+        p = functools.partial(_example_func)
+        self.assertNotIn("0x", canonical_json(callable_spec(p)))
+
+    def test_partial_fingerprint_is_stable(self):
+        a = functools.partial(_example_func, 1)
+        b = functools.partial(_example_func, 1)
+        self.assertEqual(sha256_of(callable_spec(a)), sha256_of(callable_spec(b)))
+
+    def test_partial_keeps_the_wrapped_function_identity(self):
+        spec = callable_spec(functools.partial(_example_func, 1))
+        self.assertEqual(spec["name"], "_example_func")
+
+    def test_partial_records_bound_arguments(self):
+        spec = callable_spec(functools.partial(_example_func, threshold=5))
+        self.assertEqual(spec["partial_keywords"], {"threshold": "5"})
+
+    def test_partials_with_different_bound_args_differ(self):
+        a = callable_spec(functools.partial(_example_func, threshold=5))
+        b = callable_spec(functools.partial(_example_func, threshold=6))
+        self.assertNotEqual(a, b)
+
+    def test_callable_object_name_has_no_memory_address(self):
+        self.assertNotIn("0x", canonical_json(callable_spec(_CallableObject())))
+
+    def test_callable_object_is_identified_by_its_class(self):
+        spec = callable_spec(_CallableObject())
+        self.assertEqual(spec["name"], f"{__name__}._CallableObject")
+
+    def test_two_callable_object_instances_fingerprint_alike(self):
+        self.assertEqual(
+            sha256_of(callable_spec(_CallableObject())),
+            sha256_of(callable_spec(_CallableObject())),
+        )
+
+    def test_callable_object_captures_class_source(self):
+        self.assertIsNotNone(callable_spec(_CallableObject())["source_sha256"])
+
+    def test_sets_serialize_in_a_stable_order(self):
+        a = canonical_json({"s": {"zebra", "apple", "mango"}})
+        b = canonical_json({"s": {"mango", "zebra", "apple"}})
+        self.assertEqual(a, b)
+
+    def test_nested_sets_are_stable(self):
+        self.assertEqual(
+            canonical_json([{"b", "a"}]), canonical_json([{"a", "b"}])
+        )
+
+    def test_tuple_dict_keys_do_not_raise(self):
+        canonical_json({(1, 2): "a"})
+
+    def test_mixed_type_dict_keys_do_not_raise(self):
+        canonical_json({1: "a", "1": "b"})
+
+    def test_object_without_custom_repr_has_no_memory_address(self):
+        self.assertNotIn("0x", canonical_json({"o": object()}))
+
+    def test_object_fallback_is_stable_across_instances(self):
+        self.assertEqual(
+            canonical_json({"o": _Plain()}), canonical_json({"o": _Plain()})
+        )
