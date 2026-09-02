@@ -55,6 +55,7 @@ from .pipeline_funcs import (
     _PipelineKeep,
     _PipelineAlign,
     _PipelineWhere,
+    _SafeWrite,
 )
 
 from .align import XarrayAligner
@@ -113,6 +114,7 @@ class Pipeline:
         keep: Keep only the fields specified in the list
         align: Align an xarray dataset with a specified set of coordinates
             (typically times)
+        write: Write one file per record from within the pipeline
         where: Apply a function to the records of the previous step in the pipeline,
             and keep the record if the result is truthy, remove it otherwise
         compute_shot: Run the pipeline for a single shot, returning a record object
@@ -330,6 +332,111 @@ class Pipeline:
         )
 
         self.map(_PipelineAlign(ds_name, aligner))
+
+    def write(
+        self,
+        directory: str,
+        field: Optional[str] = None,
+        fields: Optional[List[str]] = None,
+        fmt: Optional[str] = None,
+        name: Optional[Callable] = None,
+        track: str = "directory",
+        exist_ok: bool = False,
+        path_field: str = "output_path",
+    ):
+        """Write one file per record, in the worker that produced it.
+
+        This is the recommended way to get data out of a pipeline. Writing per
+        shot in the workers is both faster and more honest than concatenating
+        on the driver: concatenation is a transformation, and it deserves its
+        own stage rather than hiding inside a writer.
+
+        Read the results back with ``xarray.open_mfdataset(directory +
+        '/*.nc')`` where ``dask`` is installed. Without it, open per file::
+
+            import glob, xarray as xr
+            ds = xr.concat(
+                [xr.open_dataset(f) for f in sorted(glob.glob('out/*.nc'))],
+                dim='shot',
+            )
+
+        Without ``netCDF4``/``h5netcdf``, xarray writes NetCDF3 via scipy,
+        which has no int64 -- integer coordinates read back as int32.
+
+        Two forms:
+
+        **Declarative** -- pass ``field`` or ``fields``. The operation is
+        appended immediately and None is returned::
+
+            pipeline.write('out/peaks', field='ds', fmt='netcdf')
+
+        **Decorator** -- pass neither. A decorator is returned; applying it to
+        a function appends the operation and gives the function back
+        unchanged::
+
+            @pipeline.write('out/peaks', fmt='netcdf')
+            def shot_file(rec):
+                return rec['ds']
+
+        A two-argument function takes ``(record, path)``, writes the file
+        itself, and returns the path it wrote.
+
+        Arguments:
+            directory: Output directory. Created if absent.
+            field: Single record field to write.
+            fields: Several record fields, merged with ``xarray.merge``.
+            fmt: Format name ('netcdf', 'parquet', 'npy', 'npz', 'json').
+                Inferred from the object's type when omitted.
+            name: Callable ``(record) -> str`` producing the basename without
+                extension. Defaults to the shot number.
+            track: Provenance granularity. 'directory' (default) records the
+                whole directory as one artifact; 'file' records one artifact
+                per shot.
+            exist_ok: Allow writing into a non-empty directory. Off by
+                default: two runs interleaving into one directory silently
+                corrupt the directory's content hash, and ``flock`` is not
+                cross-client on BeeGFS so nothing else prevents it.
+            path_field: Record field that receives the written path.
+
+        Returns:
+            None in declarative form, a decorator in decorator form.
+        """
+        if track not in ("directory", "file"):
+            raise ValueError(
+                f"track must be 'directory' or 'file', got {track!r}"
+            )
+
+        if not exist_ok and os.path.isdir(directory) and os.listdir(directory):
+            raise ValueError(
+                f"Output directory {directory!r} is not empty. Writing into "
+                f"it would mix this run's output with existing files and "
+                f"corrupt the directory's provenance hash. Use a fresh "
+                f"directory, or pass exist_ok=True if you are certain."
+            )
+
+        def _append(func=None):
+            self._append_operation(
+                _SafeWrite(
+                    directory,
+                    field=field,
+                    fields=fields,
+                    fmt=fmt,
+                    func=func,
+                    name=name,
+                    track=track,
+                    path_field=path_field,
+                )
+            )
+
+        if field is not None or fields:
+            _append()
+            return None
+
+        def decorator(func):
+            _append(func)
+            return func
+
+        return decorator
 
     def where(self, func):
         """

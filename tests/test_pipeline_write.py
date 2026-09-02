@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import glob
 import os
 import tempfile
 import unittest
@@ -372,3 +373,185 @@ class TestSafeWrite(unittest.TestCase):
                 code=capture_code(),
             )
             self.assertEqual(ctx.write_directories(), [os.path.abspath(d)])
+
+
+from toksearch import Pipeline
+from toksearch.signal.mock_signal import MockSignal
+
+
+class TestPipelineWrite(unittest.TestCase):
+    def _pipeline(self):
+        pipeline = Pipeline([1, 2, 3])
+        pipeline.fetch_dataset("ds", {"ip": MockSignal()})
+        return pipeline
+
+    def test_declarative_form_writes_one_file_per_shot(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            pipeline.compute_serial()
+            self.assertEqual(sorted(os.listdir(out)), ["1.nc", "2.nc", "3.nc"])
+
+    def test_declarative_form_returns_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+            self.assertIsNone(pipeline.write(os.path.join(d, "p"), field="ds"))
+
+    def test_decorator_form_writes_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+
+            @pipeline.write(out, fmt="netcdf")
+            def shot_file(rec):
+                return rec["ds"]
+
+            pipeline.compute_serial()
+            self.assertEqual(sorted(os.listdir(out)), ["1.nc", "2.nc", "3.nc"])
+
+    def test_decorator_returns_the_original_function(self):
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+
+            @pipeline.write(os.path.join(d, "p"), fmt="netcdf")
+            def shot_file(rec):
+                return rec["ds"]
+
+            self.assertEqual(shot_file.__name__, "shot_file")
+            self.assertTrue(callable(shot_file))
+
+    def test_two_argument_decorator_form(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+
+            @pipeline.write(out)
+            def shot_file(rec, path):
+                with open(path, "w") as fh:
+                    fh.write(str(rec.shot))
+                return path
+
+            pipeline.compute_serial()
+            self.assertEqual(sorted(os.listdir(out)), ["1", "2", "3"])
+
+    def test_multiprocessing_backend_writes_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            pipeline.compute_multiprocessing(num_workers=2)
+            self.assertEqual(sorted(os.listdir(out)), ["1.nc", "2.nc", "3.nc"])
+
+    def test_written_files_are_readable(self):
+        # Per-file open, not open_mfdataset: dask is not installed here.
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            pipeline.compute_serial()
+            written = sorted(glob.glob(os.path.join(out, "*.nc")))
+            merged = xr.concat([xr.open_dataset(f) for f in written], dim="shot")
+            self.assertIn("ip", merged)
+
+    def test_non_empty_directory_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            os.makedirs(out)
+            with open(os.path.join(out, "stale.nc"), "w") as fh:
+                fh.write("old")
+            pipeline = self._pipeline()
+            with self.assertRaises(ValueError):
+                pipeline.write(out, field="ds", fmt="netcdf")
+
+    def test_the_refusal_explains_why(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            os.makedirs(out)
+            with open(os.path.join(out, "stale.nc"), "w") as fh:
+                fh.write("old")
+            pipeline = self._pipeline()
+            with self.assertRaises(ValueError) as caught:
+                pipeline.write(out, field="ds", fmt="netcdf")
+            self.assertIn("exist_ok", str(caught.exception))
+
+    def test_non_empty_directory_allowed_with_exist_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            os.makedirs(out)
+            with open(os.path.join(out, "stale.nc"), "w") as fh:
+                fh.write("old")
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf", exist_ok=True)
+
+    def test_an_empty_existing_directory_is_fine(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            os.makedirs(out)
+            self._pipeline().write(out, field="ds", fmt="netcdf")
+
+    def test_write_appears_in_the_run_context_ops(self):
+        from toksearch.backend.serial import SerialRecordSet
+
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+            pipeline.write(os.path.join(d, "p"), field="ds", fmt="netcdf")
+            ctx = pipeline._run_context(SerialRecordSet, None)
+            self.assertEqual([op.op for op in ctx.ops][-1], "write")
+
+    def test_write_directories_needs_no_computation(self):
+        # RunContext.write_directories reads the pipeline definition, so the
+        # output directory is known before anything runs. That is what keeps
+        # provenance from forcing materialization on lazy Ray/Spark backends.
+        from toksearch.backend.serial import SerialRecordSet
+
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            ctx = pipeline._run_context(SerialRecordSet, None)
+            self.assertEqual(ctx.write_directories(), [os.path.abspath(out)])
+
+    def test_track_file_is_recorded_in_the_spec(self):
+        from toksearch.backend.serial import SerialRecordSet
+
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+            pipeline.write(os.path.join(d, "p"), field="ds", fmt="netcdf",
+                           track="file")
+            ctx = pipeline._run_context(SerialRecordSet, None)
+            self.assertEqual(ctx.ops[-1].detail["track"], "file")
+
+    def test_track_file_is_excluded_from_write_directories(self):
+        from toksearch.backend.serial import SerialRecordSet
+
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+            pipeline.write(os.path.join(d, "p"), field="ds", fmt="netcdf",
+                           track="file")
+            ctx = pipeline._run_context(SerialRecordSet, None)
+            self.assertEqual(ctx.write_directories(), [])
+
+    def test_invalid_track_value_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            pipeline = self._pipeline()
+            with self.assertRaises(ValueError):
+                pipeline.write(os.path.join(d, "p"), field="ds", track="bogus")
+
+    def test_end_to_end_with_provenance(self):
+        import json
+
+        from toksearch.provenance import JsonProvenance
+
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            record = os.path.join(d, "run.json")
+            prov = JsonProvenance("study", path=record)
+            pipeline = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            pipeline.compute_serial(provenance=prov)
+            prov.finalize()
+            with open(record) as fh:
+                payload = json.load(fh)
+        self.assertEqual([o["path"] for o in payload["outputs"]],
+                         [os.path.abspath(out)])
