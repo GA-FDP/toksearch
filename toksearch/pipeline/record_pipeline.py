@@ -81,6 +81,7 @@ if TYPE_CHECKING:
 
 from .pipeline_source import PipelineSource
 
+from ..provenance.base import safe_call
 from ..provenance.code import capture_code
 from ..provenance.context import RunContext, SourceSpec, BackendSpec
 from ..provenance.hashing import sha256_of
@@ -357,7 +358,10 @@ class Pipeline:
         # return self._map_single_shot(record)
 
     def compute(
-        self, recordset_cls: Type[RecordSet], config: Optional[object] = None
+        self,
+        recordset_cls: Type[RecordSet],
+        config: Optional[object] = None,
+        provenance: Optional[object] = None,
     ) -> RecordSet:
         """Apply the pipeline using a backend defined by recordset_cls
 
@@ -366,26 +370,43 @@ class Pipeline:
                 of RecordSet.
             config: Configuration object for the backend RecordSet (e.g. RayConfig if
                 using Ray, MultiprocessingConfig if using multiprocessing, etc.)
+            provenance: Optional Provenance backend. When given, the run is
+                described and recorded. Backend failures are warnings, never
+                exceptions -- see toksearch.provenance.safe_call.
 
         Returns:
             RecordSet: The record set
         """
+        ctx = None
+        if provenance is not None:
+            ctx = self._run_context(recordset_cls, config)
+            safe_call(provenance, "on_compute_start", ctx)
 
         if isinstance(self.parent, RecordSet):
             initial_result = self.parent
         else:
             initial_result = self.parent.create_recordset(recordset_cls, config=config)
 
-        return initial_result.map(*self._operations)
+        result = initial_result.map(*self._operations)
+
+        if provenance is not None:
+            result.provenance = provenance
+            result.run_id = getattr(provenance, "run_id", None)
+            safe_call(provenance, "on_compute_end", ctx, result)
+
+        return result
 
     ####################### SERIAL ######################
 
-    def compute_serial(self):
+    def compute_serial(self, provenance: Optional[object] = None):
         """Apply the pipeline serially on the local host
+
+        Arguments:
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns a SerialRecordSet object
         """
-        return self.compute(SerialRecordSet)
+        return self.compute(SerialRecordSet, provenance=provenance)
 
     ####################### RAY  ######################
 
@@ -396,6 +417,7 @@ class Pipeline:
         verbose: bool = True,
         placement_group_func: Optional[Callable] = None,
         memory_per_shot: Optional[int] = None,
+        provenance: Optional[object] = None,
         **ray_init_kwargs,
     ) -> RayRecordSet:
         """Apply the pipeline using Ray
@@ -410,6 +432,7 @@ class Pipeline:
                 for more information on placement groups.
             memory_per_shot: Memory to allocate to each shot in bytes. If not provided, there
                 is no limit.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Other Arguments:
             **ray_init_kwargs: Keyword arguments to pass to ray.init
@@ -426,7 +449,7 @@ class Pipeline:
             **ray_init_kwargs,
         )
 
-        return self.compute(RayRecordSet, config=config)
+        return self.compute(RayRecordSet, config=config, provenance=provenance)
 
     ####################### SPARK  ######################
     def compute_spark(
@@ -434,6 +457,7 @@ class Pipeline:
         sc: Optional[SparkContext] = None,
         numparts: Optional[int] = None,
         cache: bool = False,
+        provenance: Optional[object] = None,
     ) -> SparkRecordSet:
         """Apply the pipeline using Spark
 
@@ -442,6 +466,7 @@ class Pipeline:
         numparts: Number of partitions to use. If not provided, defaults to the number of records.
                 will be used.
             cache: Whether to cache the RDD. Default is False.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             SparkRecordSet: The record set
@@ -449,13 +474,14 @@ class Pipeline:
         from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
 
         config = ToksearchSparkConfig(sc=sc, numparts=numparts, cache=cache)
-        return self.compute(SparkRecordSet, config=config)
+        return self.compute(SparkRecordSet, config=config, provenance=provenance)
 
     ####################### MULTIPROCESSING  ######################
     def compute_multiprocessing(
         self,
         num_workers: Optional[int] = None,
         batch_size: Union[str, int] = "auto",
+        provenance: Optional[object] = None,
     ) -> MultiprocessingRecordSet:
         """Apply the pipeline using multiprocessing
 
@@ -464,12 +490,13 @@ class Pipeline:
                 If set to None (the default), half the number of CPUs on the machine will be used.
             batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
                 Defaults to "auto".
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             MultiprocessingRecordSet: The record set
         """
         config = MultiprocessingConfig(num_workers=num_workers, batch_size=batch_size)
-        return self.compute(MultiprocessingRecordSet, config=config)
+        return self.compute(MultiprocessingRecordSet, config=config, provenance=provenance)
 
     ####################### Private methods ######################
 

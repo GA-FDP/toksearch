@@ -229,3 +229,120 @@ class TestJsonProvenance(unittest.TestCase):
             with open(path) as fh:
                 outputs = [o["path"] for o in json.load(fh)["outputs"]]
         self.assertEqual(outputs, ["/tmp/peaks"])
+
+
+class _RecordingProvenance(Provenance):
+    def __init__(self):
+        self.run_id = "run-abc"
+        self.calls = []
+
+    def on_compute_start(self, ctx):
+        self.calls.append(("start", ctx))
+
+    def on_compute_end(self, ctx, recordset):
+        self.calls.append(("end", ctx, recordset))
+
+    def output(self, *paths, **custom_properties):
+        self.calls.append(("output", paths))
+
+    def metrics(self, name, values):
+        self.calls.append(("metrics", name))
+
+    def finalize(self):
+        self.calls.append(("finalize",))
+
+
+class TestComputeWiring(unittest.TestCase):
+    def _pipeline(self):
+        pipeline = Pipeline([1, 2, 3])
+        pipeline.fetch("ip", MockSignal())
+        return pipeline
+
+    def test_serial_calls_start_and_end(self):
+        prov = _RecordingProvenance()
+        self._pipeline().compute_serial(provenance=prov)
+        self.assertEqual([c[0] for c in prov.calls], ["start", "end"])
+
+    def test_multiprocessing_calls_start_and_end(self):
+        prov = _RecordingProvenance()
+        self._pipeline().compute_multiprocessing(num_workers=2, provenance=prov)
+        self.assertEqual([c[0] for c in prov.calls], ["start", "end"])
+
+    def test_start_receives_a_run_context(self):
+        from toksearch.provenance import RunContext
+
+        prov = _RecordingProvenance()
+        self._pipeline().compute_serial(provenance=prov)
+        self.assertIsInstance(prov.calls[0][1], RunContext)
+
+    def test_no_provenance_means_no_calls_and_no_error(self):
+        results = self._pipeline().compute_serial()
+        self.assertEqual(len(results), 3)
+
+    def test_no_provenance_leaves_recordset_attributes_none(self):
+        results = self._pipeline().compute_serial()
+        self.assertIsNone(results.provenance)
+        self.assertIsNone(results.run_id)
+
+    def test_recordset_carries_the_provenance(self):
+        prov = _RecordingProvenance()
+        results = self._pipeline().compute_serial(provenance=prov)
+        self.assertIs(results.provenance, prov)
+
+    def test_recordset_carries_the_run_id(self):
+        prov = _RecordingProvenance()
+        results = self._pipeline().compute_serial(provenance=prov)
+        self.assertEqual(results.run_id, "run-abc")
+
+    def test_chained_pipeline_records_the_parent_run(self):
+        prov = _RecordingProvenance()
+        first = self._pipeline().compute_serial(provenance=prov)
+        second = Pipeline(first)
+        ctx = second._run_context(SerialRecordSet, None)
+        self.assertEqual(ctx.parent_run, "run-abc")
+
+    def test_a_failing_backend_does_not_fail_the_run(self):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            results = self._pipeline().compute_serial(
+                provenance=_ExplodingProvenance()
+            )
+        self.assertEqual(len(results), 3)
+
+    def test_a_failing_backend_warns(self):
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._pipeline().compute_serial(provenance=_ExplodingProvenance())
+        self.assertTrue(any("_ExplodingProvenance" in str(c.message) for c in caught))
+
+    def test_end_receives_the_returned_recordset(self):
+        prov = _RecordingProvenance()
+        results = self._pipeline().compute_serial(provenance=prov)
+        self.assertIs(prov.calls[1][2], results)
+
+    def test_the_same_context_object_reaches_both_hooks(self):
+        # One derivation per compute, not two: re-deriving could produce a
+        # different code capture or a different identity mid-run.
+        prov = _RecordingProvenance()
+        self._pipeline().compute_serial(provenance=prov)
+        self.assertIs(prov.calls[0][1], prov.calls[1][1])
+
+    def test_json_provenance_end_to_end_through_compute(self):
+        import json
+        import os
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "run.json")
+            prov = JsonProvenance("study", path=path)
+            self._pipeline().compute_serial(provenance=prov)
+            prov.finalize()
+            with open(path) as fh:
+                payload = json.load(fh)
+        self.assertEqual(payload["pipeline_name"], "study")
+        self.assertIn("ip", payload["context"]["signals"])
+        self.assertEqual(payload["context"]["backend"]["kind"], "SerialRecordSet")

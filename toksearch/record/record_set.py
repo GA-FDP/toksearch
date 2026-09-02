@@ -30,6 +30,12 @@ class RecordSet(ABC):
             shutting down a SparkContext or Ray cluster
     """
 
+    #: Set by Pipeline.compute when a provenance backend is in use. Carrying
+    #: it on the record set is what makes an in-process pipeline chain
+    #: automatically linkable: Pipeline(previous_recordset) can read it.
+    provenance = None
+    run_id = None
+
     @abstractmethod
     def __len__(self):
         pass
