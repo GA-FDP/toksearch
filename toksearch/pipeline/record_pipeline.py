@@ -81,6 +81,10 @@ if TYPE_CHECKING:
 
 from .pipeline_source import PipelineSource
 
+from ..provenance.code import capture_code
+from ..provenance.context import RunContext, SourceSpec, BackendSpec
+from ..provenance.hashing import sha256_of
+
 
 class MissingColumnName(Exception):
     pass
@@ -181,7 +185,9 @@ class Pipeline:
 
         results = [dict(zip(column_names, row)) for row in cursor.fetchall()]
 
-        return cls(results)
+        pipeline = cls(results)
+        pipeline._sql_source = {"query": query, "params": tuple(query_params)}
+        return pipeline
 
     def __init__(
         self,
@@ -226,6 +232,14 @@ class Pipeline:
             self.do_shot_cleanups = False
             self.do_cleanups = False
             self._operations = []
+
+        # Propagate through pipeline chaining; a RecordSet or shot-list parent
+        # has no query behind it.
+        self._sql_source = (
+            getattr(parent, "_sql_source", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
 
     def fetch(self, name: str, signal: "Signal"):
         """Add a signal to be fetched by the pipeline
@@ -467,3 +481,63 @@ class Pipeline:
 
     def _append_operation(self, func):
         self._operations.append(func)
+
+    def _source_spec(self) -> SourceSpec:
+        """Describe where this pipeline's records come from."""
+        if self._sql_source is not None:
+            return SourceSpec(
+                kind="sql",
+                query=self._sql_source["query"],
+                params=self._sql_source["params"],
+                hash=sha256_of(self._sql_source),
+            )
+
+        if isinstance(self.parent, RecordSet):
+            return SourceSpec(kind="recordset", count=len(self.parent))
+
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return SourceSpec(kind="unknown")
+
+        shots = sorted(rec.shot for rec in records)
+        return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
+
+    def _run_context(self, recordset_cls, config) -> RunContext:
+        """Derive the full description of the run about to happen."""
+        op_specs = tuple(
+            op.spec() for op in self._operations if hasattr(op, "spec")
+        )
+
+        signals = {}
+        for spec in op_specs:
+            if spec.op == "fetch":
+                signals[spec.detail["name"]] = spec.detail["signal"]
+            elif spec.op == "fetch_dataset":
+                key = f"{spec.detail['ds_name']}.{spec.detail['signame']}"
+                signals[key] = spec.detail["signal"]
+
+        config_dict = {}
+        if config is not None:
+            config_dict = {
+                k: v for k, v in vars(config).items() if not k.startswith("_")
+            }
+
+        return RunContext(
+            source=self._source_spec(),
+            ops=op_specs,
+            signals=signals,
+            backend=BackendSpec(kind=recordset_cls.__name__, config=config_dict),
+            code=capture_code(),
+            device=self._device_hint(signals),
+            parent_run=getattr(self.parent, "run_id", None),
+        )
+
+    @staticmethod
+    def _device_hint(signals) -> Optional[str]:
+        """Best-effort device name, from the modules the signals came from."""
+        modules = {s.get("module", "") or "" for s in signals.values()}
+        if any(m.startswith("toksearch_d3d") for m in modules):
+            return "d3d"
+        if any(m.startswith("toksearch_mast") for m in modules):
+            return "mast"
+        return None

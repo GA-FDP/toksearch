@@ -203,3 +203,133 @@ class TestOperationSpecs(unittest.TestCase):
             p.where(_a_where_func)
 
         canonical_json(_specs_for(build))
+
+
+from toksearch.backend.serial import SerialRecordSet
+from toksearch.backend.multiprocessing import (
+    MultiprocessingRecordSet,
+    MultiprocessingConfig,
+)
+
+
+class TestRunContext(unittest.TestCase):
+    def _ctx(self, shots=(1, 2, 3)):
+        pipeline = Pipeline(list(shots))
+        pipeline.fetch("ip", MockSignal())
+        pipeline.map(_a_map_func)
+        return pipeline._run_context(SerialRecordSet, None)
+
+    def test_source_kind_is_shotlist(self):
+        self.assertEqual(self._ctx().source.kind, "shotlist")
+
+    def test_source_records_the_count(self):
+        self.assertEqual(self._ctx().source.count, 3)
+
+    def test_source_hash_is_stable_for_the_same_shots(self):
+        self.assertEqual(self._ctx().source.hash, self._ctx().source.hash)
+
+    def test_source_hash_ignores_shot_order(self):
+        a = self._ctx(shots=(1, 2, 3)).source.hash
+        b = self._ctx(shots=(3, 1, 2)).source.hash
+        self.assertEqual(a, b)
+
+    def test_source_hash_differs_for_different_shots(self):
+        self.assertNotEqual(self._ctx(shots=(1, 2)).source.hash,
+                            self._ctx(shots=(1, 2, 3)).source.hash)
+
+    def test_signals_are_collected_by_field_name(self):
+        self.assertIn("ip", self._ctx().signals)
+
+    def test_ops_are_recorded_in_order(self):
+        self.assertEqual([op.op for op in self._ctx().ops], ["fetch", "map"])
+
+    def test_backend_kind_is_the_recordset_class_name(self):
+        self.assertEqual(self._ctx().backend.kind, "SerialRecordSet")
+
+    def test_backend_config_is_captured(self):
+        pipeline = Pipeline([1])
+        config = MultiprocessingConfig(num_workers=4)
+        ctx = pipeline._run_context(MultiprocessingRecordSet, config)
+        self.assertEqual(ctx.backend.config["num_workers"], 4)
+
+    def test_code_is_captured(self):
+        self.assertIsInstance(self._ctx().code.argv, tuple)
+
+    def test_parent_run_is_none_without_a_parent(self):
+        self.assertIsNone(self._ctx().parent_run)
+
+    def test_to_dict_is_canonically_serializable(self):
+        from toksearch.provenance.hashing import canonical_json
+        canonical_json(self._ctx().to_dict())
+
+    def test_to_dict_carries_no_memory_address(self):
+        from toksearch.provenance.hashing import canonical_json
+        self.assertNotIn("0x", canonical_json(self._ctx().to_dict()))
+
+    def test_two_identical_pipelines_share_an_input_identity(self):
+        self.assertEqual(self._ctx().input_identity(), self._ctx().input_identity())
+
+    def test_input_identity_changes_with_signals(self):
+        a = self._ctx()
+        p = Pipeline([1, 2, 3])
+        p.fetch("ip", MockSignal(data=[9, 9]))
+        b = p._run_context(SerialRecordSet, None)
+        self.assertNotEqual(a.input_identity(), b.input_identity())
+
+    def test_input_identity_ignores_the_backend(self):
+        # Two runs reading the same data share an input artifact even when
+        # computed on different backends. That shared artifact is what
+        # connects the lineage graph.
+        p = Pipeline([1, 2, 3])
+        p.fetch("ip", MockSignal())
+        a = p._run_context(SerialRecordSet, None)
+        b = p._run_context(MultiprocessingRecordSet, MultiprocessingConfig(num_workers=4))
+        self.assertEqual(a.input_identity(), b.input_identity())
+
+    def test_input_identity_ignores_map_functions(self):
+        # Same reasoning: what you do with the data does not change which
+        # data you read.
+        p1 = Pipeline([1, 2, 3])
+        p1.fetch("ip", MockSignal())
+        p2 = Pipeline([1, 2, 3])
+        p2.fetch("ip", MockSignal())
+        p2.map(_a_map_func)
+        self.assertEqual(
+            p1._run_context(SerialRecordSet, None).input_identity(),
+            p2._run_context(SerialRecordSet, None).input_identity(),
+        )
+
+    def test_is_frozen(self):
+        import dataclasses
+
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            self._ctx().device = "nope"
+
+
+class TestSqlSource(unittest.TestCase):
+    def test_shotlist_pipeline_has_no_sql_source(self):
+        self.assertIsNone(Pipeline([1, 2])._sql_source)
+
+    def test_chained_pipeline_inherits_sql_source(self):
+        parent = Pipeline([1, 2])
+        parent._sql_source = {"query": "select shot from shots", "params": ()}
+        self.assertEqual(Pipeline(parent)._sql_source, parent._sql_source)
+
+    def test_sql_source_produces_a_sql_source_spec(self):
+        pipeline = Pipeline([1, 2])
+        pipeline._sql_source = {"query": "select shot from shots", "params": ("a",)}
+        source = pipeline._source_spec()
+        self.assertEqual(source.kind, "sql")
+        self.assertEqual(source.query, "select shot from shots")
+        self.assertEqual(source.params, ("a",))
+        self.assertIsNotNone(source.hash)
+
+
+class TestRecordSetSource(unittest.TestCase):
+    def test_recordset_parent_is_reported_as_recordset(self):
+        first = Pipeline([1, 2, 3])
+        first.fetch("ip", MockSignal())
+        results = first.compute_serial()
+        source = Pipeline(results)._source_spec()
+        self.assertEqual(source.kind, "recordset")
+        self.assertEqual(source.count, 3)
