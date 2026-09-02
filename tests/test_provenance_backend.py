@@ -346,3 +346,52 @@ class TestComputeWiring(unittest.TestCase):
         self.assertEqual(payload["pipeline_name"], "study")
         self.assertIn("ip", payload["context"]["signals"])
         self.assertEqual(payload["context"]["backend"]["kind"], "SerialRecordSet")
+
+
+class TestAllBackendsForwardProvenance(unittest.TestCase):
+    """Ray and Spark accept provenance= but no test runs them.
+
+    A wrapper that takes the argument and drops it would pass every signature
+    check while recording nothing, and compute_ray's **ray_init_kwargs makes
+    that a live risk. Intercept Pipeline.compute so all four wrappers can be
+    checked without starting a Ray cluster or a Spark context.
+    """
+
+    def test_every_compute_wrapper_forwards_provenance(self):
+        seen = {}
+        sentinel = object()
+        real = Pipeline.compute
+
+        class _FakeRecordSet:
+            provenance = None
+            run_id = None
+
+            def __iter__(self):
+                return iter(())
+
+        def _spy(self, recordset_cls, config=None, provenance=None):
+            seen[recordset_cls.__name__] = provenance
+            return _FakeRecordSet()
+
+        pipeline = Pipeline([1])
+        pipeline.fetch("ip", MockSignal())
+        try:
+            Pipeline.compute = _spy
+            pipeline.compute_serial(provenance=sentinel)
+            pipeline.compute_multiprocessing(num_workers=1, provenance=sentinel)
+            pipeline.compute_ray(provenance=sentinel)
+            pipeline.compute_spark(provenance=sentinel)
+        finally:
+            Pipeline.compute = real
+
+        self.assertEqual(
+            sorted(seen),
+            [
+                "MultiprocessingRecordSet",
+                "RayRecordSet",
+                "SerialRecordSet",
+                "SparkRecordSet",
+            ],
+        )
+        for name, forwarded in seen.items():
+            self.assertIs(forwarded, sentinel, f"{name} dropped provenance")
