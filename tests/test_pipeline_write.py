@@ -210,3 +210,165 @@ class TestWrittenPathIsTheReturnedPath(unittest.TestCase):
             for fmt, obj in cases:
                 returned = write_object(obj, os.path.join(d, fmt), fmt=fmt)
                 self.assertTrue(os.path.exists(returned), f"{fmt} path mismatch")
+
+
+from toksearch.pipeline.pipeline_funcs import _SafeWrite
+from toksearch.record import Record
+
+
+def _make_record(shot, value=1.0):
+    rec = Record(shot)
+    rec["ds"] = xr.Dataset({"a": ("t", [value, value])})
+    return rec
+
+
+class TestSafeWrite(unittest.TestCase):
+    def test_writes_one_file_named_for_the_shot(self):
+        with tempfile.TemporaryDirectory() as d:
+            _SafeWrite(d, field="ds", fmt="netcdf")(_make_record(123))
+            self.assertTrue(os.path.exists(os.path.join(d, "123.nc")))
+
+    def test_returns_the_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = _make_record(123)
+            self.assertIs(_SafeWrite(d, field="ds", fmt="netcdf")(rec), rec)
+
+    def test_records_the_output_path_on_the_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, field="ds", fmt="netcdf")(_make_record(123))
+            self.assertEqual(rec["output_path"], os.path.join(d, "123.nc"))
+
+    def test_the_recorded_path_actually_exists(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, field="ds", fmt="netcdf")(_make_record(123))
+            self.assertTrue(os.path.exists(rec["output_path"]))
+
+    def test_records_the_output_directory_on_the_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, field="ds", fmt="netcdf")(_make_record(123))
+            self.assertEqual(rec["_toksearch_write_dir"], os.path.abspath(d))
+
+    def test_creates_the_directory_if_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "nested", "deeper")
+            _SafeWrite(out, field="ds", fmt="netcdf")(_make_record(1))
+            self.assertTrue(os.path.exists(os.path.join(out, "1.nc")))
+
+    def test_infers_format_from_the_object(self):
+        with tempfile.TemporaryDirectory() as d:
+            _SafeWrite(d, field="ds")(_make_record(123))
+            self.assertTrue(os.path.exists(os.path.join(d, "123.nc")))
+
+    def test_missing_field_sets_an_error_and_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, field="nope", fmt="netcdf")(_make_record(123))
+            self.assertIn("write", rec["errors"])
+
+    def test_missing_field_writes_no_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            _SafeWrite(d, field="nope", fmt="netcdf")(_make_record(123))
+            self.assertEqual(os.listdir(d), [])
+
+    def test_missing_field_still_returns_the_record(self):
+        # A failed write must not break the pipeline chain: _apply_operations
+        # stops on a falsy return.
+        with tempfile.TemporaryDirectory() as d:
+            rec = _make_record(123)
+            self.assertIs(_SafeWrite(d, field="nope", fmt="netcdf")(rec), rec)
+
+    def test_an_unwritable_object_sets_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = Record(1)
+            rec["scalar"] = 3.14
+            out = _SafeWrite(d, field="scalar")(rec)
+            self.assertIn("write", out["errors"])
+
+    def test_multiple_fields_are_merged_into_one_dataset(self):
+        with tempfile.TemporaryDirectory() as d:
+            rec = Record(7)
+            rec["a"] = xr.Dataset({"x": ("t", [1.0])})
+            rec["b"] = xr.Dataset({"y": ("t", [2.0])})
+            _SafeWrite(d, fields=["a", "b"], fmt="netcdf")(rec)
+            written = xr.open_dataset(os.path.join(d, "7.nc"))
+            self.assertIn("x", written)
+            self.assertIn("y", written)
+
+    def test_custom_name_callable(self):
+        with tempfile.TemporaryDirectory() as d:
+            op = _SafeWrite(d, field="ds", fmt="netcdf",
+                            name=lambda rec: f"shot_{rec.shot}")
+            op(_make_record(5))
+            self.assertTrue(os.path.exists(os.path.join(d, "shot_5.nc")))
+
+    def test_writer_func_returning_an_object(self):
+        with tempfile.TemporaryDirectory() as d:
+            _SafeWrite(d, func=lambda rec: rec["ds"], fmt="netcdf")(_make_record(9))
+            self.assertTrue(os.path.exists(os.path.join(d, "9.nc")))
+
+    def test_writer_func_returning_a_path_it_wrote(self):
+        def writer(rec, path):
+            with open(path, "w") as fh:
+                fh.write("hi")
+            return path
+
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, func=writer)(_make_record(11))
+            self.assertTrue(os.path.exists(os.path.join(d, "11")))
+            self.assertEqual(rec["output_path"], os.path.join(d, "11"))
+
+    def test_a_raising_writer_func_sets_an_error(self):
+        def writer(rec):
+            raise ValueError("nope")
+
+        with tempfile.TemporaryDirectory() as d:
+            rec = _SafeWrite(d, func=writer, fmt="netcdf")(_make_record(1))
+            self.assertIn("write", rec["errors"])
+
+    def test_custom_path_field(self):
+        with tempfile.TemporaryDirectory() as d:
+            op = _SafeWrite(d, field="ds", fmt="netcdf", path_field="nc_path")
+            rec = op(_make_record(3))
+            self.assertIn("nc_path", rec)
+
+    def test_spec_reports_the_write_op(self):
+        with tempfile.TemporaryDirectory() as d:
+            spec = _SafeWrite(d, field="ds", fmt="netcdf").spec().to_dict()
+            self.assertEqual(spec["op"], "write")
+            self.assertEqual(spec["detail"]["fields"], ["ds"])
+            self.assertEqual(spec["detail"]["track"], "directory")
+
+    def test_spec_directory_is_absolute(self):
+        with tempfile.TemporaryDirectory() as d:
+            spec = _SafeWrite(d, field="ds", fmt="netcdf").spec().to_dict()
+            self.assertEqual(spec["detail"]["directory"], os.path.abspath(d))
+
+    def test_spec_is_canonically_serializable(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        with tempfile.TemporaryDirectory() as d:
+            op = _SafeWrite(d, field="ds", fmt="netcdf",
+                            name=lambda rec: str(rec.shot))
+            canonical_json(op.spec().to_dict())
+
+    def test_spec_carries_no_memory_address(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        with tempfile.TemporaryDirectory() as d:
+            op = _SafeWrite(d, func=lambda rec: rec["ds"], fmt="netcdf")
+            self.assertNotIn("0x", canonical_json(op.spec().to_dict()))
+
+    def test_spec_keys_match_what_write_directories_reads(self):
+        # RunContext.write_directories filters on op == "write" and
+        # detail["track"] == "directory", then reads detail["directory"].
+        from toksearch.provenance.code import capture_code
+        from toksearch.provenance.context import BackendSpec, RunContext, SourceSpec
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx = RunContext(
+                source=SourceSpec(kind="shotlist", count=1),
+                ops=(_SafeWrite(d, field="ds", fmt="netcdf").spec(),),
+                signals={},
+                backend=BackendSpec(kind="SerialRecordSet"),
+                code=capture_code(),
+            )
+            self.assertEqual(ctx.write_directories(), [os.path.abspath(d)])
