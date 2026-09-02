@@ -451,7 +451,13 @@ class TestPipelineWrite(unittest.TestCase):
             pipeline.write(out, field="ds", fmt="netcdf")
             pipeline.compute_serial()
             written = sorted(glob.glob(os.path.join(out, "*.nc")))
-            merged = xr.concat([xr.open_dataset(f) for f in written], dim="shot")
+            # data_vars is explicit: xarray warns that its default changes in a
+            # future release, and the suite's warning count is a signal.
+            merged = xr.concat(
+                [xr.open_dataset(f) for f in written],
+                dim="shot",
+                data_vars="all",
+            )
             self.assertIn("ip", merged)
 
     def test_non_empty_directory_is_refused(self):
