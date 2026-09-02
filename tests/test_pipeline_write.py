@@ -561,3 +561,74 @@ class TestPipelineWrite(unittest.TestCase):
                 payload = json.load(fh)
         self.assertEqual([o["path"] for o in payload["outputs"]],
                          [os.path.abspath(out)])
+
+
+class TestWriteSkipsFailedRecords(unittest.TestCase):
+    """A record that already failed must not be written by default.
+
+    Its fields are whatever survived the failure -- a fetch_dataset result that
+    never went through the map meant to reduce it, say -- so the file looks
+    valid while silently missing a pipeline stage, and the output directory's
+    DVC hash then vouches for it. Found by the CmfRun integration test, which
+    asserted the documented behaviour and caught the code not doing it.
+    """
+
+    def _pipeline(self, **write_kwargs):
+        def boom(rec):
+            if rec.shot == 2:
+                raise ValueError("no data")
+            rec["computed"] = rec.shot
+
+        pipeline = Pipeline([1, 2, 3])
+        pipeline.fetch_dataset("ds", {"ip": MockSignal()})
+        pipeline.map(boom)
+        return pipeline, boom
+
+    def test_a_failed_record_writes_no_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline, _ = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf")
+            pipeline.compute_serial()
+            self.assertEqual(sorted(os.listdir(out)), ["1.nc", "3.nc"])
+
+    def test_the_failed_record_still_reaches_the_recordset(self):
+        # Skipping the write must not drop the record: record_outcomes counts
+        # failures from it, and a dropped record would make a partial run look
+        # like a smaller complete one.
+        with tempfile.TemporaryDirectory() as d:
+            pipeline, _ = self._pipeline()
+            pipeline.write(os.path.join(d, "peaks"), field="ds", fmt="netcdf")
+            results = pipeline.compute_serial()
+            self.assertEqual(sorted(r.shot for r in results), [1, 2, 3])
+
+    def test_the_failed_record_has_no_output_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            pipeline, _ = self._pipeline()
+            pipeline.write(os.path.join(d, "peaks"), field="ds", fmt="netcdf")
+            results = pipeline.compute_serial()
+            failed = next(r for r in results if r.shot == 2)
+            self.assertIsNone(failed.get("output_path", None))
+
+    def test_on_error_write_keeps_the_old_behaviour(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "peaks")
+            pipeline, _ = self._pipeline()
+            pipeline.write(out, field="ds", fmt="netcdf", on_error="write")
+            pipeline.compute_serial()
+            self.assertEqual(sorted(os.listdir(out)), ["1.nc", "2.nc", "3.nc"])
+
+    def test_an_invalid_on_error_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            pipeline, _ = self._pipeline()
+            with self.assertRaises(ValueError):
+                pipeline.write(os.path.join(d, "p"), field="ds", on_error="maybe")
+
+    def test_on_error_appears_in_the_spec(self):
+        from toksearch.backend.serial import SerialRecordSet
+
+        with tempfile.TemporaryDirectory() as d:
+            pipeline, _ = self._pipeline()
+            pipeline.write(os.path.join(d, "p"), field="ds", fmt="netcdf")
+            ctx = pipeline._run_context(SerialRecordSet, None)
+            self.assertEqual(ctx.ops[-1].detail["on_error"], "skip")

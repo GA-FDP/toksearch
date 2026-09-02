@@ -175,7 +175,8 @@ class _SafeWrite(object):
 
     def __init__(self, directory, field=None, fields=None, fmt=None,
                  func=None, name=None, track="directory",
-                 path_field="output_path"):
+                 path_field="output_path", on_error="skip"):
+        self.on_error = on_error
         self.directory = os.path.abspath(directory)
         self.fields = [field] if field is not None else (list(fields) if fields else [])
         self.fmt = fmt
@@ -208,6 +209,16 @@ class _SafeWrite(object):
         return xr.merge(values, join="outer"), None
 
     def __call__(self, record):
+        # A record that already failed an earlier operation must not be
+        # written by default. Its fields are whatever survived the failure --
+        # a fetch_dataset result that never went through the map that was
+        # supposed to reduce it, say -- so the file would look valid while
+        # silently missing a pipeline stage, and the output directory's DVC
+        # hash would then vouch for it. Skipping keeps the recorded artifact
+        # honest: it covers exactly the shots that completed.
+        if self.on_error == "skip" and record.get("errors", None):
+            return record
+
         try:
             os.makedirs(self.directory, exist_ok=True)
             obj, written_path = self._payload(record)
@@ -238,6 +249,7 @@ class _SafeWrite(object):
                 "name": callable_spec(self.name),
                 "track": self.track,
                 "path_field": self.path_field,
+                "on_error": self.on_error,
             },
         )
 

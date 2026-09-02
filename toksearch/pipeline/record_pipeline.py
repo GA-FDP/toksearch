@@ -343,6 +343,7 @@ class Pipeline:
         track: str = "directory",
         exist_ok: bool = False,
         path_field: str = "output_path",
+        on_error: str = "skip",
     ):
         """Write one file per record, in the worker that produced it.
 
@@ -397,6 +398,12 @@ class Pipeline:
                 corrupt the directory's content hash, and ``flock`` is not
                 cross-client on BeeGFS so nothing else prevents it.
             path_field: Record field that receives the written path.
+            on_error: What to do with a record that already carries an error
+                from an earlier operation. 'skip' (default) writes no file for
+                it, so the output directory -- and the provenance hash over it
+                -- covers exactly the shots that completed. 'write' writes
+                anyway, which means the file may be missing whatever a failed
+                stage was supposed to add.
 
         Returns:
             None in declarative form, a decorator in decorator form.
@@ -404,6 +411,11 @@ class Pipeline:
         if track not in ("directory", "file"):
             raise ValueError(
                 f"track must be 'directory' or 'file', got {track!r}"
+            )
+
+        if on_error not in ("skip", "write"):
+            raise ValueError(
+                f"on_error must be 'skip' or 'write', got {on_error!r}"
             )
 
         if not exist_ok and os.path.isdir(directory) and os.listdir(directory):
@@ -425,6 +437,7 @@ class Pipeline:
                     name=name,
                     track=track,
                     path_field=path_field,
+                    on_error=on_error,
                 )
             )
 
