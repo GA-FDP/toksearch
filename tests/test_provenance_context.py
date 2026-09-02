@@ -379,3 +379,53 @@ class TestSqlSourceEndToEnd(unittest.TestCase):
             a._run_context(SerialRecordSet, None).input_identity(),
             b._run_context(SerialRecordSet, None).input_identity(),
         )
+
+
+class TestWriteDirectories(unittest.TestCase):
+    """Built from a hand-made RunContext.
+
+    Pipeline.write does not exist yet (a later task adds it), and this method
+    cannot wait for it: JsonProvenance already depends on it.
+    """
+
+    def _ctx(self, ops):
+        from toksearch.provenance.code import capture_code
+        from toksearch.provenance.context import BackendSpec, RunContext, SourceSpec
+
+        return RunContext(
+            source=SourceSpec(kind="shotlist", count=1),
+            ops=tuple(ops),
+            signals={},
+            backend=BackendSpec(kind="SerialRecordSet"),
+            code=capture_code(),
+        )
+
+    def test_reads_the_directory_from_a_write_op(self):
+        from toksearch.provenance.context import OpSpec
+
+        ctx = self._ctx([OpSpec("write", {"directory": "/tmp/out",
+                                          "track": "directory"})])
+        self.assertEqual(ctx.write_directories(), ["/tmp/out"])
+
+    def test_skips_track_file_writes(self):
+        from toksearch.provenance.context import OpSpec
+
+        ctx = self._ctx([OpSpec("write", {"directory": "/tmp/out",
+                                          "track": "file"})])
+        self.assertEqual(ctx.write_directories(), [])
+
+    def test_is_empty_without_write_ops(self):
+        from toksearch.provenance.context import OpSpec
+
+        ctx = self._ctx([OpSpec("map", {"func": None})])
+        self.assertEqual(ctx.write_directories(), [])
+
+    def test_collects_several_write_ops_in_order(self):
+        from toksearch.provenance.context import OpSpec
+
+        ctx = self._ctx([
+            OpSpec("write", {"directory": "/tmp/a", "track": "directory"}),
+            OpSpec("map", {"func": None}),
+            OpSpec("write", {"directory": "/tmp/b", "track": "directory"}),
+        ])
+        self.assertEqual(ctx.write_directories(), ["/tmp/a", "/tmp/b"])

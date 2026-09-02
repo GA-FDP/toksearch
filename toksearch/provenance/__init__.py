@@ -20,5 +20,22 @@ It derives a ``RunContext`` describing a pipeline run and hands it to a
 """
 
 from .hashing import canonical_json, sha256_of, callable_spec
+from .context import RunContext, SourceSpec, OpSpec, BackendSpec
+from .code import CodeSpec, capture_code
+from .base import Provenance, safe_call
+from .json_backend import JsonProvenance
 
-__all__ = ["canonical_json", "sha256_of", "callable_spec"]
+__all__ = [
+    "canonical_json",
+    "sha256_of",
+    "callable_spec",
+    "RunContext",
+    "SourceSpec",
+    "OpSpec",
+    "BackendSpec",
+    "CodeSpec",
+    "capture_code",
+    "Provenance",
+    "safe_call",
+    "JsonProvenance",
+]

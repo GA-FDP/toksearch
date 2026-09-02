@@ -100,3 +100,24 @@ class RunContext:
                 "device": self.device,
             }
         )
+
+    def write_directories(self) -> list:
+        """Output directories declared by Pipeline.write operations.
+
+        Read from the pipeline definition, not from the records. Ray and Spark
+        RecordSets are lazy -- ``SparkRecordSet.map`` returns an un-actioned
+        RDD and ``RayRecordSet.map`` returns unmaterialized ObjectRefs -- so
+        iterating one to discover written paths would force materialization as
+        a side effect of recording provenance. On Spark without caching, the
+        user's next action would then recompute the whole pipeline. The
+        directory is known statically, so nothing needs to be forced.
+
+        Only ``track="directory"`` writes are covered. ``track="file"`` asks
+        for per-shot artifacts, whose paths genuinely are per-record; a backend
+        wanting those must iterate, and should say so.
+        """
+        return [
+            op.detail["directory"]
+            for op in self.ops
+            if op.op == "write" and op.detail.get("track") == "directory"
+        ]
