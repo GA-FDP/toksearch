@@ -163,3 +163,50 @@ class TestRegistration(unittest.TestCase):
             writers._WRITERS.pop("custom_test_fmt", None)
             if "custom_test_fmt" in writers._ORDER:
                 writers._ORDER.remove("custom_test_fmt")
+
+
+class TestWrittenPathIsTheReturnedPath(unittest.TestCase):
+    """write_object's return value is recorded as a provenance artifact.
+
+    np.save/np.savez append their extension to a path that lacks one, which
+    would make the recorded path point at a file that does not exist.
+    """
+
+    def test_npy_writes_exactly_where_it_says(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bare")
+            returned = write_object(np.array([1, 2]), path, fmt="npy")
+            self.assertTrue(os.path.exists(returned))
+            self.assertEqual(os.listdir(d), ["bare"])
+
+    def test_npz_writes_exactly_where_it_says(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bare")
+            returned = write_object({"a": np.array([1, 2])}, path, fmt="npz")
+            self.assertTrue(os.path.exists(returned))
+            self.assertEqual(os.listdir(d), ["bare"])
+
+    def test_npy_still_roundtrips(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.npy")
+            write_object(np.array([1, 2, 3]), path, fmt="npy")
+            self.assertEqual(list(np.load(path)), [1, 2, 3])
+
+    def test_npz_still_roundtrips(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.npz")
+            write_object({"a": np.array([1, 2])}, path, fmt="npz")
+            self.assertEqual(list(np.load(path)["a"]), [1, 2])
+
+    def test_every_format_writes_to_the_returned_path(self):
+        cases = [
+            ("netcdf", xr.Dataset({"a": ("t", [1.0])})),
+            ("parquet", pd.DataFrame({"a": [1]})),
+            ("npy", np.array([1, 2])),
+            ("npz", {"a": np.array([1, 2])}),
+            ("json", {"a": 1}),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            for fmt, obj in cases:
+                returned = write_object(obj, os.path.join(d, fmt), fmt=fmt)
+                self.assertTrue(os.path.exists(returned), f"{fmt} path mismatch")

@@ -91,16 +91,23 @@ def _write_parquet(obj, path):
     obj.to_parquet(path)
 
 
+# np.save and np.savez append ".npy"/".npz" to a path that lacks the
+# extension, so the file lands somewhere other than where the caller was
+# told. write_object returns that path and a provenance backend records it as
+# an artifact, so the mismatch would produce lineage pointing at a file that
+# does not exist. Writing through an open handle suppresses the rewriting.
 def _write_npy(obj, path):
     import numpy as np
 
-    np.save(path, obj)
+    with open(path, "wb") as fh:
+        np.save(fh, obj)
 
 
 def _write_npz(obj, path):
     import numpy as np
 
-    np.savez(path, **obj)
+    with open(path, "wb") as fh:
+        np.savez(fh, **obj)
 
 
 def _write_json(obj, path):
