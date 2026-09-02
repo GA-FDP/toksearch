@@ -219,6 +219,14 @@ class TestZarrSignalSpec(unittest.TestCase):
         )
         self.assertEqual(sig.spec()["fields"]["file_name_format"], "x-{shot}.zarr")
 
+    def test_fetch_units_changes_the_spec(self):
+        # ZarrSignal.__init__ does not sync fetch_units into the base class's
+        # with_units, so spec()["with_units"] is always True here. Without
+        # fetch_units in fields, these two would collide.
+        a = ZarrSignal(path="s3://bucket", treepath="magnetics/ip", fetch_units=True)
+        b = ZarrSignal(path="s3://bucket", treepath="magnetics/ip", fetch_units=False)
+        self.assertNotEqual(a.spec(), b.spec())
+
     def test_filesystem_object_is_not_in_the_spec(self):
         sig = ZarrSignal(path="s3://bucket", treepath="magnetics/ip")
         self.assertNotIn("fs", sig.spec()["fields"])

@@ -67,6 +67,13 @@ class ZarrSignal(Signal):
             "path": self.path,
             "treepath": self.treepath,
             "file_name_format": self.file_name_format,
+            # fetch_units genuinely changes what gather() returns, so it must
+            # be in the spec. Note it is NOT reflected in the base class's
+            # with_units attribute -- ZarrSignal.__init__ never syncs the two
+            # -- so without this line two signals differing only in
+            # fetch_units would produce byte-identical specs and be recorded
+            # as the same provenance input.
+            "fetch_units": self.fetch_units,
         }
 
     def gather(self, shot):
