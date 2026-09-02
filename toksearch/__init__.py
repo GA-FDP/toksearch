@@ -111,12 +111,13 @@ All backends return an iterable ``RecordSet``.  Iterate directly::
     for rec in records:
         print(rec['shot'], rec.get('max_ip', None))
 
-To build a pandas DataFrame, convert records explicitly —
-``pd.DataFrame(records)`` does **not** work because RecordSet is not a list
-of dicts::
+To build a pandas DataFrame from scalar results, use ``to_dataframe``::
 
-    import pandas as pd
-    df = pd.DataFrame([dict(r) for r in records])
+    df = records.to_dataframe()
+
+``pd.DataFrame(records)`` does **not** work because RecordSet is not a list.
+For records holding arrays or datasets, write per-shot files from inside the
+pipeline with ``Pipeline.write`` instead.
 
 Critical Gotchas
 ================
@@ -126,7 +127,7 @@ Gotcha                      Wrong                               Right
 ==========================  ==================================  ==============================
 ``map`` return value        ``return {'key': val}``             ``rec['key'] = val`` (in-place)
 ``keep`` signature          ``keep('a', 'b')``                  ``keep(['a', 'b'])``
-DataFrame from results      ``pd.DataFrame(records)``           ``pd.DataFrame([dict(r)...])``
+DataFrame from results      ``pd.DataFrame(records)``           ``records.to_dataframe()``
 Record safe access          ``rec.get('k')``                    ``rec.get('k', None)``
 ==========================  ==================================  ==============================
 

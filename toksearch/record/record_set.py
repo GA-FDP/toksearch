@@ -55,3 +55,64 @@ class RecordSet(ABC):
     @abstractmethod
     def cleanup(self, **kwargs):
         pass
+
+    #: Record fields that are bookkeeping, not results. Excluded from
+    #: to_dataframe unless explicitly requested.
+    _NON_RESULT_FIELDS = ("errors", "_toksearch_write_dir")
+
+    def to_dataframe(self, fields=None):
+        """Return a pandas DataFrame with one row per record.
+
+        Intended for scalar summary results. Array-valued and dataset-valued
+        fields belong in per-shot files written by ``Pipeline.write``, not in
+        a driver-side frame.
+
+        Rows are built from each record's own keys rather than one shared
+        column list: a shot whose map function failed never gains the field
+        its siblings have, and pandas unions the columns and fills NaN. That
+        keeps a partial run visibly partial instead of silently smaller.
+
+        Arguments:
+            fields: Field names to include, in order. When omitted, every
+                field except bookkeeping ones is included. ``shot`` is always
+                the first column.
+        """
+        import pandas as pd
+
+        rows = []
+        for record in self:
+            if fields is None:
+                keys = [
+                    k
+                    for k in record.keys()
+                    if k != "shot" and k not in self._NON_RESULT_FIELDS
+                ]
+            else:
+                keys = list(fields)
+
+            row = {"shot": record.shot}
+            for key in keys:
+                row[key] = record.get(key, None)
+            rows.append(row)
+
+        if not rows:
+            return pd.DataFrame(columns=["shot"] + list(fields or []))
+
+        return pd.DataFrame(rows)
+
+    def to_parquet(self, path, fields=None):
+        """Write the record set to a parquet file and return its path.
+
+        If this record set came from a ``compute_*`` call with a provenance
+        backend, the file is declared to that backend as an output artifact.
+        The file is written first: a provenance failure must not cost the user
+        their output.
+        """
+        self.to_dataframe(fields=fields).to_parquet(path)
+
+        if self.provenance is not None:
+            from ..provenance.base import safe_call
+
+            safe_call(self.provenance, "output", path, source="to_parquet")
+
+        return path
