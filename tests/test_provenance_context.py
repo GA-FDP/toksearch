@@ -100,3 +100,106 @@ class TestCaptureCode(unittest.TestCase):
             code = capture_code(cwd=d)
             with self.assertRaises(dataclasses.FrozenInstanceError):
                 code.commit = "nope"
+
+
+from toksearch import Pipeline
+from toksearch.signal.mock_signal import MockSignal
+
+
+def _a_map_func(rec):
+    rec["doubled"] = 2
+
+
+def _a_where_func(rec):
+    return True
+
+
+def _specs_for(build):
+    pipeline = Pipeline([1, 2])
+    build(pipeline)
+    return [op.spec().to_dict() for op in pipeline._operations]
+
+
+class TestOperationSpecs(unittest.TestCase):
+    def test_fetch_reports_op_name_and_field(self):
+        op_specs = _specs_for(lambda p: p.fetch("ip", MockSignal()))
+        self.assertEqual(op_specs[0]["op"], "fetch")
+        self.assertEqual(op_specs[0]["detail"]["name"], "ip")
+
+    def test_fetch_includes_the_signal_spec(self):
+        op_specs = _specs_for(lambda p: p.fetch("ip", MockSignal()))
+        self.assertEqual(op_specs[0]["detail"]["signal"]["class"], "MockSignal")
+
+    def test_map_reports_the_function(self):
+        op_specs = _specs_for(lambda p: p.map(_a_map_func))
+        self.assertEqual(op_specs[0]["op"], "map")
+        self.assertEqual(op_specs[0]["detail"]["func"]["name"], "_a_map_func")
+
+    def test_keep_is_reported_as_keep_not_map(self):
+        op_specs = _specs_for(lambda p: p.keep(["ip"]))
+        self.assertEqual(op_specs[0]["op"], "keep")
+        self.assertEqual(op_specs[0]["detail"]["fields"], ["ip"])
+
+    def test_where_reports_the_predicate(self):
+        op_specs = _specs_for(lambda p: p.where(_a_where_func))
+        self.assertEqual(op_specs[0]["op"], "where")
+        self.assertEqual(op_specs[0]["detail"]["func"]["name"], "_a_where_func")
+
+    def test_fetch_dataset_reports_dataset_and_signal_names(self):
+        op_specs = _specs_for(
+            lambda p: p.fetch_dataset("ds", {"ip": MockSignal()})
+        )
+        self.assertEqual(op_specs[0]["op"], "fetch_dataset")
+        self.assertEqual(op_specs[0]["detail"]["ds_name"], "ds")
+        self.assertEqual(op_specs[0]["detail"]["signame"], "ip")
+
+    def test_align_reports_its_configuration_not_a_repr(self):
+        op_specs = _specs_for(
+            lambda p: p.align("ds", [0, 1, 2], dim="times", method="nearest")
+        )
+        detail = op_specs[0]["detail"]
+        self.assertEqual(op_specs[0]["op"], "align")
+        self.assertEqual(detail["align_with"], [0, 1, 2])
+        self.assertEqual(detail["dim"], "times")
+        self.assertEqual(detail["method"], "nearest")
+
+    def test_align_spec_carries_no_memory_address(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        op_specs = _specs_for(lambda p: p.align("ds", [0, 1, 2]))
+        self.assertNotIn("0x", canonical_json(op_specs))
+
+    def test_two_identical_aligns_produce_equal_specs(self):
+        a = _specs_for(lambda p: p.align("ds", [0, 1, 2]))
+        b = _specs_for(lambda p: p.align("ds", [0, 1, 2]))
+        self.assertEqual(a, b)
+
+    def test_align_with_a_numpy_array_is_serializable(self):
+        import numpy as np
+
+        from toksearch.provenance.hashing import canonical_json
+
+        op_specs = _specs_for(lambda p: p.align("ds", np.array([0.0, 1.0])))
+        canonical_json(op_specs)
+
+    def test_op_order_is_preserved(self):
+        def build(p):
+            p.fetch("ip", MockSignal())
+            p.map(_a_map_func)
+            p.keep(["ip"])
+
+        self.assertEqual([s["op"] for s in _specs_for(build)],
+                         ["fetch", "map", "keep"])
+
+    def test_every_op_spec_is_canonically_serializable(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        def build(p):
+            p.fetch("ip", MockSignal())
+            p.fetch_dataset("ds", {"bt": MockSignal()})
+            p.map(_a_map_func)
+            p.keep(["ip"])
+            p.align("ds", [0, 1])
+            p.where(_a_where_func)
+
+        canonical_json(_specs_for(build))

@@ -14,6 +14,8 @@
 
 import xarray as xr
 from ..signal.signal import SignalRegistry
+from ..provenance.context import OpSpec
+from ..provenance.hashing import callable_spec
 
 
 class _SafeMap(object):
@@ -27,6 +29,15 @@ class _SafeMap(object):
             name = getattr(self.func, "__name__", repr(self.func))
             record.set_error(name, e)
         return record
+
+    def spec(self):
+        # keep() and align() are implemented as map(), so delegate to the
+        # wrapped callable when it can describe itself. Otherwise this really
+        # is a user map function.
+        inner = getattr(self.func, "spec", None)
+        if callable(inner):
+            return inner()
+        return OpSpec("map", {"func": callable_spec(self.func)})
 
 
 class _SafeFetch(object):
@@ -42,6 +53,9 @@ class _SafeFetch(object):
             record.set_error(self.name, e)
             record[self.name] = None
         return record
+
+    def spec(self):
+        return OpSpec("fetch", {"name": self.name, "signal": self.signal.spec()})
 
 
 class _SafeFetchAsXarray(object):
@@ -70,6 +84,17 @@ class _SafeFetchAsXarray(object):
             record.set_error(self.ds_name, e)
         return record
 
+    def spec(self):
+        return OpSpec(
+            "fetch_dataset",
+            {
+                "ds_name": self.ds_name,
+                "signame": self.signame,
+                "append": self.append,
+                "signal": self.signal.spec(),
+            },
+        )
+
 
 class _PipelineKeep(object):
     def __init__(self, fields):
@@ -77,6 +102,9 @@ class _PipelineKeep(object):
 
     def __call__(self, rec):
         rec.keep(self.fields)
+
+    def spec(self):
+        return OpSpec("keep", {"fields": list(self.fields)})
 
 
 class _PipelineAlign(object):
@@ -86,6 +114,31 @@ class _PipelineAlign(object):
 
     def __call__(self, record):
         record[self.ds_name] = self.aligner(record[self.ds_name])
+
+    def spec(self):
+        # NOT repr(self.aligner): XarrayAligner defines no __repr__, so its
+        # repr embeds a memory address and two identical aligners compare
+        # unequal. canonical_json cannot rescue this -- it only rewrites
+        # non-serializable *values*, and a repr string is already a str, so
+        # the address would pass straight into the hash. Describe the
+        # aligner's actual configuration instead.
+        aligner = self.aligner
+        align_with = getattr(aligner, "align_with", None)
+        if callable(align_with):
+            align_with = callable_spec(align_with)
+        elif hasattr(align_with, "tolist"):
+            align_with = align_with.tolist()
+        return OpSpec(
+            "align",
+            {
+                "ds_name": self.ds_name,
+                "align_with": align_with,
+                "dim": getattr(aligner, "dim", None),
+                "method": getattr(aligner, "method", None),
+                "extrapolate": getattr(aligner, "extrapolate", None),
+                "interp_kwargs": getattr(aligner, "interp_kwargs", None),
+            },
+        )
 
 
 class _PipelineWhere(object):
@@ -102,6 +155,9 @@ class _PipelineWhere(object):
         except Exception as e:
             record.set_error("where", e)
             return None
+
+    def spec(self):
+        return OpSpec("where", {"func": callable_spec(self.func)})
 
 
 def _map_multiple(record_list, operations):
