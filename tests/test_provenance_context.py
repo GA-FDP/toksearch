@@ -333,3 +333,49 @@ class TestRecordSetSource(unittest.TestCase):
         source = Pipeline(results)._source_spec()
         self.assertEqual(source.kind, "recordset")
         self.assertEqual(source.count, 3)
+
+class TestSqlSourceEndToEnd(unittest.TestCase):
+    """Exercise the real from_sql path, not a hand-set _sql_source.
+
+    from_sql is the only pre-existing public API this work modifies, so the
+    round trip through it needs direct coverage: a hand-set attribute would
+    still pass if the from_sql edit were reverted.
+    """
+
+    def _conn(self):
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        conn.execute("create table shots_type (shot int, shot_type text)")
+        conn.executemany(
+            "insert into shots_type values (?,?)",
+            [(101, "plasma"), (102, "plasma"), (103, "calibration")],
+        )
+        conn.commit()
+        return conn
+
+    _QUERY = "select shot from shots_type where shot_type = ?"
+
+    def test_from_sql_records_the_query(self):
+        pipeline = Pipeline.from_sql(self._conn(), self._QUERY, "plasma")
+        self.assertEqual(pipeline._source_spec().query, self._QUERY)
+
+    def test_from_sql_records_the_params(self):
+        pipeline = Pipeline.from_sql(self._conn(), self._QUERY, "plasma")
+        self.assertEqual(pipeline._source_spec().params, ("plasma",))
+
+    def test_from_sql_source_kind_is_sql(self):
+        pipeline = Pipeline.from_sql(self._conn(), self._QUERY, "plasma")
+        self.assertEqual(pipeline._source_spec().kind, "sql")
+
+    def test_from_sql_still_returns_a_working_pipeline(self):
+        pipeline = Pipeline.from_sql(self._conn(), self._QUERY, "plasma")
+        self.assertEqual(len(pipeline.compute_serial()), 2)
+
+    def test_different_queries_have_different_input_identities(self):
+        a = Pipeline.from_sql(self._conn(), self._QUERY, "plasma")
+        b = Pipeline.from_sql(self._conn(), self._QUERY, "calibration")
+        self.assertNotEqual(
+            a._run_context(SerialRecordSet, None).input_identity(),
+            b._run_context(SerialRecordSet, None).input_identity(),
+        )
