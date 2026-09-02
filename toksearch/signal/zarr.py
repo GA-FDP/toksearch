@@ -60,6 +60,15 @@ class ZarrSignal(Signal):
                 fsspec.filesystem("file"), asynchronous=True
             )
 
+    def _spec_fields(self):
+        # `fs` is a live filesystem client, not a description of what is
+        # fetched. Including it would make the spec non-deterministic.
+        return {
+            "path": self.path,
+            "treepath": self.treepath,
+            "file_name_format": self.file_name_format,
+        }
+
     def gather(self, shot):
         """Gather the data for a shot
 

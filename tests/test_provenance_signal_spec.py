@@ -16,6 +16,8 @@ import unittest
 
 from toksearch.signal.signal import Signal
 from toksearch.signal.mock_signal import MockSignal
+from toksearch.signal.mds import MdsSignal, MdsTreePath
+from toksearch.signal.zarr import ZarrSignal
 
 
 class _UnspeccedSignal(Signal):
@@ -159,3 +161,70 @@ class TestSpecDeterminism(unittest.TestCase):
                 pass
 
         self.assertNotIn("0x", canonical_json(_HoldsAnObject().spec()))
+
+
+class TestMdsSignalSpec(unittest.TestCase):
+    def test_declares_its_fields(self):
+        sig = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        self.assertNotIn("spec_incomplete", sig.spec())
+
+    def test_captures_expression_and_tree(self):
+        sig = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        fields = sig.spec()["fields"]
+        self.assertEqual(fields["expression"], r"\ipmhd")
+        self.assertEqual(fields["treename"], "efit01")
+
+    def test_captures_location(self):
+        sig = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(sig.spec()["fields"]["location"], "remote://atlas.gat.com")
+
+    def test_tree_path_location_is_serializable(self):
+        sig = MdsSignal(r"\ipmhd", "efit01", location=MdsTreePath(efit01="/a/b"))
+        location = sig.spec()["fields"]["location"]
+        self.assertIsInstance(location, (str, dict))
+
+    def test_different_expressions_differ(self):
+        a = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal(r"\betan", "efit01", location="remote://atlas.gat.com")
+        self.assertNotEqual(a.spec(), b.spec())
+
+    def test_spec_carries_no_memory_address(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        sig = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        self.assertNotIn("0x", canonical_json(sig.spec()))
+
+    def test_identical_signals_hash_alike(self):
+        from toksearch.provenance.hashing import sha256_of
+
+        a = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        b = MdsSignal(r"\ipmhd", "efit01", location="remote://atlas.gat.com")
+        self.assertEqual(sha256_of(a.spec()), sha256_of(b.spec()))
+
+
+class TestZarrSignalSpec(unittest.TestCase):
+    def test_declares_its_fields(self):
+        sig = ZarrSignal(path="s3://bucket", treepath="magnetics/ip")
+        self.assertNotIn("spec_incomplete", sig.spec())
+
+    def test_captures_path_and_treepath(self):
+        sig = ZarrSignal(path="s3://bucket", treepath="magnetics/ip")
+        fields = sig.spec()["fields"]
+        self.assertEqual(fields["path"], "s3://bucket")
+        self.assertEqual(fields["treepath"], "magnetics/ip")
+
+    def test_captures_file_name_format(self):
+        sig = ZarrSignal(
+            path="s3://bucket", treepath="magnetics/ip", file_name_format="x-{shot}.zarr"
+        )
+        self.assertEqual(sig.spec()["fields"]["file_name_format"], "x-{shot}.zarr")
+
+    def test_filesystem_object_is_not_in_the_spec(self):
+        sig = ZarrSignal(path="s3://bucket", treepath="magnetics/ip")
+        self.assertNotIn("fs", sig.spec()["fields"])
+
+    def test_spec_carries_no_memory_address(self):
+        from toksearch.provenance.hashing import canonical_json
+
+        sig = ZarrSignal(path="s3://bucket", treepath="magnetics/ip")
+        self.assertNotIn("0x", canonical_json(sig.spec()))
