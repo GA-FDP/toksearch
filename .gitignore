@@ -1,7 +1,18 @@
 __pycache__
 *.pyc
 metastore_db
-tags
+# Anchored deliberately. A bare `tags` pattern matches ANY path segment named
+# `tags`, including `.git/refs/tags/` -- and rattler-build's path-source copy
+# honours .gitignore, so it silently dropped every loose tag ref from the
+# build sandbox. versioneer then fell through to `git describe` against the
+# handful of tags that happened to be in .git/packed-refs and baked a wrong
+# __version__ into the wheel: toksearch 2.11.0 shipped
+# `0+untagged.208.g827f651` (CI, where all refs are loose) and built as
+# `2.2.3+156.g827f651` locally. The conda metadata was right either way,
+# because that comes from PKG_VERSION derived in the real repo.
+# `/tags` matches only a ctags file at the repo root, which is all this was
+# ever meant to ignore.
+/tags
 *.so
 build
 dist
