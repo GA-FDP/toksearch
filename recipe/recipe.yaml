@@ -22,8 +22,21 @@ requirements:
     - setuptools
     - numpy >=1.20, <2
     - openblas
+  # rattler-build 0.39 synthesises a python run-export of
+  # `python 3.12.* *_debug_cpython` from a host python whose build string is
+  # plainly `h5f976f7_2_cpython` -- no debug about it. Nothing on conda-forge
+  # declares that export (the 3.12.14 builds declare none at all), and the
+  # python_abi export beside it is correct, so this is a tool bug. The bad pin
+  # makes the built package uninstallable: no such python exists.
+  #
+  # Ignore the synthesised python export and state the constraint ourselves.
+  # python_abi still pins the ABI correctly, so the package stays
+  # version-specific.
+  ignore_run_exports:
+    by_name:
+      - python
   run:
-    - python
+    - python ${{ python }}
     - mdsplus-xrdcl >=1,<2
     # libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
     # A protocol, not a device: DIII-D is served this way today and C-Mod is

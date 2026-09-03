@@ -140,6 +140,10 @@ class MdsTreePath(object):
         """Return the name of the environment variable for the given treename"""
         return "{}_path".format(treename)
 
+    def _spec_value(self):
+        """Deterministic, JSON-serializable form for provenance records."""
+        return {"paths": dict(sorted(self.paths.items()))}
+
 
 class MdsLocalSignal(Signal):
     def __init__(
@@ -187,10 +191,21 @@ class MdsLocalSignal(Signal):
 
         self.set_dims(dims, data_order)
 
+    def _spec_fields(self):
+        # treepath is either None, a plain path string, or an MdsTreePath --
+        # normalize the latter to something JSON can render deterministically.
+        treepath = self.treepath
+        if hasattr(treepath, "_spec_value"):
+            treepath = treepath._spec_value()
+        return {
+            "expression": self.expression,
+            "treename": self.treename,
+            "treepath": treepath,
+        }
 
     def gather(self, shot):
         """Gather the data for a shot
-        
+
         Arguments:
             shot (int): The shot number to gather the data for
 
@@ -303,6 +318,20 @@ class MdsSignal(Signal):
         self.dims = self.sig.dims
         self.data_order = self.sig.data_order
         self.with_units = self.sig.with_units
+
+    def _spec_fields(self):
+        # MdsSignal itself never stores expression/treename -- __init__ hands
+        # them straight to create_local_or_remote_signal and keeps only the
+        # resulting self.sig (an MdsLocalSignal or MdsRemoteSignal), so those
+        # two fields are read back off it rather than off self.
+        location = self.location
+        if hasattr(location, "_spec_value"):
+            location = location._spec_value()
+        return {
+            "expression": self.sig.expression,
+            "treename": self.sig.treename,
+            "location": location,
+        }
 
     @classmethod
     def create_local_or_remote_signal(cls, expression, treename, location, **kwargs):
@@ -540,6 +569,13 @@ class MdsRemoteSignal(Signal):
         self._use_getmany = True
 
         self.set_dims(dims, data_order)
+
+    def _spec_fields(self):
+        return {
+            "expression": self.expression,
+            "treename": self.treename,
+            "server": self.server,
+        }
 
     def connect(self) -> mds.Connection:
         """Open the connection to remote server"""

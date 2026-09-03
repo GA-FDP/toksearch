@@ -23,6 +23,8 @@ import uuid
 import warnings
 from abc import ABC, abstractmethod
 
+from ..provenance.hashing import callable_spec
+
 
 @contextlib.contextmanager
 def _gc_disabled():
@@ -131,6 +133,64 @@ class Signal(ABC):
         self.dims: Iterable[str] = ("times",)
         self.data_order: Iterable[str] = self.dims
         self.with_units: bool = True
+
+    # Attributes owned by Signal itself. The reflective fallback skips these
+    # because they are already reported as top-level spec keys; repeating them
+    # inside "fields" would make two spellings of the same fact.
+    _SPEC_BASE_ATTRS = frozenset(
+        {"_callback", "_state", "dims", "data_order", "with_units"}
+    )
+
+    def spec(self) -> dict:
+        """Return a canonical, JSON-serializable description of this signal.
+
+        The description must be *deterministic*: two signals configured
+        identically must produce equal dicts, on any machine. Provenance
+        identity depends on it.
+
+        Subclasses describe themselves by implementing ``_spec_fields``. A
+        subclass that does not is still usable -- it gets a reflective
+        description marked ``spec_incomplete`` rather than an exception,
+        because a weak provenance record beats a crashed pipeline.
+        """
+        fields = self._spec_fields()
+        incomplete = fields is None
+        if incomplete:
+            fields = self._reflective_spec_fields()
+
+        spec = {
+            "class": type(self).__name__,
+            "module": type(self).__module__,
+            "dims": list(self.dims) if self.dims else None,
+            "data_order": list(self.data_order) if self.data_order else None,
+            "with_units": self.with_units,
+            "callback": callable_spec(self._callback),
+            "fields": fields,
+        }
+        if incomplete:
+            spec["spec_incomplete"] = True
+        return spec
+
+    def _spec_fields(self):
+        """Return a dict of the fields that define this signal, or None.
+
+        Returning None selects the reflective fallback. Subclasses should
+        override this and return only the values that change *what data is
+        fetched* -- not caches, connections, or other incidental state.
+        """
+        return None
+
+    def _reflective_spec_fields(self) -> dict:
+        """Best-effort description built from public instance attributes."""
+        fields = {}
+        for key, value in sorted(vars(self).items()):
+            if key.startswith("_") or key in self._SPEC_BASE_ATTRS:
+                continue
+            if callable(value):
+                fields[key] = callable_spec(value)
+            else:
+                fields[key] = value
+        return fields
 
     def set_callback(self, func) -> "Signal":
         """Set a callback function to be called after the data is fetched in the fetch method

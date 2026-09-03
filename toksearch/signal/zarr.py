@@ -60,6 +60,22 @@ class ZarrSignal(Signal):
                 fsspec.filesystem("file"), asynchronous=True
             )
 
+    def _spec_fields(self):
+        # `fs` is a live filesystem client, not a description of what is
+        # fetched. Including it would make the spec non-deterministic.
+        return {
+            "path": self.path,
+            "treepath": self.treepath,
+            "file_name_format": self.file_name_format,
+            # fetch_units genuinely changes what gather() returns, so it must
+            # be in the spec. Note it is NOT reflected in the base class's
+            # with_units attribute -- ZarrSignal.__init__ never syncs the two
+            # -- so without this line two signals differing only in
+            # fetch_units would produce byte-identical specs and be recorded
+            # as the same provenance input.
+            "fetch_units": self.fetch_units,
+        }
+
     def gather(self, shot):
         """Gather the data for a shot
 
