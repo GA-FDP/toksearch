@@ -56,6 +56,7 @@ nav:
     - "Distributed computing": distributed_computing.md
     - "Creating pipelines from SQL": sql.md
     - "Combining data after pipeline computation": Aggregating_Data.ipynb
+    - "Provenance and CMF": provenance.md
     - "LLM-driven analysis": LLM_Tutorial.ipynb
   - API:
     - "Pipeline": pipeline.md

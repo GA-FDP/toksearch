@@ -17,10 +17,23 @@ The ```Pipeline``` also provides a ```where``` method which takes as input a use
 
 ## Talk to your data
 
-TokSearch ships with `toksearch.llm` — a conversational interface that lets you ask for fusion data in plain English. The agent writes the pipeline code, runs it against a persistent Python namespace so follow-up turns iterate on cached results instead of re-fetching, and shows you each block before executing it. From a shell:
+TokSearch packages its own know-how — how to build a pipeline, which signal
+class a quantity needs, how to align and aggregate — as agent-readable skills.
+There are two ways to use them, and both are first-class. Pick your agent
+below — the built-in CLI or your own — then, either way, run it through `fdp`.
+
+### The built-in conversational CLI
+
+`toksearch chat` is a REPL with an LLM behind it. It writes the pipeline code,
+runs it against a persistent Python namespace — so follow-up turns iterate on
+cached results instead of re-fetching — and shows you each block before
+executing it.
 
 ```bash
-toksearch chat
+toksearch chat                  # interactive REPL
+toksearch chat --gui            # local Gradio GUI in a browser tab
+toksearch query "..."           # one-shot, for scripts and quick lookups
+toksearch backends              # list the names --backend accepts here
 ```
 
 ```text
@@ -36,72 +49,122 @@ you> What's the peak |Ip| in MA?
 [output] 1.1325
 ```
 
-Backends: Anthropic API, OpenAI API, your Claude Max plan via the Claude Agent SDK, or the American Science Cloud (AmSC) endpoint via `toksearch_d3d`. See the [LLM tutorial](https://ga-fdp.github.io/toksearch/latest/LLM_Tutorial/) for an end-to-end walkthrough and the [LLM Interface reference](https://ga-fdp.github.io/toksearch/latest/llm/) for the full API surface.
+Backends: the Anthropic API, the OpenAI API, your Claude Max plan via the
+Claude Agent SDK, or the American Science Cloud (AmSC) endpoint contributed by
+`toksearch_d3d`.
+
+### Your own agent
+
+If you already work in Claude Code, Cursor, or Codex, point it at the same
+material instead of switching tools. The skills install directly, and the same
+set is served over MCP by a standalone server:
+
+```bash
+fdp skills list                  # what's available, and what's installed
+fdp skills install               # → ~/.claude/skills
+fdp skills install --backend cursor    # or codex, or all; -f to overwrite
+
+claude mcp add toksearch-skills -- fdp run python -m toksearch.llm.mcp
+```
+
+The server exposes every skill as a `skill://<name>` MCP resource plus a
+`read_skill` tool, so any MCP-capable client can browse and read them.
+
+### Preferred: run either path through `fdp`
+
+Both paths are best used from an environment installed with the `fdp-core`
+metapackage (the standard FDP install; see [Installation](#installation)),
+through the `fdp` wrappers, which come with the device packages. `fdp chat`
+and `fdp query` configure data access (XRootD transport, MDSplus tree paths,
+bearer token) before the session starts, so the agent can actually reach shot
+data; `fdp skills` installs the skill files, and on the *Your own agent* path
+it is the `fdp run` in the `claude mcp add` line above that configures access.
+
+```bash
+fdp chat                        # interactive, FDP environment configured
+fdp query "Fetch ip for shot 200000 and report the peak in MA."
+```
+
+See the [LLM tutorial](https://ga-fdp.github.io/toksearch/latest/LLM_Tutorial/)
+for an end-to-end walkthrough and the
+[LLM Interface reference](https://ga-fdp.github.io/toksearch/latest/llm/) for
+the full API surface.
 
 
 ## Installation
 
-TokSearch is available on the `ga-fdp` conda channel. 
+### Recommended: the full FDP environment
 
-In the near future, we will provide a way to install TokSearch directly from PyPI using pip.
+Nearly everyone should install TokSearch as part of the Fusion Data Platform,
+through the `fdp-core` metapackage. That gets you TokSearch together with the
+device packages (`toksearch_d3d`, `toksearch_mast`), `ptdata`, `imas_composer`,
+the `fdp` CLI, the XRootD/Pelican transport that reaches DIII-D data, and the
+`toksearch_cmf` provenance backend — all pinned to a tested, mutually
+compatible set.
 
+```bash
+conda create -n fdp-installer -c ga-fdp -c conda-forge fdp-installer
+conda activate fdp-installer
+fdp-install -d /path/to/project
+cd /path/to/project
+pixi shell
+```
 
-### Installation with Conda in an existing environment
+`fdp-install` writes a `pixi.toml` that depends on `fdp-core` and runs
+`pixi install`. Substitute `mamba` or `micromamba` for `conda` if you prefer;
+the `-n` name is arbitrary.
 
-To install in an existing conda environment, run:
+| Flag | Effect |
+|---|---|
+| `-d`, `--directory` | Where to install (default: the current directory) |
+| `--latest` | Depend on `fdp-core-latest` (`>=` floors, e.g. `toksearch >=2.11.1`) instead of `fdp-core` (exact `==` pins, e.g. `toksearch ==2.11.1`) |
+| `--install-skills` | Also install the agent skills to `~/.claude/skills/` |
 
+Inside that environment, run your analysis through the `fdp` CLI so the
+data-access environment is configured:
 
+```bash
+fdp run python my_pipeline.py
+fdp run jupyter lab
+```
+
+### TokSearch on its own
+
+If you want the framework without FDP data access — your own MDSplus server,
+your own Zarr stores, or just the `Pipeline` machinery — install the package by
+itself:
 
 ```bash
 conda install -c ga-fdp -c conda-forge toksearch
 ```
 
-or equivalently
-
-```bash
-conda install -c conda-forge ga-fdp::toksearch
-```
-
-You can substitute `mamba` for `conda` if you prefer.
-
-### Installation with Conda in a new environment
-Optionally, you can create a new environment:
+or into a fresh environment:
 
 ```bash
 mamba create -n toksearch -c ga-fdp -c conda-forge toksearch
 ```
 
-### Installation from Source
+This does **not** give you DIII-D access: no `toksearch_d3d`, no `fdp` CLI, no
+XRootD/Pelican transport.
 
-At the moment, the cleanest way to install TokSearch from source is to first set up a Conda/Mamba environment with the required dependencies, and then install TokSearch from the local clone of the repository. Here are the steps:
+TokSearch is not published on PyPI. We intend to provide a pip install in the
+future.
 
-First, clone the repository, then from the root directory of the repository, run:
+### From source
+
+The repository is managed with [pixi](https://pixi.sh):
 
 ```bash
-mamba env create -f environment.yml
+git clone https://github.com/GA-FDP/toksearch.git
+cd toksearch
+pixi install
+pixi run build          # editable install into the pixi environment
+pixi run test           # run the test suite
 ```
 
-or
+To build the documentation site locally:
 
 ```bash
-conda env create -f environment.yml
-```
-
-You can also specify the ```-p``` flag to specify the path to the environment. For example:
-
-```bash
-mamba env create -f environment.yml -p /path/to/env
-```
-
-Then, activate the environment:
-
-```bash
-conda activate toksearch # or whatever you named the environment
-```
-
-Finally, install TokSearch itself:
-
-```bash
-pip install -e .
+pixi run -e docs docs-serve
 ```
 

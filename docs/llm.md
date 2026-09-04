@@ -36,17 +36,27 @@ Additional backends can be registered by any installed package — see
 
 ## Installation
 
-```bash
-# Conda (recommended; matches FDP-on-prem usage)
-conda install -c ga-fdp toksearch         # backends bundled by default
+The LLM interface ships with TokSearch; there is nothing extra to install if
+you installed through `fdp-core` (see the
+[installation guide](index.md#installation)). The conda recipe lists the four
+backend SDKs (`anthropic`, `openai`, `claude-agent-sdk`, `mcp`) and
+`matplotlib` as hard run-dependencies.
 
-# Pip
-pip install toksearch[llm]
+Installing TokSearch on its own works too:
+
+```bash
+conda install -c ga-fdp -c conda-forge toksearch
 ```
 
-The conda recipe lists the four backend SDKs (`anthropic`, `openai`,
-`claude-agent-sdk`, `mcp`) and `matplotlib` as hard run-dependencies; pip users
-get the same surface via the `[llm]` optional-dependency extra.
+From a source checkout, the `llm` extra installs the backend SDKs
+(`anthropic`, `openai`, `claude-agent-sdk`, `mcp`) and `matplotlib`:
+
+```bash
+pip install -e '.[llm]'
+```
+
+It does not pull in Gradio, so `toksearch chat --gui` needs either the conda
+package or a separate `pip install gradio`.
 
 ## Quickstart
 
@@ -58,15 +68,55 @@ toksearch query --backend anthropic "Use run_python to compute 2 + 2."
 
 # Interactive REPL
 toksearch chat --backend anthropic
+
+# Local Gradio GUI in a browser tab (--no-browser to skip opening it)
+toksearch chat --gui
+
+# What can --backend be, in this environment?
+toksearch backends
 ```
 
-The REPL accepts `/help`, `/reset`, and `/quit`; ctrl-D also exits. From a
-DIII-D environment, the `fdp` script wraps the same commands with the
-FDP environment pre-configured (XRootD plugin, MDSplus tree paths, etc.):
+`toksearch backends` prints the resolved registry — built-in backends,
+backends discovered from installed packages, and your own presets:
+
+```text
+name        source      backend     model
+----------  ----------  ----------  -----------------
+amsc        discovered  anthropic   claude-sonnet-4-6
+anthropic   built-in    anthropic   claude-sonnet-4-6  (default)
+claude-max  built-in    claude-max  -
+openai      built-in    openai      gpt-4o
+```
+
+Flags shared by `query` and `chat`:
+
+| Flag | Effect |
+|---|---|
+| `--backend NAME` | Backend or preset name. |
+| `--model NAME` | Override the preset's default model. |
+| `-n`, `--max-iterations N` | Cap on tool-call rounds per turn. |
+| `--package NAME` | Restrict discovered contributors to the named package(s). Repeatable. |
+| `-v`, `--verbose` | Show full tool-call code and tool-result bodies instead of a one-line summary per call. |
+
+`--gui` and `--no-browser` are `chat`-only. The REPL accepts `/help`,
+`/reset`, and `/quit`; ctrl-D also exits.
+
+From a DIII-D environment, the `fdp` CLI wraps the same commands with the FDP
+environment configured (XRootD plugin, MDSplus tree paths, `BEARER_TOKEN`)
+before the session starts, which is what lets the agent reach shot data:
 
 ```bash
 fdp query "Fetch ip for shot 200000 and report peak in MA."
 fdp chat                                                       # interactive
+fdp chat --gui
+```
+
+`fdp chat`/`fdp query` forward `--backend`, `--model`, `-n/--max-iterations`,
+`--gui`, and `--no-browser`. They do not forward `--package` or `-v`; for those,
+run the underlying command inside the FDP environment instead:
+
+```bash
+fdp run toksearch chat --package toksearch_d3d -v
 ```
 
 The backend default is deployment-level, not device-driven: `--backend` →
@@ -94,9 +144,10 @@ real DIII-D workflow, see the [LLM Tutorial](LLM_Tutorial.ipynb).
 
 ## Configuration
 
-Resolution precedence (highest first):
+Three settings resolve through a precedence chain: the backend, the model, and
+the iteration cap. Highest first:
 
-1. CLI flags: `--backend`, `--model`, `-n / --max-iterations`, `--package`
+1. CLI flags: `--backend`, `--model`, `-n / --max-iterations`
 2. Environment variables: `FDP_LLM_BACKEND`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 3. `~/.fdp/config.toml`:
 
@@ -115,6 +166,9 @@ Resolution precedence (highest first):
     ```
 
 4. Built-in defaults
+
+`--package` and `-v / --verbose` are flag-only — they have no environment
+variable and no `config.toml` key, so they must be passed on each invocation.
 
 ## Tools
 
@@ -144,16 +198,13 @@ agent calls `lookup_docs(skill_name=...)` when it needs the details.
 
 Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
-`toksearch_d3d` contributes skills for `PtDataSignal`, `ImasSignal`, FDP CLI,
-and a DIII-D quickstart.
+`toksearch_d3d` contributes five — signal routing (which class a given
+physics quantity needs), `PtDataSignal`, `ImasSignal`, the FDP CLI, and a
+DIII-D quickstart.
 
-Skills are served via a **standalone MCP server** launched as a subprocess when
-`Session` is constructed: `python -m toksearch.llm.mcp`. Each `SKILL.md` is
-exposed as a `skill://<name>` MCP resource (and via a `read_skill` tool). The
-`toksearch.llm.skills` entry-point group remains the discovery source; extra
-directories can be added via the `TOKSEARCH_SKILL_DIRS` env var
-(os.pathsep-delimited). An external MCP client can also connect to the server
-directly to browse or read skills independently of `Session`.
+Skills are served over MCP: `Session` launches `python -m toksearch.llm.mcp` as
+a subprocess on construction. The same server can be used directly by an
+external agent — see [Using your own agent](#using-your-own-agent).
 
 ## Show-then-run
 
@@ -174,6 +225,39 @@ def review(call):
 
 sess.send("...", confirm=review)
 ```
+
+## Using your own agent
+
+The skills that `lookup_docs` serves to the built-in agent are the same ones an
+external coding agent can read. Two delivery mechanisms:
+
+**Installed skill files.** `fdp skills` installs the SKILL.md directories
+contributed by every installed package into the agent's own skills location, in
+the form that agent expects:
+
+```bash
+fdp skills list                            # available + install status
+fdp skills install                         # → ~/.claude/skills (Claude Code)
+fdp skills install --backend cursor        # or codex, or all
+fdp skills install --force                 # overwrite already-installed copies
+```
+
+**The MCP server.** `python -m toksearch.llm.mcp` is a standalone stdio MCP
+server that exposes each skill as a `skill://<name>` resource plus a
+`read_skill` tool. Register it with Claude Code:
+
+```bash
+claude mcp add toksearch-skills -- fdp run python -m toksearch.llm.mcp
+```
+
+Wrapping it in `fdp run` means the agent's environment can also fetch data, not
+just read documentation. Any MCP-capable client can connect to the same server.
+
+Discovery for both mechanisms is the `toksearch.llm.skills` entry-point group;
+extra directories can be added through the `TOKSEARCH_SKILL_DIRS` environment
+variable (os.pathsep-delimited). `Session` launches its own copy of this server
+as a subprocess, so the built-in agent and an external one read byte-identical
+documentation.
 
 ## Contributors
 
@@ -263,5 +347,6 @@ handler).
 ## See also
 
 - [LLM Tutorial](LLM_Tutorial.ipynb) — end-to-end walkthrough including a DIII-D plot.
-- [`fdp` CLI](https://github.com/GA-FDP/toksearch_d3d) — wraps `toksearch chat`/`query` with FDP environment setup for DIII-D users.
+- [`fdp` CLI](https://github.com/GA-FDP/fdp) — wraps `toksearch chat`/`query`
+  with FDP environment setup, and provides `fdp skills`.
 - [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) — underlies the `claude-max` backend.
