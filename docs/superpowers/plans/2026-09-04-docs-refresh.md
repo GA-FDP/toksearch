@@ -1393,15 +1393,18 @@ run description and `CmfRun` records it.
 
 **Prerequisites.** cmflib records the executing script's commit and hands
 output paths to DVC, so the script must run from inside a git repository that
-has a remote and an initialised DVC, and the script itself must be committed
-there. `CmfRun` checks for the repository up front rather than failing after a
-long compute.
+has a remote and DVC initialised, with the script itself committed there.
+`CmfRun` checks for the repository up front rather than failing after a long
+compute.
 
 **Run it with `python -m fdp run`, not `fdp run`.** In any environment
 carrying cmflib, graphviz arrives transitively (`cmflib → dvc → pydot →
-graphviz`) and installs its own layout engine at `bin/fdp`. `fdp` 0.6.0 fixed
-the link order so the FDP CLI keeps the file, but `python -m fdp` is
-unambiguous regardless of environment:
+graphviz`) and installs its own layout engine at `bin/fdp`. `fdp` 0.6.0
+declared graphviz as a dependency so the installer's link order gives the FDP
+CLI the file back (verified on pixi/rattler and micromamba 2.9.0). That still
+leaves two ways to lose the collision: an `fdp` older than 0.6.0, or an
+installer whose link order isn't guaranteed the way those two are.
+`python -m fdp` sidesteps the question either way:
 
 ```bash
 python -m fdp run python betan_ip_peaks_cmf.py
@@ -1409,7 +1412,9 @@ python -m fdp run python betan_ip_peaks_cmf.py
 
 A complete working example is
 [`examples/betan_ip_peaks_cmf.py`](https://github.com/GA-FDP/toksearch_cmf/blob/main/examples/betan_ip_peaks_cmf.py)
-in the `toksearch_cmf` repository.
+in the `toksearch_cmf` repository. The prerequisite passage above is kept
+deliberately in sync with the same passage in that repository's README; if you
+change one, change the other.
 
 ## API reference
 
