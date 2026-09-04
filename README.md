@@ -19,7 +19,8 @@ The ```Pipeline``` also provides a ```where``` method which takes as input a use
 
 TokSearch packages its own know-how — how to build a pipeline, which signal
 class a quantity needs, how to align and aggregate — as agent-readable skills.
-There are two ways to use them, and both are first-class.
+There are two ways to use them, and both are first-class. Pick your agent
+below — the built-in CLI or your own — then, either way, run it through `fdp`.
 
 ### The built-in conversational CLI
 
@@ -71,8 +72,9 @@ The server exposes every skill as a `skill://<name>` MCP resource plus a
 
 ### Preferred: run either path through `fdp`
 
-Both paths are best used from an environment installed with `fdp-core` (see
-[Installation](#installation)), through the `fdp` wrappers — `fdp chat`,
+Both paths are best used from an environment installed with the `fdp-core`
+metapackage (the standard FDP install; see [Installation](#installation)),
+through the `fdp` wrappers — `fdp chat`,
 `fdp query`, `fdp skills`. Those come with the device packages and configure
 data access (XRootD transport, MDSplus tree paths, bearer token) before the
 session starts, so the agent can actually reach shot data.
@@ -114,7 +116,7 @@ the `-n` name is arbitrary.
 | Flag | Effect |
 |---|---|
 | `-d`, `--directory` | Where to install (default: the current directory) |
-| `--latest` | Depend on `fdp-core-latest` (`>=` floors) instead of `fdp-core` (exact `==` pins) |
+| `--latest` | Depend on `fdp-core-latest` (`>=` floors, e.g. `toksearch >=2.11.1`) instead of `fdp-core` (exact `==` pins, e.g. `toksearch ==2.11.1`) |
 | `--install-skills` | Also install the agent skills to `~/.claude/skills/` |
 
 Inside that environment, run your analysis through the `fdp` CLI so the
