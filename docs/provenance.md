@@ -99,7 +99,7 @@ That writes `out/180000.nc` and `out/180001.nc`, and this `run.json`:
     "source": {"count": 2, "hash": "8964cb18ba55ec4e...", "kind": "shotlist",
                "params": null, "query": null}
   },
-  "input_identity": "e320ff068b07e8d0aa91bdcd7c7b8c2c454cf1dee2879fab1ef8718668e15d36",
+  "input_identity": "ca52bcbedcaf50337f0c97ebf2533b38c481d7862f6647cb0ce57b195476bb69",
   "metrics": {"coverage": {"requested": 2, "returned": 2}},
   "outputs": [{"path": "/path/to/demo/out", "source": "pipeline_write"}],
   "pipeline_name": "demo",
