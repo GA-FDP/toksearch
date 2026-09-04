@@ -726,7 +726,7 @@ pixi run -e docs docs-serve
 - [ ] **Step 2: Confirm `docs/index.md` still tracks it**
 
 ```bash
-\
+cd /fusion/projects/dt/sammuli/fdp_dev/repos/toksearch && \
   git ls-files -s docs/index.md && tail -3 docs/index.md
 ```
 
