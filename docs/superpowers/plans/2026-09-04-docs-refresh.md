@@ -38,16 +38,21 @@ Baseline before you start: `fdp`'s suite is **246 passed**.
 | `fdp/tests/test_cli.py` | Coverage for the three env outcomes | 1 |
 | `fdp/fdp/llm_shims.py` | Drop the vestigial `handle` parameter | 2 |
 | `fdp/tests/test_llm_shims.py` | Update to the new `_build_llm_cmd` signature | 2 |
-| `toksearch/docs/index.md` | Landing page: talk-to-your-data + installation | 3, 4 |
-| `toksearch/README.md` | Same content, kept in sync with `index.md` | 3, 4 |
+| `toksearch/README.md` | Landing page: talk-to-your-data + installation | 3, 4 |
+| `toksearch/docs/index.md` | **Symlink to `../README.md`** — never edited directly | 3, 4 |
 | `toksearch/docs/llm.md` | LLM reference: full CLI surface, agent integration | 5 |
 | `toksearch/docs/LLM_Tutorial.ipynb` | Tutorial: install, backends, false claims | 6 |
 | `toksearch/docs/provenance.md` | **New.** Provenance + CMF page with API blocks | 7 |
 | `toksearch/mkdocs.yml` | Nav entry for the new page | 7 |
 | `toksearch_cmf/README.md` | Describe the shipped 0.1.1 surface | 9 |
 
-`README.md` and `docs/index.md` in `toksearch` are near-duplicates today and
-must stay that way. Tasks 3 and 4 write the section once and apply it to both.
+**`docs/index.md` is a symlink to `../README.md`** (mode `120000`, since
+`03250be` in 2024). Edit `README.md` only; the site page follows automatically
+and the two cannot drift. Because the same bytes are served on GitHub and on
+the mkdocs site, cross-references in this shared text must be **absolute**
+`https://ga-fdp.github.io/toksearch/latest/...` URLs, which resolve from both.
+Do not use relative mkdocs paths here, and do not convert the symlink into a
+regular file to work around that.
 
 ---
 
@@ -619,8 +624,8 @@ MSG
 ## Task 4: `toksearch` — rewrite Installation
 
 **Files:**
-- Modify: `/fusion/projects/dt/sammuli/fdp_dev/repos/toksearch/docs/index.md`
 - Modify: `/fusion/projects/dt/sammuli/fdp_dev/repos/toksearch/README.md`
+  (`docs/index.md` is a symlink to it and needs no separate edit)
 
 Facts this section must respect, all verified:
 
@@ -718,9 +723,17 @@ pixi run -e docs docs-serve
 ```
 ````
 
-- [ ] **Step 2: Apply the identical replacement to `README.md`**
+- [ ] **Step 2: Confirm `docs/index.md` still tracks it**
 
-Same text; no link rewriting is needed in this section.
+```bash
+\
+  git ls-files -s docs/index.md && tail -3 docs/index.md
+```
+
+Expected: mode `120000` (still a symlink), and the tail showing the new
+content. If the mode is `100644`, the symlink was broken — restore it with
+`rm docs/index.md && ln -s ../README.md docs/index.md` rather than maintaining
+two copies.
 
 - [ ] **Step 3: Confirm the dead instructions are gone**
 
@@ -735,7 +748,7 @@ Expected: no output.
 
 ```bash
 cd /fusion/projects/dt/sammuli/fdp_dev/repos/toksearch
-git add README.md docs/index.md
+git add README.md
 git commit -F - <<'MSG'
 docs: install the way people actually install
 
