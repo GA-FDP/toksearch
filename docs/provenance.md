@@ -17,10 +17,10 @@ separate `toksearch_cmf` package.
 | Component | What it carries |
 |---|---|
 | `SourceSpec` | Where the shots came from: `kind` (`shotlist`, `sql`, `recordset`), `count`, a hash of the shot list, and for SQL sources the `query` and `params` |
-| `OpSpec` | One per pipeline operation, in order: `fetch`, `map`, `keep`, `where`, `align`, `write`, each with its detail |
+| `OpSpec` | One per pipeline operation, in order: `fetch`, `fetch_dataset`, `map`, `keep`, `where`, `align`, `write`, each with its detail |
 | `BackendSpec` | Which compute backend ran it, and its configuration |
 | `CodeSpec` | The executing script, its `argv`, the git `commit`, and whether the tree was `dirty` |
-| `signals` | The `Signal.spec()` of every fetched signal, keyed by record field |
+| `signals` | The `Signal.spec()` of every fetched signal, keyed by record field — or by `<dataset>.<name>` for `fetch_dataset` |
 
 `RunContext.input_identity()` hashes only the source, the signals, and the
 device — deliberately excluding operations, backend, and code. Two runs that
@@ -37,10 +37,18 @@ differently.
 | `metrics(name, values)` | Record a named set of metrics |
 | `finalize()` | Flush and close the record |
 
-Hooks are invoked through `safe_call`, which converts any exception into a
-`RuntimeWarning` and carries on. Losing a provenance record is bad; losing a
-completed multi-hour compute is worse. Set `strict=True` on the backend to make
-failures propagate instead — appropriate in CI, not in production runs.
+The three hooks toksearch invokes itself — `on_compute_start`,
+`on_compute_end`, and the `output` recorded by `RecordSet.to_parquet` — go
+through `safe_call`, which converts any exception into a `RuntimeWarning` and
+carries on: losing a provenance record is bad, losing a completed multi-hour
+compute is worse. Set `strict=True` on the backend to make those propagate
+instead — appropriate in CI, not in production runs. `metrics()` and
+`finalize()` get no such protection and `strict` does not reach them: you call
+them yourself, so a failure inside one — a DVC or mlmd error in
+`CmfRun.finalize()`, say — raises into your script like any other call, after
+the compute has already finished. Put `finalize()` where an exception is
+survivable, or wrap it, when the computed result matters more than the
+record.
 
 ## Recording a run
 
@@ -231,14 +239,16 @@ has a remote and DVC initialised, with the script itself committed there.
 `CmfRun` checks for the repository up front rather than failing after a long
 compute.
 
-**Run it with `python -m fdp run`, not `fdp run`.** In any environment
+**Prefer `python -m fdp run` to `fdp run`.** In any environment
 carrying cmflib, graphviz arrives transitively (`cmflib → dvc → pydot →
 graphviz`) and installs its own layout engine at `bin/fdp`. `fdp` 0.6.0
 declared graphviz as a dependency so the installer's link order gives the FDP
 CLI the file back (verified on pixi/rattler and micromamba 2.9.0). That still
 leaves two ways to lose the collision: an `fdp` older than 0.6.0, or an
-installer whose link order isn't guaranteed the way those two are.
-`python -m fdp` sidesteps the question either way:
+installer whose link order isn't guaranteed the way those two are. So plain
+`fdp run` does work in a stock `fdp-core` environment — which is why the rest
+of these docs use it — and `python -m fdp` is simply the form that cannot be
+wrong:
 
 ```bash
 python -m fdp run python betan_ip_peaks_cmf.py
