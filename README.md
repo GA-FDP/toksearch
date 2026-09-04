@@ -17,10 +17,22 @@ The ```Pipeline``` also provides a ```where``` method which takes as input a use
 
 ## Talk to your data
 
-TokSearch ships with `toksearch.llm` — a conversational interface that lets you ask for fusion data in plain English. The agent writes the pipeline code, runs it against a persistent Python namespace so follow-up turns iterate on cached results instead of re-fetching, and shows you each block before executing it. From a shell:
+TokSearch packages its own know-how — how to build a pipeline, which signal
+class a quantity needs, how to align and aggregate — as agent-readable skills.
+There are two ways to use them, and both are first-class.
+
+### The built-in conversational CLI
+
+`toksearch chat` is a REPL with an LLM behind it. It writes the pipeline code,
+runs it against a persistent Python namespace — so follow-up turns iterate on
+cached results instead of re-fetching — and shows you each block before
+executing it.
 
 ```bash
-toksearch chat
+toksearch chat                  # interactive REPL
+toksearch chat --gui            # local Gradio GUI in a browser tab
+toksearch query "..."           # one-shot, for scripts and quick lookups
+toksearch backends              # list the names --backend accepts here
 ```
 
 ```text
@@ -36,7 +48,44 @@ you> What's the peak |Ip| in MA?
 [output] 1.1325
 ```
 
-Backends: Anthropic API, OpenAI API, your Claude Max plan via the Claude Agent SDK, or the American Science Cloud (AmSC) endpoint via `toksearch_d3d`. See the [LLM tutorial](https://ga-fdp.github.io/toksearch/latest/LLM_Tutorial/) for an end-to-end walkthrough and the [LLM Interface reference](https://ga-fdp.github.io/toksearch/latest/llm/) for the full API surface.
+Backends: the Anthropic API, the OpenAI API, your Claude Max plan via the
+Claude Agent SDK, or the American Science Cloud (AmSC) endpoint contributed by
+`toksearch_d3d`.
+
+### Your own agent
+
+If you already work in Claude Code, Cursor, or Codex, point it at the same
+material instead of switching tools. The skills install directly, and the same
+set is served over MCP by a standalone server:
+
+```bash
+fdp skills list                  # what's available, and what's installed
+fdp skills install               # → ~/.claude/skills
+fdp skills install --backend cursor    # or codex, or all; -f to overwrite
+
+claude mcp add toksearch-skills -- fdp run python -m toksearch.llm.mcp
+```
+
+The server exposes every skill as a `skill://<name>` MCP resource plus a
+`read_skill` tool, so any MCP-capable client can browse and read them.
+
+### Preferred: run either path through `fdp`
+
+Both paths are best used from an environment installed with `fdp-core` (see
+[Installation](#installation)), through the `fdp` wrappers — `fdp chat`,
+`fdp query`, `fdp skills`. Those come with the device packages and configure
+data access (XRootD transport, MDSplus tree paths, bearer token) before the
+session starts, so the agent can actually reach shot data.
+
+```bash
+fdp chat                        # interactive, FDP environment configured
+fdp query "Fetch ip for shot 200000 and report the peak in MA."
+```
+
+See the [LLM tutorial](https://ga-fdp.github.io/toksearch/latest/LLM_Tutorial/)
+for an end-to-end walkthrough and the
+[LLM Interface reference](https://ga-fdp.github.io/toksearch/latest/llm/) for
+the full API surface.
 
 
 ## Installation
