@@ -22,3 +22,7 @@ toksearch.orig
 .eggs
 
 
+
+# mkdocs build output. Anchored, per the /tags lesson above: a bare `site`
+# would match any directory segment named site, including inside a package.
+/site

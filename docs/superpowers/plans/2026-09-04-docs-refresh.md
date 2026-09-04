@@ -570,32 +570,33 @@ fdp chat                        # interactive, FDP environment configured
 fdp query "Fetch ip for shot 200000 and report the peak in MA."
 ```
 
-See the [LLM tutorial](LLM_Tutorial.ipynb) for an end-to-end walkthrough and
-the [LLM Interface reference](llm.md) for the full API surface.
-````
-
-- [ ] **Step 2: Apply the same replacement to `README.md`**
-
-Identical text, except the two trailing cross-reference links, which must be
-absolute in the README (it is read on GitHub, where relative mkdocs paths do
-not resolve):
-
-```markdown
 See the [LLM tutorial](https://ga-fdp.github.io/toksearch/latest/LLM_Tutorial/)
 for an end-to-end walkthrough and the
 [LLM Interface reference](https://ga-fdp.github.io/toksearch/latest/llm/) for
 the full API surface.
+````
+
+- [ ] **Step 2: Confirm `docs/index.md` still tracks it**
+
+There is no second file to edit — `docs/index.md` is a symlink to
+`../README.md`. The absolute URLs above are what let the one shared copy
+resolve from both GitHub and the mkdocs site. Verify the symlink survived:
+
+```bash
+\
+  git ls-files -s docs/index.md
 ```
+
+Expected: mode `120000`.
 
 - [ ] **Step 3: Verify the two files stayed in sync**
 
 ```bash
 cd /fusion/projects/dt/sammuli/fdp_dev/repos/toksearch && \
-  diff <(sed -n '/^## Talk to your data/,/^## Installation/p' README.md) \
-       <(sed -n '/^## Talk to your data/,/^## Installation/p' docs/index.md)
+  diff README.md docs/index.md && echo "one copy, as expected"
 ```
 
-Expected: differences only in the final two link lines.
+Expected: no differences — they are the same file.
 
 - [ ] **Step 4: Commit**
 
