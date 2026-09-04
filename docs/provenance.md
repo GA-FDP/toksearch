@@ -256,9 +256,12 @@ python -m fdp run python betan_ip_peaks_cmf.py
 
 A complete working example is
 [`examples/betan_ip_peaks_cmf.py`](https://github.com/GA-FDP/toksearch_cmf/blob/main/examples/betan_ip_peaks_cmf.py)
-in the `toksearch_cmf` repository. The prerequisite passage above is kept
-deliberately in sync with the same passage in that repository's README; if you
-change one, change the other.
+in the `toksearch_cmf` repository. The technical claims in the prerequisite
+passage above — the git+DVC requirement, and the graphviz story with its two
+residual exposures — are kept deliberately in sync with the same passage in
+that repository's README. The surrounding wording differs where local context
+demands it (only this page has to reconcile itself with the `fdp run` used
+elsewhere in these docs), so compare the claims, not the prose.
 
 ## API reference
 
