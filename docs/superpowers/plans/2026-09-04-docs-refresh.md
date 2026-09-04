@@ -1674,7 +1674,7 @@ git commit -F - <<'MSG'
 docs: describe the package that shipped
 
 The README still said "Scaffold only: CmfRun is not implemented yet."
-CmfRun landed in 089877c and 0.1.1 is blessed by fdp-core 1.4.0. Describe
+CmfRun landed in 089873c and 0.1.1 is blessed by fdp-core 1.4.0. Describe
 the actual surface, the git+DVC prerequisite, the `python -m fdp run`
 caveat, and point at the worked example and the TokSearch provenance page.
 
