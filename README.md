@@ -74,10 +74,11 @@ The server exposes every skill as a `skill://<name>` MCP resource plus a
 
 Both paths are best used from an environment installed with the `fdp-core`
 metapackage (the standard FDP install; see [Installation](#installation)),
-through the `fdp` wrappers — `fdp chat`,
-`fdp query`, `fdp skills`. Those come with the device packages and configure
-data access (XRootD transport, MDSplus tree paths, bearer token) before the
-session starts, so the agent can actually reach shot data.
+through the `fdp` wrappers, which come with the device packages. `fdp chat`
+and `fdp query` configure data access (XRootD transport, MDSplus tree paths,
+bearer token) before the session starts, so the agent can actually reach shot
+data; `fdp skills` installs the skill files, and on the *Your own agent* path
+it is the `fdp run` in the `claude mcp add` line above that configures access.
 
 ```bash
 fdp chat                        # interactive, FDP environment configured

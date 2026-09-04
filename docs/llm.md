@@ -48,11 +48,15 @@ Installing TokSearch on its own works too:
 conda install -c ga-fdp -c conda-forge toksearch
 ```
 
-From a source checkout, the same surface comes from the `llm` extra:
+From a source checkout, the `llm` extra installs the backend SDKs
+(`anthropic`, `openai`, `claude-agent-sdk`, `mcp`) and `matplotlib`:
 
 ```bash
 pip install -e '.[llm]'
 ```
+
+It does not pull in Gradio, so `toksearch chat --gui` needs either the conda
+package or a separate `pip install gradio`.
 
 ## Quickstart
 
@@ -194,8 +198,9 @@ agent calls `lookup_docs(skill_name=...)` when it needs the details.
 
 Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
-`toksearch_d3d` contributes skills for `PtDataSignal`, `ImasSignal`, FDP CLI,
-and a DIII-D quickstart.
+`toksearch_d3d` contributes five — signal routing (which class a given
+physics quantity needs), `PtDataSignal`, `ImasSignal`, the FDP CLI, and a
+DIII-D quickstart.
 
 Skills are served over MCP: `Session` launches `python -m toksearch.llm.mcp` as
 a subprocess on construction. The same server can be used directly by an
