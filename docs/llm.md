@@ -140,9 +140,10 @@ real DIII-D workflow, see the [LLM Tutorial](LLM_Tutorial.ipynb).
 
 ## Configuration
 
-Resolution precedence (highest first):
+Three settings resolve through a precedence chain: the backend, the model, and
+the iteration cap. Highest first:
 
-1. CLI flags: `--backend`, `--model`, `-n / --max-iterations`, `--package`
+1. CLI flags: `--backend`, `--model`, `-n / --max-iterations`
 2. Environment variables: `FDP_LLM_BACKEND`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 3. `~/.fdp/config.toml`:
 
@@ -161,6 +162,9 @@ Resolution precedence (highest first):
     ```
 
 4. Built-in defaults
+
+`--package` and `-v / --verbose` are flag-only — they have no environment
+variable and no `config.toml` key, so they must be passed on each invocation.
 
 ## Tools
 
