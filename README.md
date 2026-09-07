@@ -17,17 +17,17 @@ The ```Pipeline``` also provides a ```where``` method which takes as input a use
 
 ## Talk to your data
 
-TokSearch packages its own know-how — how to build a pipeline, which signal
-class a quantity needs, how to align and aggregate — as agent-readable skills.
+TokSearch packages its own know-how as agent-readable skills: how to build a
+pipeline, which signal class a quantity needs, how to align and aggregate.
 There are two ways to use them, and both are first-class. Pick your agent
-below — the built-in CLI or your own — then, either way, run it through `fdp`.
+below, the built-in CLI or your own. Either way, run it through `fdp`.
 
 ### The built-in conversational CLI
 
 `toksearch chat` is a REPL with an LLM behind it. It writes the pipeline code,
-runs it against a persistent Python namespace — so follow-up turns iterate on
-cached results instead of re-fetching — and shows you each block before
-executing it.
+runs it against a persistent Python namespace, so follow-up turns iterate on
+cached results instead of re-fetching. It shows you each block before executing
+it.
 
 ```bash
 toksearch chat                  # interactive REPL
@@ -99,7 +99,7 @@ Nearly everyone should install TokSearch as part of the Fusion Data Platform,
 through the `fdp-core` metapackage. That gets you TokSearch together with the
 device packages (`toksearch_d3d`, `toksearch_mast`), `ptdata`, `imas_composer`,
 the `fdp` CLI, the XRootD/Pelican transport that reaches DIII-D data, and the
-`toksearch_cmf` provenance backend — all pinned to a tested, mutually
+`toksearch_cmf` provenance backend, all pinned to a tested, mutually
 compatible set.
 
 ```bash
@@ -130,9 +130,8 @@ fdp run jupyter lab
 
 ### TokSearch on its own
 
-If you want the framework without FDP data access — your own MDSplus server,
-your own Zarr stores, or just the `Pipeline` machinery — install the package by
-itself:
+If you want the framework without FDP data access, for your own MDSplus server
+or Zarr stores or just the `Pipeline` machinery, install the package by itself:
 
 ```bash
 conda install -c ga-fdp -c conda-forge toksearch

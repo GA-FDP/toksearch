@@ -1,6 +1,6 @@
 # LLM Interface
 
-TokSearch ships with `toksearch.llm` — a conversational interface that lets
+TokSearch ships with `toksearch.llm`, a conversational interface that lets
 you ask for fusion data in plain English and have an LLM write the pipeline
 code for you. The agent uses a **persistent Python namespace** so successive
 turns iterate on cached results instead of re-fetching, which is what makes
@@ -31,7 +31,7 @@ Four backend names ship in core TokSearch:
 | `claude-max` | Claude Max plan via the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) | the `claude` CLI (run `claude login`) |
 | `amsc` *(registered by `toksearch_d3d`)* | American Science Cloud (AmSC) Anthropic-compatible endpoint at `api.i2-core.american-science-cloud.org` | `~/amsc_api_key` |
 
-Additional backends can be registered by any installed package — see
+Additional backends can be registered by any installed package. See
 [Contributors](#contributors).
 
 ## Installation
@@ -76,8 +76,8 @@ toksearch chat --gui
 toksearch backends
 ```
 
-`toksearch backends` prints the resolved registry — built-in backends,
-backends discovered from installed packages, and your own presets:
+`toksearch backends` prints the resolved registry: built-in backends, backends
+discovered from installed packages, and your own presets:
 
 ```text
 name        source      backend     model
@@ -167,7 +167,7 @@ the iteration cap. Highest first:
 
 4. Built-in defaults
 
-`--package` and `-v / --verbose` are flag-only — they have no environment
+`--package` and `-v / --verbose` are flag-only. They have no environment
 variable and no `config.toml` key, so they must be passed on each invocation.
 
 ## Tools
@@ -177,7 +177,7 @@ The agent has exactly two tools, registered with every Session:
 ### `run_python`
 
 Executes a Python code string in the Session's persistent namespace. The
-namespace lives for the Session's lifetime — variables defined in one turn
+namespace lives for the Session's lifetime, so variables defined in one turn
 are available in all subsequent turns. Pre-populated with:
 
 - `toksearch` (and `toksearch_d3d` if installed)
@@ -187,7 +187,7 @@ are available in all subsequent turns. Pre-populated with:
 
 The agent must populate a `thought` field with a one-sentence description of
 what each code block does and why. This is what the REPL prints before
-execution — it's the load-bearing transparency mechanism (see
+execution, which is what makes the whole thing reviewable (see
 [Show-then-run](#show-then-run)).
 
 ### `lookup_docs`
@@ -198,18 +198,18 @@ agent calls `lookup_docs(skill_name=...)` when it needs the details.
 
 Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
-`toksearch_d3d` contributes five — signal routing (which class a given
-physics quantity needs), `PtDataSignal`, `ImasSignal`, the FDP CLI, and a
-DIII-D quickstart.
+`toksearch_d3d` contributes five: signal routing (which class a given physics
+quantity needs), `PtDataSignal`, `ImasSignal`, the FDP CLI, and a DIII-D
+quickstart.
 
 Skills are served over MCP: `Session` launches `python -m toksearch.llm.mcp` as
 a subprocess on construction. The same server can be used directly by an
-external agent — see [Using your own agent](#using-your-own-agent).
+external agent. See [Using your own agent](#using-your-own-agent).
 
 ## Show-then-run
 
 The REPL prints each `run_python` block's `thought` and code **before**
-executing it. This is the default UX — auto-approval with transparency, no
+executing it. That is the default: auto-approval with transparency, no
 confirmation prompts. The realistic threat model isn't a malicious agent; it's
 the agent making an expensive mistake (e.g. firing off a
 `compute_multiprocessing` over 10,000 shots when you wanted 100). Surfacing
@@ -346,7 +346,7 @@ handler).
 
 ## See also
 
-- [LLM Tutorial](LLM_Tutorial.ipynb) — end-to-end walkthrough including a DIII-D plot.
-- [`fdp` CLI](https://github.com/GA-FDP/fdp) — wraps `toksearch chat`/`query`
+- [LLM Tutorial](LLM_Tutorial.ipynb), an end-to-end walkthrough including a DIII-D plot.
+- [`fdp` CLI](https://github.com/GA-FDP/fdp), which wraps `toksearch chat`/`query`
   with FDP environment setup, and provides `fdp skills`.
-- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) — underlies the `claude-max` backend.
+- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python), which underlies the `claude-max` backend.

@@ -1,10 +1,10 @@
 # Provenance and CMF
 
-A computed result is only reusable if you can say what produced it. TokSearch
-derives that description itself — the shot source, the specification of every
-signal fetched, the sequence of operations, the compute backend, and the git
-commit of the script that ran — and hands it to a provenance backend. You do
-not hand-write metadata.
+To reuse a computed result you need to know what produced it. TokSearch works
+that out for you. For every run it derives the shot source, the specification
+of every signal fetched, the sequence of operations, the compute backend, and
+the git commit of the script that ran, then hands all of it to a provenance
+backend. There is no metadata to write by hand.
 
 ## The interface
 
@@ -20,10 +20,10 @@ separate `toksearch_cmf` package.
 | `OpSpec` | One per pipeline operation, in order: `fetch`, `fetch_dataset`, `map`, `keep`, `where`, `align`, `write`, each with its detail |
 | `BackendSpec` | Which compute backend ran it, and its configuration |
 | `CodeSpec` | The executing script, its `argv`, the git `commit`, and whether the tree was `dirty` |
-| `signals` | The `Signal.spec()` of every fetched signal, keyed by record field — or by `<dataset>.<name>` for `fetch_dataset` |
+| `signals` | The `Signal.spec()` of every fetched signal, keyed by record field, or by `<dataset>.<name>` for `fetch_dataset` |
 
 `RunContext.input_identity()` hashes only the source, the signals, and the
-device — deliberately excluding operations, backend, and code. Two runs that
+device, deliberately excluding operations, backend, and code. Two runs that
 read the same data have the same input identity even if they process it
 differently.
 
@@ -37,15 +37,15 @@ differently.
 | `metrics(name, values)` | Record a named set of metrics |
 | `finalize()` | Flush and close the record |
 
-The three hooks toksearch invokes itself — `on_compute_start`,
-`on_compute_end`, and the `output` recorded by `RecordSet.to_parquet` — go
+Three hooks are invoked by toksearch itself: `on_compute_start`,
+`on_compute_end`, and the `output` recorded by `RecordSet.to_parquet`. These go
 through `safe_call`, which converts any exception into a `RuntimeWarning` and
 carries on: losing a provenance record is bad, losing a completed multi-hour
 compute is worse. Set `strict=True` on the backend to make those propagate
-instead — appropriate in CI, not in production runs. `metrics()` and
+instead, which suits CI but not production runs. `metrics()` and
 `finalize()` get no such protection and `strict` does not reach them: you call
-them yourself, so a failure inside one — a DVC or mlmd error in
-`CmfRun.finalize()`, say — raises into your script like any other call, after
+them yourself, so a failure inside one, such as a DVC or mlmd error in
+`CmfRun.finalize()`, raises into your script like any other call, after
 the compute has already finished. Put `finalize()` where an exception is
 survivable, or wrap it, when the computed result matters more than the
 record.
@@ -121,14 +121,14 @@ That writes `out/180000.nc` and `out/180001.nc`, and this `run.json`:
 repository containing the script; outside a repository both are `null`.
 
 Add a `fetch` and the `signals` block fills in with that signal's full
-specification — class, module, expression, tree name, dims, and every
-constructor field — which is what makes the input identity meaningful.
+specification: class, module, expression, tree name, dims, and every
+constructor field. That is what makes the input identity meaningful.
 
 ### Chaining runs
 
 `Pipeline.compute` copies the backend's `run_id` onto the returned
-`RecordSet`. Building a new pipeline from that recordset —
-`Pipeline(previous_results)` — reads it back as `RunContext.parent_run`, so a
+`RecordSet`. Building a new pipeline from that recordset with
+`Pipeline(previous_results)` reads it back as `RunContext.parent_run`, so a
 multi-stage analysis links itself without any bookkeeping on your part.
 
 ## Getting data out
@@ -137,7 +137,7 @@ multi-stage analysis links itself without any bookkeeping on your part.
 
 Write one file per record, in the worker that produced it. This is the
 recommended way to get data out of a pipeline: writing per shot in the workers
-is faster than concatenating on the driver, and more honest — concatenation is
+is faster than concatenating on the driver, and more honest: concatenation is
 a transformation and deserves its own stage rather than hiding inside a writer.
 
 Two forms. **Declarative**, which appends the operation immediately:
@@ -165,9 +165,9 @@ returns the path it wrote.
 | `fmt` | `netcdf`, `parquet`, `npy`, `npz`, `json`; inferred from the object when omitted |
 | `name` | `(record) -> str` basename without extension; defaults to the shot number |
 | `track` | `directory` (one artifact for the whole directory) or `file` (one per shot) |
-| `exist_ok` | Off by default — two runs interleaving into one directory silently corrupt the directory's content hash, and `flock` is not cross-client on BeeGFS, so nothing else prevents it |
+| `exist_ok` | Off by default. Two runs interleaving into one directory silently corrupt the directory's content hash, and `flock` is not cross-client on BeeGFS, so nothing else prevents it |
 | `path_field` | Record field that receives the written path |
-| `on_error` | `skip` (default) writes no file for a record that already failed, so the directory — and the provenance hash over it — covers exactly the shots that completed; `write` writes anyway |
+| `on_error` | `skip` (default) writes no file for a record that already failed, so the directory, and the provenance hash over it, covers exactly the shots that completed. `write` writes anyway |
 
 Read the results back with `xarray.open_mfdataset('out/peaks/*.nc')` where
 `dask` is installed. Without it, open per file:
@@ -183,7 +183,7 @@ ds = xr.concat(
 ```
 
 Without `netCDF4`/`h5netcdf`, xarray writes NetCDF3 via scipy, which has no
-int64 — integer coordinates read back as int32.
+int64, so integer coordinates read back as int32.
 
 ### Driver-side collection
 
@@ -246,9 +246,8 @@ declared graphviz as a dependency so the installer's link order gives the FDP
 CLI the file back (verified on pixi/rattler and micromamba 2.9.0). That still
 leaves two ways to lose the collision: an `fdp` older than 0.6.0, or an
 installer whose link order isn't guaranteed the way those two are. So plain
-`fdp run` does work in a stock `fdp-core` environment — which is why the rest
-of these docs use it — and `python -m fdp` is simply the form that cannot be
-wrong:
+`fdp run` does work in a stock `fdp-core` environment, which is why the rest of
+these docs use it. `python -m fdp` is simply the form that cannot be wrong:
 
 ```bash
 python -m fdp run python betan_ip_peaks_cmf.py
@@ -257,8 +256,8 @@ python -m fdp run python betan_ip_peaks_cmf.py
 A complete working example is
 [`examples/betan_ip_peaks_cmf.py`](https://github.com/GA-FDP/toksearch_cmf/blob/main/examples/betan_ip_peaks_cmf.py)
 in the `toksearch_cmf` repository. The technical claims in the prerequisite
-passage above — the git+DVC requirement, and the graphviz story with its two
-residual exposures — are kept deliberately in sync with the same passage in
+passage above, the git+DVC requirement and the graphviz behavior with its two
+residual exposures, are kept deliberately in sync with the same passage in
 that repository's README. The surrounding wording differs where local context
 demands it (only this page has to reconcile itself with the `fdp run` used
 elsewhere in these docs), so compare the claims, not the prose.
