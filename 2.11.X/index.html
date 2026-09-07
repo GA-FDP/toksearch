@@ -890,15 +890,15 @@
 </ul>
 <p>The <code>Pipeline</code> also provides a <code>where</code> method which takes as input a user-defined function that returns a boolean value. If the function evaluates to <code>False</code> for a record, then that record is removed from the pipeline.</p>
 <h2 id="talk-to-your-data">Talk to your data</h2>
-<p>TokSearch packages its own know-how — how to build a pipeline, which signal
-class a quantity needs, how to align and aggregate — as agent-readable skills.
+<p>TokSearch packages its own know-how as agent-readable skills: how to build a
+pipeline, which signal class a quantity needs, how to align and aggregate.
 There are two ways to use them, and both are first-class. Pick your agent
-below — the built-in CLI or your own — then, either way, run it through <code>fdp</code>.</p>
+below, the built-in CLI or your own. Either way, run it through <code>fdp</code>.</p>
 <h3 id="the-built-in-conversational-cli">The built-in conversational CLI</h3>
 <p><code>toksearch chat</code> is a REPL with an LLM behind it. It writes the pipeline code,
-runs it against a persistent Python namespace — so follow-up turns iterate on
-cached results instead of re-fetching — and shows you each block before
-executing it.</p>
+runs it against a persistent Python namespace, so follow-up turns iterate on
+cached results instead of re-fetching. It shows you each block before executing
+it.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>toksearch<span class="w"> </span>chat<span class="w">                  </span><span class="c1"># interactive REPL</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>toksearch<span class="w"> </span>chat<span class="w"> </span>--gui<span class="w">            </span><span class="c1"># local Gradio GUI in a browser tab</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>toksearch<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w">           </span><span class="c1"># one-shot, for scripts and quick lookups</span>
@@ -951,7 +951,7 @@ the full API surface.</p>
 through the <code>fdp-core</code> metapackage. That gets you TokSearch together with the
 device packages (<code>toksearch_d3d</code>, <code>toksearch_mast</code>), <code>ptdata</code>, <code>imas_composer</code>,
 the <code>fdp</code> CLI, the XRootD/Pelican transport that reaches DIII-D data, and the
-<code>toksearch_cmf</code> provenance backend — all pinned to a tested, mutually
+<code>toksearch_cmf</code> provenance backend, all pinned to a tested, mutually
 compatible set.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>fdp-installer<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>fdp-installer
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>conda<span class="w"> </span>activate<span class="w"> </span>fdp-installer
@@ -990,9 +990,8 @@ data-access environment is configured:</p>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>fdp<span class="w"> </span>run<span class="w"> </span>jupyter<span class="w"> </span>lab
 </span></code></pre></div>
 <h3 id="toksearch-on-its-own">TokSearch on its own</h3>
-<p>If you want the framework without FDP data access — your own MDSplus server,
-your own Zarr stores, or just the <code>Pipeline</code> machinery — install the package by
-itself:</p>
+<p>If you want the framework without FDP data access, for your own MDSplus server
+or Zarr stores or just the <code>Pipeline</code> machinery, install the package by itself:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>toksearch
 </span></code></pre></div>
 <p>or into a fresh environment:</p>

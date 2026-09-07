@@ -1368,7 +1368,7 @@
 
 
 <h1 id="llm-interface">LLM Interface</h1>
-<p>TokSearch ships with <code>toksearch.llm</code> — a conversational interface that lets
+<p>TokSearch ships with <code>toksearch.llm</code>, a conversational interface that lets
 you ask for fusion data in plain English and have an LLM write the pipeline
 code for you. The agent uses a <strong>persistent Python namespace</strong> so successive
 turns iterate on cached results instead of re-fetching, which is what makes
@@ -1418,7 +1418,7 @@ multi-turn analysis viable when each fetch takes seconds to minutes.</p>
 </tr>
 </tbody>
 </table>
-<p>Additional backends can be registered by any installed package — see
+<p>Additional backends can be registered by any installed package. See
 <a href="#contributors">Contributors</a>.</p>
 <h2 id="installation">Installation</h2>
 <p>The LLM interface ships with TokSearch; there is nothing extra to install if
@@ -1449,8 +1449,8 @@ package or a separate <code>pip install gradio</code>.</p>
 </span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># What can --backend be, in this environment?</span>
 </span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>toksearch<span class="w"> </span>backends
 </span></code></pre></div>
-<p><code>toksearch backends</code> prints the resolved registry — built-in backends,
-backends discovered from installed packages, and your own presets:</p>
+<p><code>toksearch backends</code> prints the resolved registry: built-in backends, backends
+discovered from installed packages, and your own presets:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>name        source      backend     model
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>----------  ----------  ----------  -----------------
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>amsc        discovered  anthropic   claude-sonnet-4-6
@@ -1546,13 +1546,13 @@ the iteration cap. Highest first:</p>
 <p>Built-in defaults</p>
 </li>
 </ol>
-<p><code>--package</code> and <code>-v / --verbose</code> are flag-only — they have no environment
+<p><code>--package</code> and <code>-v / --verbose</code> are flag-only. They have no environment
 variable and no <code>config.toml</code> key, so they must be passed on each invocation.</p>
 <h2 id="tools">Tools</h2>
 <p>The agent has exactly two tools, registered with every Session:</p>
 <h3 id="run_python"><code>run_python</code></h3>
 <p>Executes a Python code string in the Session's persistent namespace. The
-namespace lives for the Session's lifetime — variables defined in one turn
+namespace lives for the Session's lifetime, so variables defined in one turn
 are available in all subsequent turns. Pre-populated with:</p>
 <ul>
 <li><code>toksearch</code> (and <code>toksearch_d3d</code> if installed)</li>
@@ -1562,7 +1562,7 @@ are available in all subsequent turns. Pre-populated with:</p>
 </ul>
 <p>The agent must populate a <code>thought</code> field with a one-sentence description of
 what each code block does and why. This is what the REPL prints before
-execution — it's the load-bearing transparency mechanism (see
+execution, which is what makes the whole thing reviewable (see
 <a href="#show-then-run">Show-then-run</a>).</p>
 <h3 id="lookup_docs"><code>lookup_docs</code></h3>
 <p>Returns the body of a registered skill (a <code>SKILL.md</code> file). The Session's
@@ -1570,15 +1570,15 @@ system prompt lists the available skill names with one-line descriptions; the
 agent calls <code>lookup_docs(skill_name=...)</code> when it needs the details.</p>
 <p>Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
-<code>toksearch_d3d</code> contributes five — signal routing (which class a given
-physics quantity needs), <code>PtDataSignal</code>, <code>ImasSignal</code>, the FDP CLI, and a
-DIII-D quickstart.</p>
+<code>toksearch_d3d</code> contributes five: signal routing (which class a given physics
+quantity needs), <code>PtDataSignal</code>, <code>ImasSignal</code>, the FDP CLI, and a DIII-D
+quickstart.</p>
 <p>Skills are served over MCP: <code>Session</code> launches <code>python -m toksearch.llm.mcp</code> as
 a subprocess on construction. The same server can be used directly by an
-external agent — see <a href="#using-your-own-agent">Using your own agent</a>.</p>
+external agent. See <a href="#using-your-own-agent">Using your own agent</a>.</p>
 <h2 id="show-then-run">Show-then-run</h2>
 <p>The REPL prints each <code>run_python</code> block's <code>thought</code> and code <strong>before</strong>
-executing it. This is the default UX — auto-approval with transparency, no
+executing it. That is the default: auto-approval with transparency, no
 confirmation prompts. The realistic threat model isn't a malicious agent; it's
 the agent making an expensive mistake (e.g. firing off a
 <code>compute_multiprocessing</code> over 10,000 shots when you wanted 100). Surfacing
@@ -2021,10 +2021,10 @@ subclasses: <code>LLMConfigError</code>, <code>LLMAuthError</code>, <code>LLMBac
 handler).</p>
 <h2 id="see-also">See also</h2>
 <ul>
-<li><a href="../LLM_Tutorial/">LLM Tutorial</a> — end-to-end walkthrough including a DIII-D plot.</li>
-<li><a href="https://github.com/GA-FDP/fdp"><code>fdp</code> CLI</a> — wraps <code>toksearch chat</code>/<code>query</code>
+<li><a href="../LLM_Tutorial/">LLM Tutorial</a>, an end-to-end walkthrough including a DIII-D plot.</li>
+<li><a href="https://github.com/GA-FDP/fdp"><code>fdp</code> CLI</a>, which wraps <code>toksearch chat</code>/<code>query</code>
   with FDP environment setup, and provides <code>fdp skills</code>.</li>
-<li><a href="https://github.com/anthropics/claude-agent-sdk-python">Claude Agent SDK</a> — underlies the <code>claude-max</code> backend.</li>
+<li><a href="https://github.com/anthropics/claude-agent-sdk-python">Claude Agent SDK</a>, which underlies the <code>claude-max</code> backend.</li>
 </ul>
 
 

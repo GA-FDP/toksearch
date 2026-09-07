@@ -1332,11 +1332,11 @@
 
 
 <h1 id="provenance-and-cmf">Provenance and CMF</h1>
-<p>A computed result is only reusable if you can say what produced it. TokSearch
-derives that description itself — the shot source, the specification of every
-signal fetched, the sequence of operations, the compute backend, and the git
-commit of the script that ran — and hands it to a provenance backend. You do
-not hand-write metadata.</p>
+<p>To reuse a computed result you need to know what produced it. TokSearch works
+that out for you. For every run it derives the shot source, the specification
+of every signal fetched, the sequence of operations, the compute backend, and
+the git commit of the script that ran, then hands all of it to a provenance
+backend. There is no metadata to write by hand.</p>
 <h2 id="the-interface">The interface</h2>
 <p><code>toksearch.provenance</code> defines the contract and nothing else. It has no
 dependency on any metadata service; the CMF implementation lives in the
@@ -1368,12 +1368,12 @@ separate <code>toksearch_cmf</code> package.</p>
 </tr>
 <tr>
 <td><code>signals</code></td>
-<td>The <code>Signal.spec()</code> of every fetched signal, keyed by record field — or by <code>&lt;dataset&gt;.&lt;name&gt;</code> for <code>fetch_dataset</code></td>
+<td>The <code>Signal.spec()</code> of every fetched signal, keyed by record field, or by <code>&lt;dataset&gt;.&lt;name&gt;</code> for <code>fetch_dataset</code></td>
 </tr>
 </tbody>
 </table>
 <p><code>RunContext.input_identity()</code> hashes only the source, the signals, and the
-device — deliberately excluding operations, backend, and code. Two runs that
+device, deliberately excluding operations, backend, and code. Two runs that
 read the same data have the same input identity even if they process it
 differently.</p>
 <p><strong><code>Provenance</code></strong> is the ABC a backend implements:</p>
@@ -1407,15 +1407,15 @@ differently.</p>
 </tr>
 </tbody>
 </table>
-<p>The three hooks toksearch invokes itself — <code>on_compute_start</code>,
-<code>on_compute_end</code>, and the <code>output</code> recorded by <code>RecordSet.to_parquet</code> — go
+<p>Three hooks are invoked by toksearch itself: <code>on_compute_start</code>,
+<code>on_compute_end</code>, and the <code>output</code> recorded by <code>RecordSet.to_parquet</code>. These go
 through <code>safe_call</code>, which converts any exception into a <code>RuntimeWarning</code> and
 carries on: losing a provenance record is bad, losing a completed multi-hour
 compute is worse. Set <code>strict=True</code> on the backend to make those propagate
-instead — appropriate in CI, not in production runs. <code>metrics()</code> and
+instead, which suits CI but not production runs. <code>metrics()</code> and
 <code>finalize()</code> get no such protection and <code>strict</code> does not reach them: you call
-them yourself, so a failure inside one — a DVC or mlmd error in
-<code>CmfRun.finalize()</code>, say — raises into your script like any other call, after
+them yourself, so a failure inside one, such as a DVC or mlmd error in
+<code>CmfRun.finalize()</code>, raises into your script like any other call, after
 the compute has already finished. Put <code>finalize()</code> where an exception is
 survivable, or wrap it, when the computed result matters more than the
 record.</p>
@@ -1482,18 +1482,18 @@ no external services, which makes it the right thing to try first:</p>
 <code>peaks</code> produces a different record. <code>commit</code> and <code>dirty</code> come from the git
 repository containing the script; outside a repository both are <code>null</code>.</p>
 <p>Add a <code>fetch</code> and the <code>signals</code> block fills in with that signal's full
-specification — class, module, expression, tree name, dims, and every
-constructor field — which is what makes the input identity meaningful.</p>
+specification: class, module, expression, tree name, dims, and every
+constructor field. That is what makes the input identity meaningful.</p>
 <h3 id="chaining-runs">Chaining runs</h3>
 <p><code>Pipeline.compute</code> copies the backend's <code>run_id</code> onto the returned
-<code>RecordSet</code>. Building a new pipeline from that recordset —
-<code>Pipeline(previous_results)</code> — reads it back as <code>RunContext.parent_run</code>, so a
+<code>RecordSet</code>. Building a new pipeline from that recordset with
+<code>Pipeline(previous_results)</code> reads it back as <code>RunContext.parent_run</code>, so a
 multi-stage analysis links itself without any bookkeeping on your part.</p>
 <h2 id="getting-data-out">Getting data out</h2>
 <h3 id="pipelinewrite"><code>Pipeline.write</code></h3>
 <p>Write one file per record, in the worker that produced it. This is the
 recommended way to get data out of a pipeline: writing per shot in the workers
-is faster than concatenating on the driver, and more honest — concatenation is
+is faster than concatenating on the driver, and more honest: concatenation is
 a transformation and deserves its own stage rather than hiding inside a writer.</p>
 <p>Two forms. <strong>Declarative</strong>, which appends the operation immediately:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;out/peaks&quot;</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;ds&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>
@@ -1536,7 +1536,7 @@ returns the path it wrote.</p>
 </tr>
 <tr>
 <td><code>exist_ok</code></td>
-<td>Off by default — two runs interleaving into one directory silently corrupt the directory's content hash, and <code>flock</code> is not cross-client on BeeGFS, so nothing else prevents it</td>
+<td>Off by default. Two runs interleaving into one directory silently corrupt the directory's content hash, and <code>flock</code> is not cross-client on BeeGFS, so nothing else prevents it</td>
 </tr>
 <tr>
 <td><code>path_field</code></td>
@@ -1544,7 +1544,7 @@ returns the path it wrote.</p>
 </tr>
 <tr>
 <td><code>on_error</code></td>
-<td><code>skip</code> (default) writes no file for a record that already failed, so the directory — and the provenance hash over it — covers exactly the shots that completed; <code>write</code> writes anyway</td>
+<td><code>skip</code> (default) writes no file for a record that already failed, so the directory, and the provenance hash over it, covers exactly the shots that completed. <code>write</code> writes anyway</td>
 </tr>
 </tbody>
 </table>
@@ -1559,7 +1559,7 @@ returns the path it wrote.</p>
 </span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>Without <code>netCDF4</code>/<code>h5netcdf</code>, xarray writes NetCDF3 via scipy, which has no
-int64 — integer coordinates read back as int32.</p>
+int64, so integer coordinates read back as int32.</p>
 <h3 id="driver-side-collection">Driver-side collection</h3>
 <p>When the per-shot results are small enough to gather, <code>RecordSet</code> collapses
 them directly:</p>
@@ -1610,16 +1610,15 @@ declared graphviz as a dependency so the installer's link order gives the FDP
 CLI the file back (verified on pixi/rattler and micromamba 2.9.0). That still
 leaves two ways to lose the collision: an <code>fdp</code> older than 0.6.0, or an
 installer whose link order isn't guaranteed the way those two are. So plain
-<code>fdp run</code> does work in a stock <code>fdp-core</code> environment — which is why the rest
-of these docs use it — and <code>python -m fdp</code> is simply the form that cannot be
-wrong:</p>
+<code>fdp run</code> does work in a stock <code>fdp-core</code> environment, which is why the rest of
+these docs use it. <code>python -m fdp</code> is simply the form that cannot be wrong:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>fdp<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>betan_ip_peaks_cmf.py
 </span></code></pre></div>
 <p>A complete working example is
 <a href="https://github.com/GA-FDP/toksearch_cmf/blob/main/examples/betan_ip_peaks_cmf.py"><code>examples/betan_ip_peaks_cmf.py</code></a>
 in the <code>toksearch_cmf</code> repository. The technical claims in the prerequisite
-passage above — the git+DVC requirement, and the graphviz story with its two
-residual exposures — are kept deliberately in sync with the same passage in
+passage above, the git+DVC requirement and the graphviz behavior with its two
+residual exposures, are kept deliberately in sync with the same passage in
 that repository's README. The surrounding wording differs where local context
 demands it (only this page has to reconcile itself with the <code>fdp run</code> used
 elsewhere in these docs), so compare the claims, not the prose.</p>

@@ -1626,7 +1626,7 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </style>
 <!-- End of mermaid configuration --><div class="jupyter-wrapper">
 <div class="jp-Notebook" data-jp-theme-light="true" data-jp-theme-name="JupyterLab Light">
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=c7f68473">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=fc7f1ccc">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1634,13 +1634,13 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h1 id="llm-tutorial">LLM Tutorial<a class="anchor-link" href="#llm-tutorial">¶</a></h1><p>TokSearch's <code>toksearch.llm</code> library lets you ask for fusion data in plain English and have an LLM write the pipeline code for you. This notebook walks through the full surface end-to-end:</p>
 <ol>
-<li><a href="#1-setup">Setup</a> — install + credentials</li>
-<li><a href="#2-quickstart-for-new-users">Quickstart for new users</a> — first <code>toksearch chat</code> session</li>
-<li><a href="#3-python-api">Python API</a> — programmatic use from notebooks and scripts</li>
-<li><a href="#4-the-persistent-namespace">The persistent namespace</a> — why multi-turn analysis works</li>
-<li><a href="#5-a-realistic-diii-d-workflow">A realistic DIII-D workflow</a> — fetch, plot, iterate</li>
-<li><a href="#6-swapping-backends">Swapping backends</a> — Anthropic / OpenAI / Claude Max / AmSC</li>
-<li><a href="#7-slash-commands-in-the-repl">Slash commands</a> — <code>/help</code>, <code>/reset</code>, <code>/quit</code></li>
+<li><a href="#1-setup">Setup</a>: install and credentials</li>
+<li><a href="#2-quickstart-for-new-users">Quickstart for new users</a>: a first <code>toksearch chat</code> session</li>
+<li><a href="#3-python-api">Python API</a>: programmatic use from notebooks and scripts</li>
+<li><a href="#4-the-persistent-namespace">The persistent namespace</a>: why multi-turn analysis works</li>
+<li><a href="#5-a-realistic-diii-d-workflow">A realistic DIII-D workflow</a>: fetch, plot, iterate</li>
+<li><a href="#6-swapping-backends">Swapping backends</a>: Anthropic, OpenAI, Claude Max, AmSC</li>
+<li><a href="#7-slash-commands-in-the-repl">Slash commands</a>: <code>/help</code>, <code>/reset</code>, <code>/quit</code></li>
 <li><a href="#8-where-to-next">Where to next</a></li>
 </ol>
 <p><strong>Read-only:</strong> all <code>toksearch chat</code> / <code>toksearch query</code> outputs in this notebook are illustrative. The notebook is not auto-executed; copy any block and run it in your environment to reproduce.</p>
@@ -1649,7 +1649,7 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b4bce5e0">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=ad591200">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1693,7 +1693,7 @@ The result is 4.
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=fc12b1f3">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=85de2232">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1727,7 +1727,7 @@ you&gt; Show me a one-shot example using MdsSignal.
 
 you&gt; /quit
 </pre></div>
-<p>The agent writes the code, executes it, and shows you both the code and its output. Variables (<code>pipeline</code>, <code>records</code>, <code>rec</code>) stay in scope for follow-up turns — see <a href="#4-the-persistent-namespace">§4</a>.</p>
+<p>The agent writes the code, executes it, and shows you both the code and its output. Variables (<code>pipeline</code>, <code>records</code>, <code>rec</code>) stay in scope for follow-up turns. See <a href="#4-the-persistent-namespace">§4</a>.</p>
 <h3 id="the-gui">The GUI<a class="anchor-link" href="#the-gui">¶</a></h3><p>The same session is available as a local Gradio app, which renders matplotlib
 figures inline instead of writing them to disk:</p>
 <div class="highlight"><pre><span></span>toksearch<span class="w"> </span>chat<span class="w"> </span>--gui<span class="w">             </span><span class="c1"># opens a browser tab; --no-browser to skip</span>
@@ -1744,7 +1744,7 @@ claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </s
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e838f0cc">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b1f69158">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1767,7 +1767,7 @@ The peak |Ip| for shot 165920 is 1.1325 MA.
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=85d6360b">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=31df3461">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1787,7 +1787,7 @@ The peak |Ip| for shot 165920 is 1.1325 MA.
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=72c663a9">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=7eaf128a">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1848,7 +1848,7 @@ print("stop_reason:", result.stop_reason)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=281d0b77">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b8bda301">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1876,11 +1876,11 @@ stop_reason: end_turn
 </tr>
 <tr>
 <td><code>on_tool_call(call: ToolCall)</code></td>
-<td>The assistant decides to call a tool — <strong>before</strong> the tool runs.</td>
+<td>The assistant decides to call a tool, <strong>before</strong> the tool runs.</td>
 </tr>
 <tr>
 <td><code>on_tool_result(result: ToolResult)</code></td>
-<td>A tool finishes — <strong>after</strong> execution, before the result is sent back to the model.</td>
+<td>A tool finishes, <strong>after</strong> execution and before the result is sent back to the model.</td>
 </tr>
 <tr>
 <td><code>on_event(event)</code></td>
@@ -1896,20 +1896,20 @@ stop_reason: end_turn
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=82b071e2">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=3e8db55f">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="4-the-persistent-namespace">4. The persistent namespace<a class="anchor-link" href="#4-the-persistent-namespace">¶</a></h2><p><strong>This is the load-bearing feature</strong> that makes multi-turn analysis viable.</p>
-<p><code>run_python</code> executes its code against <code>Session.namespace</code> — a plain Python dict that lives for the Session's lifetime. Variables you (or the agent) define in one turn are available in all subsequent turns.</p>
-<p>Without this, every follow-up question would have to re-fetch — and TokSearch fetches are slow (an MdsSignal tree open + decode of a few hundred shots can take a minute). With it, the agent fetches once and iterates on the analysis in memory.</p>
+<p><code>run_python</code> executes its code against <code>Session.namespace</code>, a plain Python dict that lives for the Session's lifetime. Variables you (or the agent) define in one turn are available in all subsequent turns.</p>
+<p>Without this, every follow-up question would have to re-fetch, and TokSearch fetches are slow (an MdsSignal tree open + decode of a few hundred shots can take a minute). With it, the agent fetches once and iterates on the analysis in memory.</p>
 </div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1c328b58">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=b7ea2c3d">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1930,7 +1930,7 @@ stop_reason: end_turn
 <div class="highlight-ipynb hl-python"><pre><span></span><span class="c1"># Turn 1: fetch (slow)</span>
 <span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s2">"Use run_python to fetch ipmhd from efit01 for shots 200000-200005. Store in `records`."</span><span class="p">)</span>
 
-<span class="c1"># Turn 2: analysis on the already-fetched data (fast — no re-fetch)</span>
+<span class="c1"># Turn 2: analysis on the already-fetched data (fast, no re-fetch)</span>
 <span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s2">"What are the peak |Ip| values in MA for each shot in `records`?"</span><span class="p">)</span>
 
 <span class="c1"># Turn 3: plot the result (still no re-fetch)</span>
@@ -1939,7 +1939,7 @@ stop_reason: end_turn
 <div class="clipboard-copy-txt" id="cell-2"># Turn 1: fetch (slow)
 sess.send("Use run_python to fetch ipmhd from efit01 for shots 200000-200005. Store in `records`.")
 
-# Turn 2: analysis on the already-fetched data (fast — no re-fetch)
+# Turn 2: analysis on the already-fetched data (fast, no re-fetch)
 sess.send("What are the peak |Ip| values in MA for each shot in `records`?")
 
 # Turn 3: plot the result (still no re-fetch)
@@ -1950,7 +1950,7 @@ sess.send("Make a bar chart of those peak values and save to peaks.png.")</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=d38059fa">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=7ffbc537">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1971,7 +1971,7 @@ sess.send("Make a bar chart of those peak values and save to peaks.png.")</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=5add73e8">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=21f232a4">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2035,12 +2035,12 @@ Shot 200001 had ~2.2% lower peak |Ip| than shot 200000.
 
 you&gt; /quit
 </pre></div>
-<p>Notice the agent never re-fetched <code>ip</code> or <code>ip2</code> after the first time it pulled each shot — that's the persistent namespace earning its keep.</p>
+<p>Notice the agent never re-fetched <code>ip</code> or <code>ip2</code> after pulling each shot the first time. That is the persistent namespace at work.</p>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=aa349991">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=40494542">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2051,7 +2051,7 @@ you&gt; /quit
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e1226070">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=8a426918">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2114,7 +2114,7 @@ print(result.final_text)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b9e766af">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=c32b33f6">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2125,7 +2125,7 @@ print(result.final_text)</div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=197f09e5">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=faee766a">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2184,7 +2184,7 @@ Session(backend=ClaudeSDKBackend()).send(PROMPT)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=f667d7fd">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=6a5b8651">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2223,12 +2223,12 @@ toksearch<span class="w"> </span>query<span class="w"> </span>--backend<span cla
 </tr>
 </tbody>
 </table>
-<p>Site-specific backends can be registered as user presets in <code>~/.fdp/config.toml</code> — see <a href="llm.md#configuration">Reference &gt; Configuration</a>.</p>
+<p>Site-specific backends can be registered as user presets in <code>~/.fdp/config.toml</code>. See <a href="llm.md#configuration">Reference &gt; Configuration</a>.</p>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=a577e55d">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=cb4ed084">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2276,22 +2276,22 @@ you&gt; ^D
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e88349c9">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=33259757">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="8-where-to-next">8. Where to next<a class="anchor-link" href="#8-where-to-next">¶</a></h2><ul>
-<li><a href="llm.md">LLM reference</a> — full API surface, configuration precedence, contributor entry points, exception hierarchy.</li>
-<li><a href="Working_with_Signals.ipynb">Working with Signals</a> — the underlying <code>MdsSignal</code> / <code>ZarrSignal</code> machinery the agent uses for <code>run_python</code> calls.</li>
-<li><a href="Aggregating_Data.ipynb">Aggregating Data</a> — patterns for collapsing many-shot pipelines into pandas / xarray; useful prompts to give the agent.</li>
-<li><code>fdp</code> CLI source: <a href="https://github.com/GA-FDP/fdp">GA-FDP/fdp</a> — the FDP
+<li><a href="llm.md">LLM reference</a>: full API surface, configuration precedence, contributor entry points, exception hierarchy.</li>
+<li><a href="Working_with_Signals.ipynb">Working with Signals</a>: the underlying <code>MdsSignal</code> / <code>ZarrSignal</code> machinery the agent uses for <code>run_python</code> calls.</li>
+<li><a href="Aggregating_Data.ipynb">Aggregating Data</a>: patterns for collapsing many-shot pipelines into pandas / xarray, and useful prompts to give the agent.</li>
+<li><code>fdp</code> CLI source: <a href="https://github.com/GA-FDP/fdp">GA-FDP/fdp</a>: the FDP
 environment plus <code>fdp chat</code>, <code>fdp query</code>, <code>fdp run</code>, and <code>fdp skills</code>.
 DIII-D signal classes and the <code>amsc</code> preset live in
 <a href="https://github.com/GA-FDP/toksearch_d3d">GA-FDP/toksearch_d3d</a>.</li>
-<li>Claude Agent SDK: <a href="https://github.com/anthropics/claude-agent-sdk-python">anthropics/claude-agent-sdk-python</a> — underlies the <code>claude-max</code> backend.</li>
-<li><a href="provenance.md">Provenance and CMF</a> — recording what a pipeline run consumed
+<li>Claude Agent SDK: <a href="https://github.com/anthropics/claude-agent-sdk-python">anthropics/claude-agent-sdk-python</a>, which underlies the <code>claude-max</code> backend.</li>
+<li><a href="provenance.md">Provenance and CMF</a>: recording what a pipeline run consumed
 and produced, and pushing it to CMF.</li>
 </ul>
 <h3 id="found-a-bug">Found a bug?<a class="anchor-link" href="#found-a-bug">¶</a></h3><p>File at <a href="https://github.com/GA-FDP/toksearch/issues">github.com/GA-FDP/toksearch/issues</a>. If the agent does something surprising or the wire-format with a provider drifts, the integration tests (<code>tests/test_llm_integration.py</code>, opt-in via <code>TOKSEARCH_INTEGRATION=yes</code>) are the first place to add a reproducer.</p>
