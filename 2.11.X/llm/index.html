@@ -376,6 +376,27 @@
   
   
     <li class="md-nav__item">
+      <a href="../provenance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Provenance and CMF
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../LLM_Tutorial/" class="md-nav__link">
         
   
@@ -646,6 +667,15 @@
   <a href="#show-then-run" class="md-nav__link">
     <span class="md-ellipsis">
       Show-then-run
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-your-own-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using your own agent
     </span>
   </a>
   
@@ -1161,6 +1191,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#using-your-own-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using your own agent
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#contributors" class="md-nav__link">
     <span class="md-ellipsis">
       Contributors
@@ -1382,71 +1421,133 @@ multi-turn analysis viable when each fetch takes seconds to minutes.</p>
 <p>Additional backends can be registered by any installed package — see
 <a href="#contributors">Contributors</a>.</p>
 <h2 id="installation">Installation</h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Conda (recommended; matches FDP-on-prem usage)</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>toksearch<span class="w">         </span><span class="c1"># backends bundled by default</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Pip</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>pip<span class="w"> </span>install<span class="w"> </span>toksearch<span class="o">[</span>llm<span class="o">]</span>
+<p>The LLM interface ships with TokSearch; there is nothing extra to install if
+you installed through <code>fdp-core</code> (see the
+<a href="../#installation">installation guide</a>). The conda recipe lists the four
+backend SDKs (<code>anthropic</code>, <code>openai</code>, <code>claude-agent-sdk</code>, <code>mcp</code>) and
+<code>matplotlib</code> as hard run-dependencies.</p>
+<p>Installing TokSearch on its own works too:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>toksearch
 </span></code></pre></div>
-<p>The conda recipe lists the four backend SDKs (<code>anthropic</code>, <code>openai</code>,
-<code>claude-agent-sdk</code>, <code>mcp</code>) and <code>matplotlib</code> as hard run-dependencies; pip users
-get the same surface via the <code>[llm]</code> optional-dependency extra.</p>
+<p>From a source checkout, the <code>llm</code> extra installs the backend SDKs
+(<code>anthropic</code>, <code>openai</code>, <code>claude-agent-sdk</code>, <code>mcp</code>) and <code>matplotlib</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;.[llm]&#39;</span>
+</span></code></pre></div>
+<p>It does not pull in Gradio, so <code>toksearch chat --gui</code> needs either the conda
+package or a separate <code>pip install gradio</code>.</p>
 <h2 id="quickstart">Quickstart</h2>
 <h3 id="cli">CLI</h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># One-shot</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>toksearch<span class="w"> </span>query<span class="w"> </span>--backend<span class="w"> </span>anthropic<span class="w"> </span><span class="s2">&quot;Use run_python to compute 2 + 2.&quot;</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Interactive REPL</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>toksearch<span class="w"> </span>chat<span class="w"> </span>--backend<span class="w"> </span>anthropic
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># One-shot</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>toksearch<span class="w"> </span>query<span class="w"> </span>--backend<span class="w"> </span>anthropic<span class="w"> </span><span class="s2">&quot;Use run_python to compute 2 + 2.&quot;</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Interactive REPL</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>toksearch<span class="w"> </span>chat<span class="w"> </span>--backend<span class="w"> </span>anthropic
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Local Gradio GUI in a browser tab (--no-browser to skip opening it)</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>toksearch<span class="w"> </span>chat<span class="w"> </span>--gui
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="c1"># What can --backend be, in this environment?</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>toksearch<span class="w"> </span>backends
 </span></code></pre></div>
-<p>The REPL accepts <code>/help</code>, <code>/reset</code>, and <code>/quit</code>; ctrl-D also exits. From a
-DIII-D environment, the <code>fdp</code> script wraps the same commands with the
-FDP environment pre-configured (XRootD plugin, MDSplus tree paths, etc.):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>fdp<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;Fetch ip for shot 200000 and report peak in MA.&quot;</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>fdp<span class="w"> </span>chat<span class="w">                                                       </span><span class="c1"># interactive</span>
+<p><code>toksearch backends</code> prints the resolved registry — built-in backends,
+backends discovered from installed packages, and your own presets:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>name        source      backend     model
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>----------  ----------  ----------  -----------------
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>amsc        discovered  anthropic   claude-sonnet-4-6
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>anthropic   built-in    anthropic   claude-sonnet-4-6  (default)
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>claude-max  built-in    claude-max  -
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>openai      built-in    openai      gpt-4o
+</span></code></pre></div>
+<p>Flags shared by <code>query</code> and <code>chat</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--backend NAME</code></td>
+<td>Backend or preset name.</td>
+</tr>
+<tr>
+<td><code>--model NAME</code></td>
+<td>Override the preset's default model.</td>
+</tr>
+<tr>
+<td><code>-n</code>, <code>--max-iterations N</code></td>
+<td>Cap on tool-call rounds per turn.</td>
+</tr>
+<tr>
+<td><code>--package NAME</code></td>
+<td>Restrict discovered contributors to the named package(s). Repeatable.</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>--verbose</code></td>
+<td>Show full tool-call code and tool-result bodies instead of a one-line summary per call.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--gui</code> and <code>--no-browser</code> are <code>chat</code>-only. The REPL accepts <code>/help</code>,
+<code>/reset</code>, and <code>/quit</code>; ctrl-D also exits.</p>
+<p>From a DIII-D environment, the <code>fdp</code> CLI wraps the same commands with the FDP
+environment configured (XRootD plugin, MDSplus tree paths, <code>BEARER_TOKEN</code>)
+before the session starts, which is what lets the agent reach shot data:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>fdp<span class="w"> </span>query<span class="w"> </span><span class="s2">&quot;Fetch ip for shot 200000 and report peak in MA.&quot;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>fdp<span class="w"> </span>chat<span class="w">                                                       </span><span class="c1"># interactive</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>fdp<span class="w"> </span>chat<span class="w"> </span>--gui
+</span></code></pre></div>
+<p><code>fdp chat</code>/<code>fdp query</code> forward <code>--backend</code>, <code>--model</code>, <code>-n/--max-iterations</code>,
+<code>--gui</code>, and <code>--no-browser</code>. They do not forward <code>--package</code> or <code>-v</code>; for those,
+run the underlying command inside the FDP environment instead:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>fdp<span class="w"> </span>run<span class="w"> </span>toksearch<span class="w"> </span>chat<span class="w"> </span>--package<span class="w"> </span>toksearch_d3d<span class="w"> </span>-v
 </span></code></pre></div>
 <p>The backend default is deployment-level, not device-driven: <code>--backend</code> →
 <code>$FDP_LLM_BACKEND</code> → <code>~/.fdp/config.toml [llm].backend</code> → built-in
 <code>anthropic</code>. GA on-prem users who want AmSC by default should set
 <code>backend = "amsc"</code> in <code>config.toml</code> (or <code>export FDP_LLM_BACKEND=amsc</code>).</p>
 <h3 id="python">Python</h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.llm.backends.anthropic</span><span class="w"> </span><span class="kn">import</span> <span class="n">AnthropicBackend</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">sess</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">AnthropicBackend</span><span class="p">(</span><span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;sk-...&quot;</span><span class="p">))</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="s2">&quot;Use run_python to compute 2 + 2.&quot;</span><span class="p">,</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">on_tool_call</span><span class="o">=</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">thought</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">),</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="n">on_tool_result</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">output</span><span class="p">),</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p">)</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">final_text</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.llm.backends.anthropic</span><span class="w"> </span><span class="kn">import</span> <span class="n">AnthropicBackend</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">sess</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="n">backend</span><span class="o">=</span><span class="n">AnthropicBackend</span><span class="p">(</span><span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;sk-...&quot;</span><span class="p">))</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="s2">&quot;Use run_python to compute 2 + 2.&quot;</span><span class="p">,</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">on_tool_call</span><span class="o">=</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">thought</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">),</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">on_tool_result</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="nb">print</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">output</span><span class="p">),</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="p">)</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">final_text</span><span class="p">)</span>
 </span></code></pre></div>
 <p>For end-to-end examples including the persistent-namespace pattern and a
 real DIII-D workflow, see the <a href="../LLM_Tutorial/">LLM Tutorial</a>.</p>
 <h2 id="configuration">Configuration</h2>
-<p>Resolution precedence (highest first):</p>
+<p>Three settings resolve through a precedence chain: the backend, the model, and
+the iteration cap. Highest first:</p>
 <ol>
-<li>CLI flags: <code>--backend</code>, <code>--model</code>, <code>-n / --max-iterations</code>, <code>--package</code></li>
+<li>CLI flags: <code>--backend</code>, <code>--model</code>, <code>-n / --max-iterations</code></li>
 <li>Environment variables: <code>FDP_LLM_BACKEND</code>, <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code></li>
 <li>
 <p><code>~/.fdp/config.toml</code>:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[llm]</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span><span class="w">          </span><span class="c1"># or openai, claude-max, amsc, or a user preset name</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-sonnet-4-6&quot;</span><span class="w">    </span><span class="c1"># overrides the backend&#39;s default</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">anthropic_api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sk-...&quot;</span><span class="w">   </span><span class="c1"># only if not using env var</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">[llm.presets.mysite]</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span><span class="w">          </span><span class="c1"># the underlying backend class</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://llm.mysite.gov&quot;</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">api_key_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;MYSITE_KEY&quot;</span>
-</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-sonnet-4-6&quot;</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[llm]</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span><span class="w">          </span><span class="c1"># or openai, claude-max, amsc, or a user preset name</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-sonnet-4-6&quot;</span><span class="w">    </span><span class="c1"># overrides the backend&#39;s default</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">20</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">anthropic_api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sk-...&quot;</span><span class="w">   </span><span class="c1"># only if not using env var</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="k">[llm.presets.mysite]</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;anthropic&quot;</span><span class="w">          </span><span class="c1"># the underlying backend class</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://llm.mysite.gov&quot;</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="n">api_key_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;MYSITE_KEY&quot;</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-sonnet-4-6&quot;</span>
 </span></code></pre></div>
 </li>
 <li>
 <p>Built-in defaults</p>
 </li>
 </ol>
+<p><code>--package</code> and <code>-v / --verbose</code> are flag-only — they have no environment
+variable and no <code>config.toml</code> key, so they must be passed on each invocation.</p>
 <h2 id="tools">Tools</h2>
 <p>The agent has exactly two tools, registered with every Session:</p>
 <h3 id="run_python"><code>run_python</code></h3>
@@ -1469,15 +1570,12 @@ system prompt lists the available skill names with one-line descriptions; the
 agent calls <code>lookup_docs(skill_name=...)</code> when it needs the details.</p>
 <p>Core TokSearch ships with skills covering Pipeline basics, MdsSignal,
 the backends, datasets, and API exploration. Device packages add their own:
-<code>toksearch_d3d</code> contributes skills for <code>PtDataSignal</code>, <code>ImasSignal</code>, FDP CLI,
-and a DIII-D quickstart.</p>
-<p>Skills are served via a <strong>standalone MCP server</strong> launched as a subprocess when
-<code>Session</code> is constructed: <code>python -m toksearch.llm.mcp</code>. Each <code>SKILL.md</code> is
-exposed as a <code>skill://&lt;name&gt;</code> MCP resource (and via a <code>read_skill</code> tool). The
-<code>toksearch.llm.skills</code> entry-point group remains the discovery source; extra
-directories can be added via the <code>TOKSEARCH_SKILL_DIRS</code> env var
-(os.pathsep-delimited). An external MCP client can also connect to the server
-directly to browse or read skills independently of <code>Session</code>.</p>
+<code>toksearch_d3d</code> contributes five — signal routing (which class a given
+physics quantity needs), <code>PtDataSignal</code>, <code>ImasSignal</code>, the FDP CLI, and a
+DIII-D quickstart.</p>
+<p>Skills are served over MCP: <code>Session</code> launches <code>python -m toksearch.llm.mcp</code> as
+a subprocess on construction. The same server can be used directly by an
+external agent — see <a href="#using-your-own-agent">Using your own agent</a>.</p>
 <h2 id="show-then-run">Show-then-run</h2>
 <p>The REPL prints each <code>run_python</code> block's <code>thought</code> and code <strong>before</strong>
 executing it. This is the default UX — auto-approval with transparency, no
@@ -1487,12 +1585,35 @@ the agent making an expensive mistake (e.g. firing off a
 the code before execution lets you ctrl-C out before it commits to anything.</p>
 <p>A <code>confirm=</code> callback is exposed on <code>Session.send</code> for callers who want to gate
 each call programmatically:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">review</span><span class="p">(</span><span class="n">call</span><span class="p">):</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">args</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;code&quot;</span><span class="p">))</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="k">return</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Run this? [Y/n] &quot;</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;n&quot;</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="n">confirm</span><span class="o">=</span><span class="n">review</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">review</span><span class="p">(</span><span class="n">call</span><span class="p">):</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">args</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;code&quot;</span><span class="p">))</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="k">return</span> <span class="nb">input</span><span class="p">(</span><span class="s2">&quot;Run this? [Y/n] &quot;</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;n&quot;</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">sess</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="n">confirm</span><span class="o">=</span><span class="n">review</span><span class="p">)</span>
 </span></code></pre></div>
+<h2 id="using-your-own-agent">Using your own agent</h2>
+<p>The skills that <code>lookup_docs</code> serves to the built-in agent are the same ones an
+external coding agent can read. Two delivery mechanisms:</p>
+<p><strong>Installed skill files.</strong> <code>fdp skills</code> installs the SKILL.md directories
+contributed by every installed package into the agent's own skills location, in
+the form that agent expects:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>fdp<span class="w"> </span>skills<span class="w"> </span>list<span class="w">                            </span><span class="c1"># available + install status</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>fdp<span class="w"> </span>skills<span class="w"> </span>install<span class="w">                         </span><span class="c1"># → ~/.claude/skills (Claude Code)</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>fdp<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--backend<span class="w"> </span>cursor<span class="w">        </span><span class="c1"># or codex, or all</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>fdp<span class="w"> </span>skills<span class="w"> </span>install<span class="w"> </span>--force<span class="w">                 </span><span class="c1"># overwrite already-installed copies</span>
+</span></code></pre></div>
+<p><strong>The MCP server.</strong> <code>python -m toksearch.llm.mcp</code> is a standalone stdio MCP
+server that exposes each skill as a <code>skill://&lt;name&gt;</code> resource plus a
+<code>read_skill</code> tool. Register it with Claude Code:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>toksearch-skills<span class="w"> </span>--<span class="w"> </span>fdp<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>toksearch.llm.mcp
+</span></code></pre></div>
+<p>Wrapping it in <code>fdp run</code> means the agent's environment can also fetch data, not
+just read documentation. Any MCP-capable client can connect to the same server.</p>
+<p>Discovery for both mechanisms is the <code>toksearch.llm.skills</code> entry-point group;
+extra directories can be added through the <code>TOKSEARCH_SKILL_DIRS</code> environment
+variable (os.pathsep-delimited). <code>Session</code> launches its own copy of this server
+as a subprocess, so the built-in agent and an external one read byte-identical
+documentation.</p>
 <h2 id="contributors">Contributors</h2>
 <p>Any installed package can contribute three things to <code>toksearch.llm</code> via Python
 entry points:</p>
@@ -1523,14 +1644,14 @@ entry points:</p>
 </tbody>
 </table>
 <p>Example: how <code>toksearch_d3d</code> plugs in (in its <code>pyproject.toml</code>):</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.namespace&quot;</span><span class="k">]</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">toksearch_d3d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d&quot;</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.skills&quot;</span><span class="k">]</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">toksearch_d3d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d.llm:skills_path&quot;</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.presets&quot;</span><span class="k">]</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">amsc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d.llm:AMSC_PRESET&quot;</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.namespace&quot;</span><span class="k">]</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">toksearch_d3d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d&quot;</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.skills&quot;</span><span class="k">]</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">toksearch_d3d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d.llm:skills_path&quot;</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="k">[project.entry-points.</span><span class="s2">&quot;toksearch.llm.presets&quot;</span><span class="k">]</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">amsc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;toksearch_d3d.llm:AMSC_PRESET&quot;</span>
 </span></code></pre></div>
 <p>Sessions auto-discover all installed contributors on construction. Filter to a
 subset with <code>Session(packages=["toksearch_d3d"])</code> or <code>toksearch chat --package
@@ -1901,7 +2022,8 @@ handler).</p>
 <h2 id="see-also">See also</h2>
 <ul>
 <li><a href="../LLM_Tutorial/">LLM Tutorial</a> — end-to-end walkthrough including a DIII-D plot.</li>
-<li><a href="https://github.com/GA-FDP/toksearch_d3d"><code>fdp</code> CLI</a> — wraps <code>toksearch chat</code>/<code>query</code> with FDP environment setup for DIII-D users.</li>
+<li><a href="https://github.com/GA-FDP/fdp"><code>fdp</code> CLI</a> — wraps <code>toksearch chat</code>/<code>query</code>
+  with FDP environment setup, and provides <code>fdp skills</code>.</li>
 <li><a href="https://github.com/anthropics/claude-agent-sdk-python">Claude Agent SDK</a> — underlies the <code>claude-max</code> backend.</li>
 </ul>
 

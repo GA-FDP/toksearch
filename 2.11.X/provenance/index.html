@@ -1,0 +1,2168 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+        <meta name="author" content="Brian Sammuli">
+      
+      
+        <link rel="canonical" href="https://ga-fdp.github.io/toksearch/2.11.X/provenance/">
+      
+      
+        <link rel="prev" href="../Aggregating_Data/">
+      
+      
+        <link rel="next" href="../LLM_Tutorial/">
+      
+      
+      <link rel="icon" href="../favicon.ico">
+      <meta name="generator" content="mkdocs-1.5.3, mkdocs-material-9.5.20">
+    
+    
+      
+        <title>Provenance and CMF - TokSearch</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.66ac8b77.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#provenance-and-cmf" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="TokSearch" class="md-header__button md-logo" aria-label="TokSearch" data-md-component="logo">
+      
+  <img src="../ts_just_logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            TokSearch
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Provenance and CMF
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/GA-FDP/toksearch" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GA-FDP/toksearch
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="TokSearch" class="md-nav__button md-logo" aria-label="TokSearch" data-md-component="logo">
+      
+  <img src="../ts_just_logo.svg" alt="logo">
+
+    </a>
+    TokSearch
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/GA-FDP/toksearch" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.5.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GA-FDP/toksearch
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Tutorials
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Tutorials
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    The Basics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Working_with_Signals/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Working with signals
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Using_with_Xarray/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Xarray and signal alignment
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Parallelization/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Parallelization
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../distributed_computing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Distributed computing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sql/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Creating pipelines from SQL
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Aggregating_Data/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Combining data after pipeline computation
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Provenance and CMF
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Provenance and CMF
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      The interface
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-a-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recording a run
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recording a run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chaining-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      Chaining runs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-data-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      Getting data out
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Getting data out">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipelinewrite" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline.write
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#driver-side-collection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Driver-side collection
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-to-cmf" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recording to CMF
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      API reference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Provenance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Provenance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.on_compute_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      on_compute_start
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.on_compute_end" class="md-nav__link">
+    <span class="md-ellipsis">
+      on_compute_end
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.output" class="md-nav__link">
+    <span class="md-ellipsis">
+      output
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      metrics
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.finalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      finalize
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext" class="md-nav__link">
+    <span class="md-ellipsis">
+      RunContext
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RunContext">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext.input_identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      input_identity
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext.write_directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      write_directories
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.SourceSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      SourceSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.OpSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      OpSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.BackendSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      BackendSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.CodeSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      CodeSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.JsonProvenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      JsonProvenance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.safe_call" class="md-nav__link">
+    <span class="md-ellipsis">
+      safe_call
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="safe_call">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-output-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline output operations
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../LLM_Tutorial/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LLM Tutorial
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            API
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Pipeline
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Record
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mds/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MDSplus Data Access
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../llm/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LLM Interface
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Backend
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            Backend
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_ray/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ray
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_spark/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Spark
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_serial/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Serial
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../backend_multiprocessing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Multiprocessing
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Abstract Interfaces
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            Abstract Interfaces
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signal/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Signal
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record_set/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    RecordSet
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      The interface
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-a-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recording a run
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recording a run">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chaining-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      Chaining runs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-data-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      Getting data out
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Getting data out">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipelinewrite" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline.write
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#driver-side-collection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Driver-side collection
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-to-cmf" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recording to CMF
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      API reference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Provenance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Provenance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.on_compute_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      on_compute_start
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.on_compute_end" class="md-nav__link">
+    <span class="md-ellipsis">
+      on_compute_end
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.output" class="md-nav__link">
+    <span class="md-ellipsis">
+      output
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      metrics
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.Provenance.finalize" class="md-nav__link">
+    <span class="md-ellipsis">
+      finalize
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext" class="md-nav__link">
+    <span class="md-ellipsis">
+      RunContext
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RunContext">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext.input_identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      input_identity
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toksearch.provenance.RunContext.write_directories" class="md-nav__link">
+    <span class="md-ellipsis">
+      write_directories
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.SourceSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      SourceSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.OpSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      OpSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.BackendSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      BackendSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.CodeSpec" class="md-nav__link">
+    <span class="md-ellipsis">
+      CodeSpec
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.JsonProvenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      JsonProvenance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toksearch.provenance.safe_call" class="md-nav__link">
+    <span class="md-ellipsis">
+      safe_call
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="safe_call">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-output-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline output operations
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+<h1 id="provenance-and-cmf">Provenance and CMF</h1>
+<p>A computed result is only reusable if you can say what produced it. TokSearch
+derives that description itself — the shot source, the specification of every
+signal fetched, the sequence of operations, the compute backend, and the git
+commit of the script that ran — and hands it to a provenance backend. You do
+not hand-write metadata.</p>
+<h2 id="the-interface">The interface</h2>
+<p><code>toksearch.provenance</code> defines the contract and nothing else. It has no
+dependency on any metadata service; the CMF implementation lives in the
+separate <code>toksearch_cmf</code> package.</p>
+<p><strong><code>RunContext</code></strong> is the derived description of a run. Its parts:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>What it carries</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SourceSpec</code></td>
+<td>Where the shots came from: <code>kind</code> (<code>shotlist</code>, <code>sql</code>, <code>recordset</code>), <code>count</code>, a hash of the shot list, and for SQL sources the <code>query</code> and <code>params</code></td>
+</tr>
+<tr>
+<td><code>OpSpec</code></td>
+<td>One per pipeline operation, in order: <code>fetch</code>, <code>fetch_dataset</code>, <code>map</code>, <code>keep</code>, <code>where</code>, <code>align</code>, <code>write</code>, each with its detail</td>
+</tr>
+<tr>
+<td><code>BackendSpec</code></td>
+<td>Which compute backend ran it, and its configuration</td>
+</tr>
+<tr>
+<td><code>CodeSpec</code></td>
+<td>The executing script, its <code>argv</code>, the git <code>commit</code>, and whether the tree was <code>dirty</code></td>
+</tr>
+<tr>
+<td><code>signals</code></td>
+<td>The <code>Signal.spec()</code> of every fetched signal, keyed by record field — or by <code>&lt;dataset&gt;.&lt;name&gt;</code> for <code>fetch_dataset</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>RunContext.input_identity()</code> hashes only the source, the signals, and the
+device — deliberately excluding operations, backend, and code. Two runs that
+read the same data have the same input identity even if they process it
+differently.</p>
+<p><strong><code>Provenance</code></strong> is the ABC a backend implements:</p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on_compute_start(ctx)</code></td>
+<td>Before the backend runs</td>
+</tr>
+<tr>
+<td><code>on_compute_end(ctx, recordset)</code></td>
+<td>After compute returns</td>
+</tr>
+<tr>
+<td><code>output(*paths, **custom_properties)</code></td>
+<td>Declare artifacts toksearch did not write itself</td>
+</tr>
+<tr>
+<td><code>metrics(name, values)</code></td>
+<td>Record a named set of metrics</td>
+</tr>
+<tr>
+<td><code>finalize()</code></td>
+<td>Flush and close the record</td>
+</tr>
+</tbody>
+</table>
+<p>The three hooks toksearch invokes itself — <code>on_compute_start</code>,
+<code>on_compute_end</code>, and the <code>output</code> recorded by <code>RecordSet.to_parquet</code> — go
+through <code>safe_call</code>, which converts any exception into a <code>RuntimeWarning</code> and
+carries on: losing a provenance record is bad, losing a completed multi-hour
+compute is worse. Set <code>strict=True</code> on the backend to make those propagate
+instead — appropriate in CI, not in production runs. <code>metrics()</code> and
+<code>finalize()</code> get no such protection and <code>strict</code> does not reach them: you call
+them yourself, so a failure inside one — a DVC or mlmd error in
+<code>CmfRun.finalize()</code>, say — raises into your script like any other call, after
+the compute has already finished. Put <code>finalize()</code> where an exception is
+survivable, or wrap it, when the computed result matters more than the
+record.</p>
+<h2 id="recording-a-run">Recording a run</h2>
+<p>Pass a backend to any of the four <code>compute_*</code> methods. <code>JsonProvenance</code> needs
+no external services, which makes it the right thing to try first:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch</span><span class="w"> </span><span class="kn">import</span> <span class="n">Pipeline</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch.provenance</span><span class="w"> </span><span class="kn">import</span> <span class="n">JsonProvenance</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">peaks</span><span class="p">(</span><span class="n">rec</span><span class="p">):</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;peaks&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">(</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="p">{</span><span class="s2">&quot;double&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;shot&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">rec</span><span class="o">.</span><span class="n">shot</span> <span class="o">*</span> <span class="mi">2</span><span class="p">])},</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">coords</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;shot&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;shot&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">rec</span><span class="o">.</span><span class="n">shot</span><span class="p">])},</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">)</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">Pipeline</span><span class="p">([</span><span class="mi">180000</span><span class="p">,</span> <span class="mi">180001</span><span class="p">])</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">peaks</span><span class="p">)</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">keep</span><span class="p">([</span><span class="s2">&quot;peaks&quot;</span><span class="p">])</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;out&quot;</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;peaks&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">run</span> <span class="o">=</span> <span class="n">JsonProvenance</span><span class="p">(</span><span class="s2">&quot;demo&quot;</span><span class="p">,</span> <span class="n">stage</span><span class="o">=</span><span class="s2">&quot;explore&quot;</span><span class="p">,</span> <span class="n">path</span><span class="o">=</span><span class="s2">&quot;run.json&quot;</span><span class="p">)</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">compute_serial</span><span class="p">(</span><span class="n">provenance</span><span class="o">=</span><span class="n">run</span><span class="p">)</span>
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="n">run</span><span class="o">.</span><span class="n">metrics</span><span class="p">(</span><span class="s2">&quot;coverage&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;requested&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;returned&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)})</span>
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="n">run</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span>
+</span></code></pre></div>
+<p>That writes <code>out/180000.nc</code> and <code>out/180001.nc</code>, and this <code>run.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">&quot;backend&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;config&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w"> </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SerialRecordSet&quot;</span><span class="p">},</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">&quot;code&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">      </span><span class="nt">&quot;argv&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;demo.py&quot;</span><span class="p">],</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">      </span><span class="nt">&quot;commit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;b06208582106642adfc5666eef5c3c43628204d8&quot;</span><span class="p">,</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="nt">&quot;dirty&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">      </span><span class="nt">&quot;repo_root&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/demo&quot;</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="nt">&quot;script&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;demo.py&quot;</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="p">},</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">&quot;device&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">&quot;ops&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">      </span><span class="p">{</span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;map&quot;</span><span class="p">,</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">       </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;func&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;module&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;__main__&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;peaks&quot;</span><span class="p">,</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">                           </span><span class="nt">&quot;source_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30b447cd1662a427...&quot;</span><span class="p">}}},</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">      </span><span class="p">{</span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;keep&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;peaks&quot;</span><span class="p">]}},</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">      </span><span class="p">{</span><span class="nt">&quot;op&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;write&quot;</span><span class="p">,</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">       </span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;directory&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/demo/out&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;peaks&quot;</span><span class="p">],</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">                  </span><span class="nt">&quot;fmt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;netcdf&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;func&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">                  </span><span class="nt">&quot;on_error&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;skip&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;path_field&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;output_path&quot;</span><span class="p">,</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">                  </span><span class="nt">&quot;track&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;directory&quot;</span><span class="p">}}</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">    </span><span class="p">],</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="nt">&quot;parent_run&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">    </span><span class="nt">&quot;signals&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span>
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">    </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;hash&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;8964cb18ba55ec4e...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;shotlist&quot;</span><span class="p">,</span>
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">               </span><span class="nt">&quot;params&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">  </span><span class="nt">&quot;input_identity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ca52bcbedcaf50337f0c97ebf2533b38c481d7862f6647cb0ce57b195476bb69&quot;</span><span class="p">,</span>
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">  </span><span class="nt">&quot;metrics&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;coverage&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;requested&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;returned&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">}},</span>
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">  </span><span class="nt">&quot;outputs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/path/to/demo/out&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;pipeline_write&quot;</span><span class="p">}],</span>
+</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">  </span><span class="nt">&quot;pipeline_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;demo&quot;</span><span class="p">,</span>
+</span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="w">  </span><span class="nt">&quot;run_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bd9348f4471b4f2fb14ca64aea5fcdf6&quot;</span><span class="p">,</span>
+</span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="w">  </span><span class="nt">&quot;stage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;explore&quot;</span>
+</span><span id="__span-1-34"><a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>source_sha256</code> is the hash of the mapped function's source, so a change to
+<code>peaks</code> produces a different record. <code>commit</code> and <code>dirty</code> come from the git
+repository containing the script; outside a repository both are <code>null</code>.</p>
+<p>Add a <code>fetch</code> and the <code>signals</code> block fills in with that signal's full
+specification — class, module, expression, tree name, dims, and every
+constructor field — which is what makes the input identity meaningful.</p>
+<h3 id="chaining-runs">Chaining runs</h3>
+<p><code>Pipeline.compute</code> copies the backend's <code>run_id</code> onto the returned
+<code>RecordSet</code>. Building a new pipeline from that recordset —
+<code>Pipeline(previous_results)</code> — reads it back as <code>RunContext.parent_run</code>, so a
+multi-stage analysis links itself without any bookkeeping on your part.</p>
+<h2 id="getting-data-out">Getting data out</h2>
+<h3 id="pipelinewrite"><code>Pipeline.write</code></h3>
+<p>Write one file per record, in the worker that produced it. This is the
+recommended way to get data out of a pipeline: writing per shot in the workers
+is faster than concatenating on the driver, and more honest — concatenation is
+a transformation and deserves its own stage rather than hiding inside a writer.</p>
+<p>Two forms. <strong>Declarative</strong>, which appends the operation immediately:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;out/peaks&quot;</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;ds&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;out/peaks&quot;</span><span class="p">,</span> <span class="n">fields</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ip&quot;</span><span class="p">,</span> <span class="s2">&quot;betan&quot;</span><span class="p">],</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>   <span class="c1"># xr.merge</span>
+</span></code></pre></div>
+<p><strong>Decorator</strong>, when the file's content needs computing:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nd">@pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;out/peaks&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">shot_file</span><span class="p">(</span><span class="n">rec</span><span class="p">):</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="k">return</span> <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;ds&quot;</span><span class="p">]</span>
+</span></code></pre></div>
+<p>A two-argument function takes <code>(record, path)</code>, writes the file itself, and
+returns the path it wrote.</p>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>directory</code></td>
+<td>Output directory; created if absent</td>
+</tr>
+<tr>
+<td><code>field</code> / <code>fields</code></td>
+<td>One record field, or several merged with <code>xarray.merge</code></td>
+</tr>
+<tr>
+<td><code>fmt</code></td>
+<td><code>netcdf</code>, <code>parquet</code>, <code>npy</code>, <code>npz</code>, <code>json</code>; inferred from the object when omitted</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td><code>(record) -&gt; str</code> basename without extension; defaults to the shot number</td>
+</tr>
+<tr>
+<td><code>track</code></td>
+<td><code>directory</code> (one artifact for the whole directory) or <code>file</code> (one per shot)</td>
+</tr>
+<tr>
+<td><code>exist_ok</code></td>
+<td>Off by default — two runs interleaving into one directory silently corrupt the directory's content hash, and <code>flock</code> is not cross-client on BeeGFS, so nothing else prevents it</td>
+</tr>
+<tr>
+<td><code>path_field</code></td>
+<td>Record field that receives the written path</td>
+</tr>
+<tr>
+<td><code>on_error</code></td>
+<td><code>skip</code> (default) writes no file for a record that already failed, so the directory — and the provenance hash over it — covers exactly the shots that completed; <code>write</code> writes anyway</td>
+</tr>
+</tbody>
+</table>
+<p>Read the results back with <code>xarray.open_mfdataset('out/peaks/*.nc')</code> where
+<code>dask</code> is installed. Without it, open per file:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">glob</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">xarray</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">xr</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">ds</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="p">[</span><span class="n">xr</span><span class="o">.</span><span class="n">open_dataset</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">glob</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;out/peaks/*.nc&quot;</span><span class="p">))],</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">dim</span><span class="o">=</span><span class="s2">&quot;shot&quot;</span><span class="p">,</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span>
+</span></code></pre></div>
+<p>Without <code>netCDF4</code>/<code>h5netcdf</code>, xarray writes NetCDF3 via scipy, which has no
+int64 — integer coordinates read back as int32.</p>
+<h3 id="driver-side-collection">Driver-side collection</h3>
+<p>When the per-shot results are small enough to gather, <code>RecordSet</code> collapses
+them directly:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">compute_multiprocessing</span><span class="p">(</span><span class="n">num_workers</span><span class="o">=</span><span class="mi">16</span><span class="p">)</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>                       <span class="c1"># all scalar fields</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">results</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">(</span><span class="n">fields</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ip_max_ma&quot;</span><span class="p">])</span>   <span class="c1"># a subset</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">results</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="s2">&quot;peaks.parquet&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<h2 id="recording-to-cmf">Recording to CMF</h2>
+<p><a href="https://github.com/HewlettPackard/cmf">CMF</a> (Common Metadata Framework) is a
+git- and DVC-backed metadata store. <code>toksearch_cmf</code> provides <code>CmfRun</code>, a
+<code>Provenance</code> implementation that records a run there. It owns every <code>cmflib</code>
+and <code>dvc</code> dependency; TokSearch core knows about neither.</p>
+<p><code>toksearch_cmf</code> is part of the <code>fdp-core</code> metapackage, so an FDP environment
+already has it.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch</span><span class="w"> </span><span class="kn">import</span> <span class="n">MdsSignal</span><span class="p">,</span> <span class="n">Pipeline</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch_d3d</span><span class="w"> </span><span class="kn">import</span> <span class="n">PtDataSignal</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">toksearch_cmf</span><span class="w"> </span><span class="kn">import</span> <span class="n">CmfRun</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">run</span> <span class="o">=</span> <span class="n">CmfRun</span><span class="p">(</span><span class="s2">&quot;betan-ip-study&quot;</span><span class="p">,</span> <span class="n">stage</span><span class="o">=</span><span class="s2">&quot;assemble&quot;</span><span class="p">,</span> <span class="n">work_dir</span><span class="o">=</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">pipeline</span> <span class="o">=</span> <span class="n">Pipeline</span><span class="p">(</span><span class="n">shots</span><span class="p">)</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;ip&quot;</span><span class="p">,</span> <span class="n">PtDataSignal</span><span class="p">(</span><span class="s2">&quot;ip&quot;</span><span class="p">))</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    <span class="s2">&quot;betan&quot;</span><span class="p">,</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="n">MdsSignal</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\betan&quot;</span><span class="p">,</span> <span class="s2">&quot;efit01&quot;</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="s2">&quot;remote://atlas.gat.com&quot;</span><span class="p">),</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="p">)</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">peaks</span><span class="p">)</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">keep</span><span class="p">([</span><span class="s2">&quot;peaks&quot;</span><span class="p">])</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="n">pipeline</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;peaks&quot;</span><span class="p">,</span> <span class="n">field</span><span class="o">=</span><span class="s2">&quot;peaks&quot;</span><span class="p">,</span> <span class="n">fmt</span><span class="o">=</span><span class="s2">&quot;netcdf&quot;</span><span class="p">)</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">compute_multiprocessing</span><span class="p">(</span><span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">provenance</span><span class="o">=</span><span class="n">run</span><span class="p">)</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="n">run</span><span class="o">.</span><span class="n">metrics</span><span class="p">(</span><span class="s2">&quot;coverage&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;requested&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">shots</span><span class="p">),</span> <span class="s2">&quot;returned&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">)})</span>
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="n">run</span><span class="o">.</span><span class="n">finalize</span><span class="p">()</span>
+</span></code></pre></div>
+<p>Nothing there hand-writes a <code>cmflib.log_dataset</code> call. TokSearch derives the
+run description and <code>CmfRun</code> records it.</p>
+<p><strong>Prerequisites.</strong> cmflib records the executing script's commit and hands
+output paths to DVC, so the script must run from inside a git repository that
+has a remote and DVC initialised, with the script itself committed there.
+<code>CmfRun</code> checks for the repository up front rather than failing after a long
+compute.</p>
+<p><strong>Prefer <code>python -m fdp run</code> to <code>fdp run</code>.</strong> In any environment
+carrying cmflib, graphviz arrives transitively (<code>cmflib → dvc → pydot →
+graphviz</code>) and installs its own layout engine at <code>bin/fdp</code>. <code>fdp</code> 0.6.0
+declared graphviz as a dependency so the installer's link order gives the FDP
+CLI the file back (verified on pixi/rattler and micromamba 2.9.0). That still
+leaves two ways to lose the collision: an <code>fdp</code> older than 0.6.0, or an
+installer whose link order isn't guaranteed the way those two are. So plain
+<code>fdp run</code> does work in a stock <code>fdp-core</code> environment — which is why the rest
+of these docs use it — and <code>python -m fdp</code> is simply the form that cannot be
+wrong:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>python<span class="w"> </span>-m<span class="w"> </span>fdp<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>betan_ip_peaks_cmf.py
+</span></code></pre></div>
+<p>A complete working example is
+<a href="https://github.com/GA-FDP/toksearch_cmf/blob/main/examples/betan_ip_peaks_cmf.py"><code>examples/betan_ip_peaks_cmf.py</code></a>
+in the <code>toksearch_cmf</code> repository. The technical claims in the prerequisite
+passage above — the git+DVC requirement, and the graphviz story with its two
+residual exposures — are kept deliberately in sync with the same passage in
+that repository's README. The surrounding wording differs where local context
+demands it (only this page has to reconcile itself with the <code>fdp run</code> used
+elsewhere in these docs), so compare the claims, not the prose.</p>
+<h2 id="api-reference">API reference</h2>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.Provenance" class="doc doc-heading">
+          <code>toksearch.provenance.Provenance</code>
+
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+          <p class="doc doc-class-bases">
+            Bases: <code><span title="abc.ABC">ABC</span></code></p>
+
+  
+      <p>Receives a RunContext and records it somewhere.</p>
+<p>Implementations must not raise in normal operation: losing a provenance
+record is bad, but losing a completed multi-hour compute is worse. Errors
+are converted to warnings by <code>safe_call</code> unless <code>strict</code> is set.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.Provenance.on_compute_start" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">on_compute_start</span><span class="p">(</span><span class="n">ctx</span><span class="p">)</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Called before the backend runs, with the derived RunContext.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.Provenance.on_compute_end" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">on_compute_end</span><span class="p">(</span><span class="n">ctx</span><span class="p">,</span> <span class="n">recordset</span><span class="p">)</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Called after compute returns, with the resulting RecordSet.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.Provenance.output" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">output</span><span class="p">(</span><span class="o">*</span><span class="n">paths</span><span class="p">,</span> <span class="o">**</span><span class="n">custom_properties</span><span class="p">)</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Declare output artifacts that toksearch did not write itself.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.Provenance.metrics" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">metrics</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">values</span><span class="p">)</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Record a named set of metrics for this run.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.Provenance.finalize" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">finalize</span><span class="p">()</span></code>
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-abstractmethod"><code>abstractmethod</code></small>
+  </span>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Flush and close the record.</p>
+
+  </div>
+
+</div>
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.RunContext" class="doc doc-heading">
+          <code>toksearch.provenance.RunContext</code>
+
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>Everything toksearch knows about one <code>compute_*</code> call.</p>
+<p>This is the entire contract with a provenance backend. A backend receives
+a RunContext and nothing else; it never touches a Pipeline, a Signal, or a
+Record.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.RunContext.input_identity" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">input_identity</span><span class="p">()</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Hash of <em>what data this run reads</em> -- source plus signals.</p>
+<p>Deliberately excludes ops, backend, and code: two runs that read the
+same data share an input artifact even if they then do different
+things with it. That shared artifact is what connects the lineage
+graph.</p>
+
+  </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h3 id="toksearch.provenance.RunContext.write_directories" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">write_directories</span><span class="p">()</span></code>
+
+</h3>
+
+
+  <div class="doc doc-contents ">
+  
+      <p>Output directories declared by Pipeline.write operations.</p>
+<p>Read from the pipeline definition, not from the records. Ray and Spark
+RecordSets are lazy -- <code>SparkRecordSet.map</code> returns an un-actioned
+RDD and <code>RayRecordSet.map</code> returns unmaterialized ObjectRefs -- so
+iterating one to discover written paths would force materialization as
+a side effect of recording provenance. On Spark without caching, the
+user's next action would then recompute the whole pipeline. The
+directory is known statically, so nothing needs to be forced.</p>
+<p>Only <code>track="directory"</code> writes are covered. <code>track="file"</code> asks
+for per-shot artifacts, whose paths genuinely are per-record; a backend
+wanting those must iterate, and should say so.</p>
+
+  </div>
+
+</div>
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.SourceSpec" class="doc doc-heading">
+          <code>toksearch.provenance.SourceSpec</code>
+
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>Where the records came from.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.OpSpec" class="doc doc-heading">
+          <code>toksearch.provenance.OpSpec</code>
+
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>One pipeline operation, described.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.BackendSpec" class="doc doc-heading">
+          <code>toksearch.provenance.BackendSpec</code>
+
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>Which compute backend ran, and how it was configured.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.CodeSpec" class="doc doc-heading">
+          <code>toksearch.provenance.CodeSpec</code>
+
+  
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+
+  
+      <p>Which code produced a run.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="toksearch.provenance.JsonProvenance" class="doc doc-heading">
+          <code>toksearch.provenance.JsonProvenance</code>
+
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+          <p class="doc doc-class-bases">
+            Bases: <code><a class="autorefs autorefs-internal" title="toksearch.provenance.base.Provenance" href="#toksearch.provenance.Provenance">Provenance</a></code></p>
+
+  
+      <p>Record a run to a JSON file.</p>
+
+
+  
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+  </div>
+
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<h2 id="toksearch.provenance.safe_call" class="doc doc-heading">
+          <code class="highlight language-python"><span class="n">toksearch</span><span class="o">.</span><span class="n">provenance</span><span class="o">.</span><span class="n">safe_call</span><span class="p">(</span><span class="n">provenance</span><span class="p">,</span> <span class="n">hook</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span></code>
+
+</h2>
+
+
+  <div class="doc doc-contents first">
+  
+      <p>Invoke a provenance hook without letting it break the pipeline.</p>
+<p>A None provenance is a no-op, so call sites need no branching.</p>
+
+  </div>
+
+</div><h3 id="pipeline-output-operations">Pipeline output operations</h3>
+<p><code>Pipeline.write</code> is rendered in full on the <a href="../pipeline/">Pipeline</a> reference
+page, and <code>RecordSet.to_dataframe</code> / <code>RecordSet.to_parquet</code> on the
+<a href="../record_set/">RecordSet</a> page. Their arguments are tabulated under
+<a href="#getting-data-out">Getting data out</a> above.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "..", "features": [], "search": "../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.dd8806f2.min.js"></script>
+      
+    
+  </body>
+</html>

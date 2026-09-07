@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://ga-fdp.github.io/toksearch/2.11.X/LLM_Tutorial/">
       
       
-        <link rel="prev" href="../Aggregating_Data/">
+        <link rel="prev" href="../provenance/">
       
       
         <link rel="next" href="../pipeline/">
@@ -375,6 +375,27 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../provenance/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Provenance and CMF
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -437,6 +458,15 @@
   <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
       Install
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      Credentials
     </span>
   </a>
   
@@ -841,6 +871,15 @@
   <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
       Install
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#credentials" class="md-nav__link">
+    <span class="md-ellipsis">
+      Credentials
     </span>
   </a>
   
@@ -1587,7 +1626,7 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </style>
 <!-- End of mermaid configuration --><div class="jupyter-wrapper">
 <div class="jp-Notebook" data-jp-theme-light="true" data-jp-theme-name="JupyterLab Light">
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=211076a4">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=c7f68473">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1610,19 +1649,23 @@ span.linenos.special { color: #000000; background-color: #ffffc0; padding-left: 
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=766172ae">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b4bce5e0">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
-<h2 id="1-setup">1. Setup<a class="anchor-link" href="#1-setup">¶</a></h2><h3 id="install">Install<a class="anchor-link" href="#install">¶</a></h3><div class="highlight"><pre><span></span><span class="c1"># Conda (recommended)</span>
-conda<span class="w"> </span>install<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>toksearch<span class="w">          </span><span class="c1"># backends bundled by default</span>
-
-<span class="c1"># Pip</span>
-pip<span class="w"> </span>install<span class="w"> </span>toksearch<span class="o">[</span>llm<span class="o">]</span>
+<h2 id="1-setup">1. Setup<a class="anchor-link" href="#1-setup">¶</a></h2><h3 id="install">Install<a class="anchor-link" href="#install">¶</a></h3><p>The LLM interface ships with TokSearch. If you installed the Fusion Data
+Platform the usual way, you already have it:</p>
+<div class="highlight"><pre><span></span>conda<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>fdp-installer<span class="w"> </span>-c<span class="w"> </span>ga-fdp<span class="w"> </span>-c<span class="w"> </span>conda-forge<span class="w"> </span>fdp-installer
+conda<span class="w"> </span>activate<span class="w"> </span>fdp-installer
+fdp-install<span class="w"> </span>-d<span class="w"> </span>/path/to/project
+<span class="nb">cd</span><span class="w"> </span>/path/to/project<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pixi<span class="w"> </span>shell
 </pre></div>
-<p>The conda recipe lists the four backend SDKs (<code>anthropic</code>, <code>openai</code>, <code>claude-agent-sdk</code>, <code>mcp</code>) and <code>matplotlib</code> as hard run-deps; pip users get the same surface via the <code>[llm]</code> extra.</p>
+<p>That environment carries <code>toksearch</code>, <code>toksearch_d3d</code>, the <code>fdp</code> CLI, and the
+transport needed to reach DIII-D data. TokSearch on its own
+(<code>conda install -c ga-fdp -c conda-forge toksearch</code>) gives you the agent but no
+device access.</p>
 <h3 id="credentials">Credentials<a class="anchor-link" href="#credentials">¶</a></h3><p>Pick whichever backend you have a key for and set the corresponding env var:</p>
 <div class="highlight"><pre><span></span><span class="c1"># Anthropic</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-...
@@ -1650,7 +1693,7 @@ The result is 4.
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=d7532497">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=fc12b1f3">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1685,11 +1728,23 @@ you&gt; Show me a one-shot example using MdsSignal.
 you&gt; /quit
 </pre></div>
 <p>The agent writes the code, executes it, and shows you both the code and its output. Variables (<code>pipeline</code>, <code>records</code>, <code>rec</code>) stay in scope for follow-up turns — see <a href="#4-the-persistent-namespace">§4</a>.</p>
+<h3 id="the-gui">The GUI<a class="anchor-link" href="#the-gui">¶</a></h3><p>The same session is available as a local Gradio app, which renders matplotlib
+figures inline instead of writing them to disk:</p>
+<div class="highlight"><pre><span></span>toksearch<span class="w"> </span>chat<span class="w"> </span>--gui<span class="w">             </span><span class="c1"># opens a browser tab; --no-browser to skip</span>
+fdp<span class="w"> </span>chat<span class="w"> </span>--gui<span class="w">                   </span><span class="c1"># same, with the FDP environment configured</span>
+</pre></div>
+<h3 id="or-use-the-agent-you-already-have">Or use the agent you already have<a class="anchor-link" href="#or-use-the-agent-you-already-have">¶</a></h3><p>If you work in Claude Code, Cursor, or Codex, install the skills into it rather
+than switching tools:</p>
+<div class="highlight"><pre><span></span>fdp<span class="w"> </span>skills<span class="w"> </span>install<span class="w">                                  </span><span class="c1"># → ~/.claude/skills</span>
+claude<span class="w"> </span>mcp<span class="w"> </span>add<span class="w"> </span>toksearch-skills<span class="w"> </span>--<span class="w"> </span>fdp<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>toksearch.llm.mcp
+</pre></div>
+<p>Both deliver the same skill content the built-in agent reads through
+<code>lookup_docs</code>.</p>
 </div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=2effad88">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e838f0cc">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1712,7 +1767,7 @@ The peak |Ip| for shot 165920 is 1.1325 MA.
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e1d25a49">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=85d6360b">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1732,7 +1787,7 @@ The peak |Ip| for shot 165920 is 1.1325 MA.
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=5b934f56">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=72c663a9">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1793,7 +1848,7 @@ print("stop_reason:", result.stop_reason)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=c2fd7023">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=281d0b77">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1841,7 +1896,7 @@ stop_reason: end_turn
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=31d6f451">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=82b071e2">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1854,7 +1909,7 @@ stop_reason: end_turn
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=057f2772">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=1c328b58">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1895,7 +1950,7 @@ sess.send("Make a bar chart of those peak values and save to peaks.png.")</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=f3daf98e">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=d38059fa">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1916,16 +1971,22 @@ sess.send("Make a bar chart of those peak values and save to peaks.png.")</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=58883557">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=5add73e8">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
 <div class="jp-InputArea jp-Cell-inputArea"><div class="jp-InputPrompt jp-InputArea-prompt">
 </div><div class="jp-RenderedHTMLCommon jp-RenderedMarkdown jp-MarkdownOutput" data-mime-type="text/markdown">
 <h2 id="5-a-realistic-diii-d-workflow">5. A realistic DIII-D workflow<a class="anchor-link" href="#5-a-realistic-diii-d-workflow">¶</a></h2><p>Assumes you have <code>toksearch_d3d</code> installed (registers <code>PtDataSignal</code>, <code>ImasSignal</code>, FDP/Pelican access, and the <code>amsc</code> backend preset).</p>
-<p>From the shell, <code>fdp</code> wraps <code>toksearch chat</code> with the FDP environment pre-configured (XRootD plugin, MDSplus tree paths, BEARER_TOKEN):</p>
-<div class="highlight"><pre><span></span>fdp<span class="w"> </span>chat<span class="w">                   </span><span class="c1"># defaults to --backend amsc</span>
+<p>From the shell, <code>fdp chat</code> wraps <code>toksearch chat</code> and configures the FDP
+environment (XRootD plugin, MDSplus tree paths, <code>BEARER_TOKEN</code>) before the
+session starts, which is what lets the agent reach shot data:</p>
+<div class="highlight"><pre><span></span>fdp<span class="w"> </span>chat<span class="w">                              </span><span class="c1"># backend from config; --backend to override</span>
+fdp<span class="w"> </span>chat<span class="w"> </span>--backend<span class="w"> </span>amsc<span class="w">               </span><span class="c1"># GA on-prem AmSC endpoint</span>
 </pre></div>
+<p>The backend is a deployment-level choice, not a per-device one: <code>--backend</code> →
+<code>$FDP_LLM_BACKEND</code> → <code>~/.fdp/config.toml [llm].backend</code> → built-in
+<code>anthropic</code>. Set <code>backend = "amsc"</code> in <code>config.toml</code> to make AmSC your default.</p>
 <div class="highlight"><pre><span></span>toksearch chat (backend: anthropic, model: claude-sonnet-4-6)
 Type /help for commands. Ctrl-D to exit.
 
@@ -1979,7 +2040,7 @@ you&gt; /quit
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=6b2b7a07">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=aa349991">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -1990,7 +2051,7 @@ you&gt; /quit
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=00268b6b">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=e1226070">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2053,7 +2114,7 @@ print(result.final_text)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=32828be0">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=b9e766af">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2064,7 +2125,7 @@ print(result.final_text)</div>
 </div>
 </div>
 </div><div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs">
-<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=289b4742">
+<div class="jp-Cell jp-CodeCell jp-Notebook-cell jp-mod-noOutputs" id="cell-id=197f09e5">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2123,7 +2184,7 @@ Session(backend=ClaudeSDKBackend()).send(PROMPT)</div>
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=7f8ee5e4">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=f667d7fd">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2167,7 +2228,7 @@ toksearch<span class="w"> </span>query<span class="w"> </span>--backend<span cla
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=bd0b73d8">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=a577e55d">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2215,7 +2276,7 @@ you&gt; ^D
 </div>
 </div>
 </div>
-<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=9213e843">
+<div class="jp-Cell jp-MarkdownCell jp-Notebook-cell" id="cell-id=e88349c9">
 <div class="jp-Cell-inputWrapper" tabindex="0">
 <div class="jp-Collapser jp-InputCollapser jp-Cell-inputCollapser">
 </div>
@@ -2225,8 +2286,13 @@ you&gt; ^D
 <li><a href="llm.md">LLM reference</a> — full API surface, configuration precedence, contributor entry points, exception hierarchy.</li>
 <li><a href="Working_with_Signals.ipynb">Working with Signals</a> — the underlying <code>MdsSignal</code> / <code>ZarrSignal</code> machinery the agent uses for <code>run_python</code> calls.</li>
 <li><a href="Aggregating_Data.ipynb">Aggregating Data</a> — patterns for collapsing many-shot pipelines into pandas / xarray; useful prompts to give the agent.</li>
-<li><code>fdp</code> CLI source: <a href="https://github.com/GA-FDP/toksearch_d3d">GA-FDP/toksearch_d3d</a> — DIII-D-specific wrapping (<code>fdp chat</code>, <code>fdp query</code>, <code>fdp run</code>, the <code>amsc</code> preset).</li>
+<li><code>fdp</code> CLI source: <a href="https://github.com/GA-FDP/fdp">GA-FDP/fdp</a> — the FDP
+environment plus <code>fdp chat</code>, <code>fdp query</code>, <code>fdp run</code>, and <code>fdp skills</code>.
+DIII-D signal classes and the <code>amsc</code> preset live in
+<a href="https://github.com/GA-FDP/toksearch_d3d">GA-FDP/toksearch_d3d</a>.</li>
 <li>Claude Agent SDK: <a href="https://github.com/anthropics/claude-agent-sdk-python">anthropics/claude-agent-sdk-python</a> — underlies the <code>claude-max</code> backend.</li>
+<li><a href="provenance.md">Provenance and CMF</a> — recording what a pipeline run consumed
+and produced, and pushing it to CMF.</li>
 </ul>
 <h3 id="found-a-bug">Found a bug?<a class="anchor-link" href="#found-a-bug">¶</a></h3><p>File at <a href="https://github.com/GA-FDP/toksearch/issues">github.com/GA-FDP/toksearch/issues</a>. If the agent does something surprising or the wire-format with a provider drifts, the integration tests (<code>tests/test_llm_integration.py</code>, opt-in via <code>TOKSEARCH_INTEGRATION=yes</code>) are the first place to add a reproducer.</p>
 </div>
