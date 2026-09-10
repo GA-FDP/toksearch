@@ -55,6 +55,7 @@ from .pipeline_funcs import (
     _PipelineKeep,
     _PipelineAlign,
     _PipelineWhere,
+    _SafeWrite,
 )
 
 from .align import XarrayAligner
@@ -80,6 +81,11 @@ if TYPE_CHECKING:
     from pyspark.context import SparkContext
 
 from .pipeline_source import PipelineSource
+
+from ..provenance.base import safe_call
+from ..provenance.code import capture_code
+from ..provenance.context import RunContext, SourceSpec, BackendSpec
+from ..provenance.hashing import sha256_of
 
 
 class MissingColumnName(Exception):
@@ -108,6 +114,7 @@ class Pipeline:
         keep: Keep only the fields specified in the list
         align: Align an xarray dataset with a specified set of coordinates
             (typically times)
+        write: Write one file per record from within the pipeline
         where: Apply a function to the records of the previous step in the pipeline,
             and keep the record if the result is truthy, remove it otherwise
         compute_shot: Run the pipeline for a single shot, returning a record object
@@ -181,7 +188,9 @@ class Pipeline:
 
         results = [dict(zip(column_names, row)) for row in cursor.fetchall()]
 
-        return cls(results)
+        pipeline = cls(results)
+        pipeline._sql_source = {"query": query, "params": tuple(query_params)}
+        return pipeline
 
     def __init__(
         self,
@@ -226,6 +235,14 @@ class Pipeline:
             self.do_shot_cleanups = False
             self.do_cleanups = False
             self._operations = []
+
+        # Propagate through pipeline chaining; a RecordSet or shot-list parent
+        # has no query behind it.
+        self._sql_source = (
+            getattr(parent, "_sql_source", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
 
     def fetch(self, name: str, signal: "Signal"):
         """Add a signal to be fetched by the pipeline
@@ -316,6 +333,124 @@ class Pipeline:
 
         self.map(_PipelineAlign(ds_name, aligner))
 
+    def write(
+        self,
+        directory: str,
+        field: Optional[str] = None,
+        fields: Optional[List[str]] = None,
+        fmt: Optional[str] = None,
+        name: Optional[Callable] = None,
+        track: str = "directory",
+        exist_ok: bool = False,
+        path_field: str = "output_path",
+        on_error: str = "skip",
+    ):
+        """Write one file per record, in the worker that produced it.
+
+        This is the recommended way to get data out of a pipeline. Writing per
+        shot in the workers is both faster and more honest than concatenating
+        on the driver: concatenation is a transformation, and it deserves its
+        own stage rather than hiding inside a writer.
+
+        Read the results back with ``xarray.open_mfdataset(directory +
+        '/*.nc')`` where ``dask`` is installed. Without it, open per file::
+
+            import glob, xarray as xr
+            ds = xr.concat(
+                [xr.open_dataset(f) for f in sorted(glob.glob('out/*.nc'))],
+                dim='shot',
+            )
+
+        Without ``netCDF4``/``h5netcdf``, xarray writes NetCDF3 via scipy,
+        which has no int64 -- integer coordinates read back as int32.
+
+        Two forms:
+
+        **Declarative** -- pass ``field`` or ``fields``. The operation is
+        appended immediately and None is returned::
+
+            pipeline.write('out/peaks', field='ds', fmt='netcdf')
+
+        **Decorator** -- pass neither. A decorator is returned; applying it to
+        a function appends the operation and gives the function back
+        unchanged::
+
+            @pipeline.write('out/peaks', fmt='netcdf')
+            def shot_file(rec):
+                return rec['ds']
+
+        A two-argument function takes ``(record, path)``, writes the file
+        itself, and returns the path it wrote.
+
+        Arguments:
+            directory: Output directory. Created if absent.
+            field: Single record field to write.
+            fields: Several record fields, merged with ``xarray.merge``.
+            fmt: Format name ('netcdf', 'parquet', 'npy', 'npz', 'json').
+                Inferred from the object's type when omitted.
+            name: Callable ``(record) -> str`` producing the basename without
+                extension. Defaults to the shot number.
+            track: Provenance granularity. 'directory' (default) records the
+                whole directory as one artifact; 'file' records one artifact
+                per shot.
+            exist_ok: Allow writing into a non-empty directory. Off by
+                default: two runs interleaving into one directory silently
+                corrupt the directory's content hash, and ``flock`` is not
+                cross-client on BeeGFS so nothing else prevents it.
+            path_field: Record field that receives the written path.
+            on_error: What to do with a record that already carries an error
+                from an earlier operation. 'skip' (default) writes no file for
+                it, so the output directory -- and the provenance hash over it
+                -- covers exactly the shots that completed. 'write' writes
+                anyway, which means the file may be missing whatever a failed
+                stage was supposed to add.
+
+        Returns:
+            None in declarative form, a decorator in decorator form.
+        """
+        if track not in ("directory", "file"):
+            raise ValueError(
+                f"track must be 'directory' or 'file', got {track!r}"
+            )
+
+        if on_error not in ("skip", "write"):
+            raise ValueError(
+                f"on_error must be 'skip' or 'write', got {on_error!r}"
+            )
+
+        if not exist_ok and os.path.isdir(directory) and os.listdir(directory):
+            raise ValueError(
+                f"Output directory {directory!r} is not empty. Writing into "
+                f"it would mix this run's output with existing files and "
+                f"corrupt the directory's provenance hash. Use a fresh "
+                f"directory, or pass exist_ok=True if you are certain."
+            )
+
+        def _append(func=None):
+            self._append_operation(
+                _SafeWrite(
+                    directory,
+                    field=field,
+                    fields=fields,
+                    fmt=fmt,
+                    func=func,
+                    name=name,
+                    track=track,
+                    path_field=path_field,
+                    on_error=on_error,
+                )
+            )
+
+        if field is not None or fields:
+            _append()
+            return None
+
+        def decorator(func):
+            _append(func)
+            return func
+
+        return decorator
+
     def where(self, func):
         """
         Apply a func to result in the previous step in the pipeline. If
@@ -343,7 +478,10 @@ class Pipeline:
         # return self._map_single_shot(record)
 
     def compute(
-        self, recordset_cls: Type[RecordSet], config: Optional[object] = None
+        self,
+        recordset_cls: Type[RecordSet],
+        config: Optional[object] = None,
+        provenance: Optional[object] = None,
     ) -> RecordSet:
         """Apply the pipeline using a backend defined by recordset_cls
 
@@ -352,26 +490,43 @@ class Pipeline:
                 of RecordSet.
             config: Configuration object for the backend RecordSet (e.g. RayConfig if
                 using Ray, MultiprocessingConfig if using multiprocessing, etc.)
+            provenance: Optional Provenance backend. When given, the run is
+                described and recorded. Backend failures are warnings, never
+                exceptions -- see toksearch.provenance.safe_call.
 
         Returns:
             RecordSet: The record set
         """
+        ctx = None
+        if provenance is not None:
+            ctx = self._run_context(recordset_cls, config)
+            safe_call(provenance, "on_compute_start", ctx)
 
         if isinstance(self.parent, RecordSet):
             initial_result = self.parent
         else:
             initial_result = self.parent.create_recordset(recordset_cls, config=config)
 
-        return initial_result.map(*self._operations)
+        result = initial_result.map(*self._operations)
+
+        if provenance is not None:
+            result.provenance = provenance
+            result.run_id = getattr(provenance, "run_id", None)
+            safe_call(provenance, "on_compute_end", ctx, result)
+
+        return result
 
     ####################### SERIAL ######################
 
-    def compute_serial(self):
+    def compute_serial(self, provenance: Optional[object] = None):
         """Apply the pipeline serially on the local host
+
+        Arguments:
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns a SerialRecordSet object
         """
-        return self.compute(SerialRecordSet)
+        return self.compute(SerialRecordSet, provenance=provenance)
 
     ####################### RAY  ######################
 
@@ -382,6 +537,7 @@ class Pipeline:
         verbose: bool = True,
         placement_group_func: Optional[Callable] = None,
         memory_per_shot: Optional[int] = None,
+        provenance: Optional[object] = None,
         **ray_init_kwargs,
     ) -> RayRecordSet:
         """Apply the pipeline using Ray
@@ -396,6 +552,7 @@ class Pipeline:
                 for more information on placement groups.
             memory_per_shot: Memory to allocate to each shot in bytes. If not provided, there
                 is no limit.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Other Arguments:
             **ray_init_kwargs: Keyword arguments to pass to ray.init
@@ -412,7 +569,7 @@ class Pipeline:
             **ray_init_kwargs,
         )
 
-        return self.compute(RayRecordSet, config=config)
+        return self.compute(RayRecordSet, config=config, provenance=provenance)
 
     ####################### SPARK  ######################
     def compute_spark(
@@ -420,6 +577,7 @@ class Pipeline:
         sc: Optional[SparkContext] = None,
         numparts: Optional[int] = None,
         cache: bool = False,
+        provenance: Optional[object] = None,
     ) -> SparkRecordSet:
         """Apply the pipeline using Spark
 
@@ -428,6 +586,7 @@ class Pipeline:
         numparts: Number of partitions to use. If not provided, defaults to the number of records.
                 will be used.
             cache: Whether to cache the RDD. Default is False.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             SparkRecordSet: The record set
@@ -435,13 +594,14 @@ class Pipeline:
         from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
 
         config = ToksearchSparkConfig(sc=sc, numparts=numparts, cache=cache)
-        return self.compute(SparkRecordSet, config=config)
+        return self.compute(SparkRecordSet, config=config, provenance=provenance)
 
     ####################### MULTIPROCESSING  ######################
     def compute_multiprocessing(
         self,
         num_workers: Optional[int] = None,
         batch_size: Union[str, int] = "auto",
+        provenance: Optional[object] = None,
     ) -> MultiprocessingRecordSet:
         """Apply the pipeline using multiprocessing
 
@@ -450,12 +610,13 @@ class Pipeline:
                 If set to None (the default), half the number of CPUs on the machine will be used.
             batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
                 Defaults to "auto".
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             MultiprocessingRecordSet: The record set
         """
         config = MultiprocessingConfig(num_workers=num_workers, batch_size=batch_size)
-        return self.compute(MultiprocessingRecordSet, config=config)
+        return self.compute(MultiprocessingRecordSet, config=config, provenance=provenance)
 
     ####################### Private methods ######################
 
@@ -467,3 +628,63 @@ class Pipeline:
 
     def _append_operation(self, func):
         self._operations.append(func)
+
+    def _source_spec(self) -> SourceSpec:
+        """Describe where this pipeline's records come from."""
+        if self._sql_source is not None:
+            return SourceSpec(
+                kind="sql",
+                query=self._sql_source["query"],
+                params=self._sql_source["params"],
+                hash=sha256_of(self._sql_source),
+            )
+
+        if isinstance(self.parent, RecordSet):
+            return SourceSpec(kind="recordset", count=len(self.parent))
+
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return SourceSpec(kind="unknown")
+
+        shots = sorted(rec.shot for rec in records)
+        return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
+
+    def _run_context(self, recordset_cls, config) -> RunContext:
+        """Derive the full description of the run about to happen."""
+        op_specs = tuple(
+            op.spec() for op in self._operations if hasattr(op, "spec")
+        )
+
+        signals = {}
+        for spec in op_specs:
+            if spec.op == "fetch":
+                signals[spec.detail["name"]] = spec.detail["signal"]
+            elif spec.op == "fetch_dataset":
+                key = f"{spec.detail['ds_name']}.{spec.detail['signame']}"
+                signals[key] = spec.detail["signal"]
+
+        config_dict = {}
+        if config is not None:
+            config_dict = {
+                k: v for k, v in vars(config).items() if not k.startswith("_")
+            }
+
+        return RunContext(
+            source=self._source_spec(),
+            ops=op_specs,
+            signals=signals,
+            backend=BackendSpec(kind=recordset_cls.__name__, config=config_dict),
+            code=capture_code(),
+            device=self._device_hint(signals),
+            parent_run=getattr(self.parent, "run_id", None),
+        )
+
+    @staticmethod
+    def _device_hint(signals) -> Optional[str]:
+        """Best-effort device name, from the modules the signals came from."""
+        modules = {s.get("module", "") or "" for s in signals.values()}
+        if any(m.startswith("toksearch_d3d") for m in modules):
+            return "d3d"
+        if any(m.startswith("toksearch_mast") for m in modules):
+            return "mast"
+        return None
