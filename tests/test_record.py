@@ -82,3 +82,71 @@ class TestRecord(unittest.TestCase):
         # We tried to discard shot, but it won't let us
         # (on purpose)
         self.assertIn("shot", rec)
+
+
+class TestReservedProvenanceFields(unittest.TestCase):
+    """version/snapshot as reserved Record fields.
+
+    These live in a TestCase, not as module-level test_* functions: the
+    suite is collected by unittest.TestLoader().discover() (see
+    tests/testit.py), which is also what the conda recipe runs. Bare
+    functions import cleanly and are then silently never executed.
+    """
+
+    def test_version_and_snapshot_survive_keep(self):
+        """Provenance a routine keep() discards is provenance a reproduction
+        cannot rely on, so these join shot and errors."""
+        r = Record.from_dict({"shot": 165920, "version": 2,
+                              "snapshot": "catalog_x", "peak": 1.5})
+        r.keep(["peak"])
+        self.assertEqual(r["version"], 2)
+        self.assertEqual(r["snapshot"], "catalog_x")
+        self.assertEqual(r["shot"], 165920)
+        self.assertEqual(r["peak"], 1.5)
+
+    def test_version_and_snapshot_cannot_be_deleted(self):
+        """Both routes must refuse. pop() and __delitem__ are separate code
+        paths and only pop() guarded anything before this."""
+        r = Record.from_dict({"shot": 165920, "version": 2})
+        r.pop("version")
+        self.assertEqual(r["version"], 2)
+        with self.assertRaises(InvalidRecordField):
+            del r["version"]
+        self.assertEqual(r["version"], 2)
+        # Attribute deletion is the natural dual of item deletion in a class
+        # whose fields ARE attributes, and it bypassed every guard until it
+        # was closed.
+        with self.assertRaises(InvalidRecordField):
+            del r.version
+        self.assertEqual(r["version"], 2)
+
+    def test_shot_cannot_be_deleted_either(self):
+        """Pre-existing hole: __delitem__ bypassed the guard pop() applies, so
+        `del record["shot"]` succeeded while `record.pop("shot")` did not."""
+        r = Record.from_dict({"shot": 165920})
+        with self.assertRaises(InvalidRecordField):
+            del r["shot"]
+        with self.assertRaises(InvalidRecordField):
+            del r.shot
+        self.assertEqual(r["shot"], 165920)
+
+    def test_pop_returns_the_value_it_removed(self):
+        """Declared `-> Any` with no return, so it yielded None for every
+        key."""
+        r = Record.from_dict({"shot": 165920, "scratch": 42})
+        self.assertEqual(r.pop("scratch"), 42)
+        self.assertNotIn("scratch", r)
+        # NOT `assertIsNone(r.pop("shot"))` alone: the old broken pop had no
+        # return statement, so that passed against it too. Assert the guard's
+        # real effect -- the field survives.
+        self.assertIsNone(r.pop("shot"))
+        self.assertEqual(r["shot"], 165920)
+
+    def test_a_user_may_still_supply_version_and_snapshot(self):
+        """Optional-known, NOT forbidden. Reserving them the way key and
+        errors are reserved would reject the very shot list that seeds a
+        pinned run."""
+        r = Record.from_dict({"shot": 165920, "version": 2,
+                              "snapshot": "catalog_x"})
+        self.assertEqual(r["version"], 2)
+        self.assertEqual(r["snapshot"], "catalog_x")

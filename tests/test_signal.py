@@ -167,3 +167,63 @@ class TestDimensionedSignal(unittest.TestCase):
         res = sig.fetch(shot)
         self.assertGreater(len(res["data"]), 0)
         self.assertFalse("times" in res)
+
+
+class TestSignalReceivesRecord(unittest.TestCase):
+    """The pipeline hands the whole record to a signal.
+
+    A TestCase rather than module-level test_* functions: the suite is
+    collected by unittest.TestLoader().discover() (tests/testit.py), which
+    the conda recipe also runs. Bare functions import fine and are then
+    silently never executed -- so the mutation check behind these tests
+    would have been guarding nothing in CI.
+    """
+
+    def test_a_signal_receives_the_whole_record(self):
+        """The framework PASSES the record without interpreting it, which is
+        what keeps toksearch device-neutral: it never learns what `version`
+        means."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
+
+        seen = {}
+
+        class RecordingSignal(Signal):
+            def gather(self, shot, record=None):
+                seen["shot"] = shot
+                seen["record"] = record
+                return {"data": np.array([1, 2, 3])}
+
+            def cleanup_shot(self, shot):
+                pass
+
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 165920, "version": 2})
+        _SafeFetch("sig", RecordingSignal())(rec)
+
+        self.assertEqual(seen["shot"], 165920)
+        self.assertIsNotNone(seen["record"],
+                             "the pipeline passed only the shot")
+        self.assertEqual(seen["record"]["version"], 2)
+
+    def test_a_signal_that_ignores_the_record_still_works(self):
+        """Nothing requires a signal to want the record; the framework only
+        offers it."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
+
+        class PlainSignal(Signal):
+            def gather(self, shot, record=None):
+                return {"data": np.array([shot])}
+
+            def cleanup_shot(self, shot):
+                pass
+
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 42})
+        _SafeFetch("sig", PlainSignal())(rec)
+        self.assertEqual(rec["sig"]["data"][0], 42)

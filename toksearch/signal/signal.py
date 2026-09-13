@@ -262,7 +262,7 @@ class Signal(ABC):
         return self
 
 
-    def fetch(self, shot: int) -> dict:
+    def fetch(self, shot: int, record=None) -> dict:
         """Fetch the data for a shot
 
         
@@ -281,7 +281,7 @@ class Signal(ABC):
         SignalRegistry().register(self)
 
         with _gc_disabled():
-            results = self.gather(shot)
+            results = self.gather(shot, record=record)
 
 
         if results and (self._callback is not None):
@@ -290,11 +290,11 @@ class Signal(ABC):
         return results
 
     @abstractmethod
-    def gather(self, shot: int) -> dict:
+    def gather(self, shot: int, record=None) -> dict:
         """Collect the data for a shot"""
         pass
 
-    def fetch_as_xarray(self, shot: int) -> xr.DataArray:
+    def fetch_as_xarray(self, shot: int, record=None) -> xr.DataArray:
         """Fetch the data for a shot as an xarray DataArray object
 
         Returns a DataArray object with dimensions specified in the
@@ -308,7 +308,7 @@ class Signal(ABC):
                 with dimensions specified in the dims attribute of the Signal object.
         """
 
-        signal_as_dict = self.fetch(shot)
+        signal_as_dict = self.fetch(shot, record=record)
         d = signal_as_dict["data"]
         coords = {}
         units = signal_as_dict.get("units", {})

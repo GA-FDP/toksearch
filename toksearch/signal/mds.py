@@ -203,7 +203,7 @@ class MdsLocalSignal(Signal):
             "treepath": treepath,
         }
 
-    def gather(self, shot):
+    def gather(self, shot, record=None):
         """Gather the data for a shot
 
         Arguments:
@@ -405,7 +405,7 @@ class MdsSignal(Signal):
         )
 
 
-    def gather(self, shot):
+    def gather(self, shot, record=None):
         """Gather the data for a shot
         
         Arguments:
@@ -582,7 +582,7 @@ class MdsRemoteSignal(Signal):
         return MdsConnectionRegistry().connect(self.server)
 
 
-    def gather(self, shot):
+    def gather(self, shot, record=None):
         """Gather the data for a shot, with one retry on MDSplusERROR.
 
         The mdsip server can leave per-connection state wedged after returning

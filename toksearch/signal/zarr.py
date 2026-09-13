@@ -76,7 +76,7 @@ class ZarrSignal(Signal):
             "fetch_units": self.fetch_units,
         }
 
-    def gather(self, shot):
+    def gather(self, shot, record=None):
         """Gather the data for a shot
 
         Arguments:

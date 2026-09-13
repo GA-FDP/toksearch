@@ -52,7 +52,7 @@ class _SafeFetch(object):
 
     def __call__(self, record):
         try:
-            record[self.name] = self.signal.fetch(record.shot)
+            record[self.name] = self.signal.fetch(record.shot, record=record)
         except Exception as e:
             record.set_error(self.name, e)
             record[self.name] = None
@@ -79,7 +79,7 @@ class _SafeFetchAsXarray(object):
             # Make sure that val is a DataArray
             # doing xr.DataArray(data_array) is
             # basically idempotent
-            val = self.signal.fetch_as_xarray(record.shot)
+            val = self.signal.fetch_as_xarray(record.shot, record=record)
             record[self.ds_name] = xr.merge(
                 [record[self.ds_name], val.to_dataset(name=self.signame)],
                 join="outer",
