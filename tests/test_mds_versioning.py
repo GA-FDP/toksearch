@@ -327,6 +327,16 @@ class PinTest(unittest.TestCase):
         self._patch.start()
         self.addCleanup(self._patch.stop)
 
+        # The CLIENT's catalog root. Deliberately different from the sandbox
+        # path the origin declares -- conflating the two is the bug this
+        # fixture exists to keep out.
+        self._env = mock.patch.dict(
+            "os.environ",
+            {"FDP_STORE_ROOT": "pelican://osg-htc.org:443/fdp-d3d"},
+            clear=False)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
         self.seen = []
         self._open = mock.patch.object(
             MdsConnectionRegistry, "open_tree",
@@ -541,7 +551,7 @@ class TestTheStoreProbeIsCheap(PinTest):
 # composes from the device locator.
 # ---------------------------------------------------------------------------
 
-PELICAN_VIEWS = "pelican://osg-htc.org:443/fdp-d3d/views"
+PELICAN_ROOT = "pelican://osg-htc.org:443/fdp-d3d"
 
 
 class LocalPinTest(unittest.TestCase):
@@ -565,7 +575,7 @@ class LocalPinTest(unittest.TestCase):
         self.addCleanup(self._open.stop)
 
         self._env = mock.patch.dict(
-            "os.environ", {"FDP_VIEWS_ROOT": PELICAN_VIEWS}, clear=False)
+            "os.environ", {"FDP_STORE_ROOT": PELICAN_ROOT}, clear=False)
         self._env.start()
         self.addCleanup(self._env.stop)
 
@@ -609,12 +619,12 @@ class TestLocalPinReachesTheOpen(LocalPinTest):
             self.signal().gather(165920, record=self.record(version=99))
 
     def test_no_store_configured_behaves_as_before(self):
-        with mock.patch.dict("os.environ", {"FDP_VIEWS_ROOT": ""}, clear=False):
+        with mock.patch.dict("os.environ", {"FDP_STORE_ROOT": ""}, clear=False):
             self.gather(self.record())
         self.assertIsNone(self.seen[-1]["version"])
 
     def test_a_pin_with_no_store_configured_raises(self):
-        with mock.patch.dict("os.environ", {"FDP_VIEWS_ROOT": ""}, clear=False):
+        with mock.patch.dict("os.environ", {"FDP_STORE_ROOT": ""}, clear=False):
             with self.assertRaises(self.mds.StoreVersionError):
                 self.signal().gather(165920, record=self.record(version=1))
 
@@ -764,3 +774,58 @@ class TestTheWrapperForwardsTheRecord(unittest.TestCase):
 
         self.assertIsNotNone(seen["record"], "the record was dropped")
         self.assertEqual(seen["record"]["version"], 3)
+
+
+class TestTheTwoRootsAreNotTheSameThing(PinTest):
+    """The catalog root and the views root are different, and conflating them
+    fails in the most misleading way available.
+
+    The catalog is read by THIS client. The tree path is read by whoever opens
+    the tree -- over fdp:// that is the origin's sandbox, whose filesystem the
+    client cannot see. Deriving one from the other made the client try to list
+    the origin's disk: pinned reads then raised for a reason unrelated to the
+    pin, and unpinned reads fell back to archives having resolved nothing.
+
+    That state passes a naive acceptance test, because the controls still
+    "error" and the unpinned cases still "return data". It was found only by
+    reading the error text.
+    """
+
+    def test_the_catalog_is_read_from_the_client_root(self):
+        self.gather(self.record(version=2))
+        # FakeIndex is handed whatever root _store_index was called with; the
+        # patch records the call rather than the value, so assert on the path
+        # that came out instead: it must name the SANDBOX root, not the
+        # client's.
+        self.assertIn("/mnt/beegfs/data/views/shots/", self.seen[-1]["tree_path"])
+
+    def test_a_sandbox_path_is_never_used_as_a_catalog_root(self):
+        from toksearch.signal import mds as mds_mod
+
+        seen_roots = []
+        with mock.patch.object(mds_mod, "_store_index",
+                               side_effect=lambda r: seen_roots.append(r) or self.index):
+            self.gather(self.record(version=2))
+
+        self.assertTrue(seen_roots, "the resolver was never consulted")
+        for root in seen_roots:
+            self.assertFalse(
+                root.startswith("/mnt/beegfs"),
+                f"resolved the catalog from the origin's filesystem: {root}")
+
+    def test_a_views_root_without_a_catalog_root_is_no_store(self):
+        # The origin declares where its store lives, but this client has not
+        # been told where to READ it from. A pin cannot be honoured.
+        from toksearch.signal.mds import _resolve_store_path, StoreVersionError
+        from toksearch.record import Record
+
+        rec = Record.from_dict({"shot": 165920, "version": 2})
+        with self.assertRaises(StoreVersionError):
+            _resolve_store_path("bci", 165920, rec,
+                                "", "/mnt/beegfs/data/views", "", "origin")
+
+        # ... and an unpinned read is unchanged rather than broken.
+        self.assertEqual(
+            _resolve_store_path("bci", 165920, None,
+                                "", "/mnt/beegfs/data/views", "", "origin"),
+            (None, None))
