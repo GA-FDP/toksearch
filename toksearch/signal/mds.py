@@ -473,8 +473,8 @@ class MdsConnectionRegistry(object):
             self._connection_map[server] = conn
         return conn
 
-    def open_tree(self, server, treename, shot):
-        """Open a tree on the server's connection, if it isn't already open.
+    def open_tree(self, server, treename, shot, version=None, tree_path=None):
+        """Open a tree on the server's connection, if the right one isn't open.
 
         Signals sharing a server share a connection, and openTree only sets
         that connection's current tree. Several signals reading one tree --
@@ -485,11 +485,36 @@ class MdsConnectionRegistry(object):
         cannot outlive what it describes: connections are deliberately left
         out of the registry's pickled state, so a marker kept here could
         travel to a process whose connection has none of those trees open.
+
+        ``version`` joins the marker because MDSplus serves an already-open
+        tree regardless of the current path. Keyed by tree and shot alone, a
+        re-read at a different version returns the first version's data with a
+        success status -- no exception, no warning, the wrong bytes behind the
+        right name.
+
+        ``tree_path`` is sent as a session ``setenv`` before the open, and is
+        what selects the version. It must arrive first: the path is re-read on
+        every open of a tree the session does not already hold, but once a
+        tree is open a later setenv is silently ignored.
         """
         connection = self.connect(server)
-        if getattr(connection, _CURRENT_TREE, None) != (treename, shot):
-            connection.openTree(treename, shot)
-            setattr(connection, _CURRENT_TREE, (treename, shot))
+        wanted = (treename, shot, version)
+        current = getattr(connection, _CURRENT_TREE, None)
+        if current == wanted:
+            return connection
+
+        # Only a version change under a tree+shot we already hold needs a
+        # close, and that is the one case a setenv cannot reach on its own.
+        # A different tree or a different shot re-reads the path by itself,
+        # and closing for those would spend a round trip per record.
+        if current is not None and current[:2] == (treename, shot):
+            connection.closeAllTrees()
+
+        if tree_path:
+            connection.get("setenv($)", "default_tree_path=" + tree_path)
+
+        connection.openTree(treename, shot)
+        setattr(connection, _CURRENT_TREE, wanted)
         return connection
 
     def close_all_trees(self, server):
