@@ -691,7 +691,8 @@ class TestMdsTreeRegistry(unittest.TestCase):
 
         tree = registry.open_tree(treename, shot, treepath=treepath)
         self.assertTrue(treename in registry._tree_map)
-        self.assertTrue(shot in registry._tree_map[treename])
+        # Keyed (shot, version); an unversioned open keys on (shot, None).
+        self.assertTrue((shot, None) in registry._tree_map[treename])
         self.assertIsInstance(tree, mds_tree_type)
 
         tree2 = registry.open_tree(treename, shot, treepath=treepath)

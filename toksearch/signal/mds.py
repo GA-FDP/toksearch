@@ -818,8 +818,14 @@ class MdsTreeRegistry(object):
         self.__dict__.update(state)
         self.__dict__["_tree_map"] = {} if existing is None else existing
 
-    def open_tree(self, treename, shot, treepath=None):
-        tree = self._get_tree(treename, shot)
+    def open_tree(self, treename, shot, treepath=None, version=None):
+        """Open a tree, reusing one already open at the same version.
+
+        The version is part of the key because two versions of a shot are
+        different data behind the same name. Keyed by shot alone, a pinned
+        re-read would be handed whatever was opened first, with no error.
+        """
+        tree = self._get_tree(treename, shot, version)
         if tree is None:
 
             if not treepath:
@@ -834,7 +840,7 @@ class MdsTreeRegistry(object):
             if treename not in self._tree_map:
                 self._tree_map[treename] = {}
 
-            self._tree_map[treename][shot] = tree
+            self._tree_map[treename][(shot, version)] = tree
 
         return tree
 
@@ -847,20 +853,33 @@ class MdsTreeRegistry(object):
             tree = mds.Tree(treename, shot, mode="READONLY")
             return tree
 
-    def _get_tree(self, treename, shot):
-        return self._tree_map.get(treename, {}).get(shot, None)
+    def _get_tree(self, treename, shot, version=None):
+        return self._tree_map.get(treename, {}).get((shot, version), None)
 
-    def close_tree(self, treename, shot):
-        tree = self._tree_map.get(treename, {}).pop(shot, None)
-        if tree is not None:
-            try:
-                tree.close()
-            except Exception:
-                pass
+    def close_tree(self, treename, shot, version=None):
+        """Close a shot's tree, or every version of it.
+
+        Lookup is exact but closing sweeps by default, and the asymmetry is
+        deliberate: cleanup_shot wants the shot gone and does not know which
+        versions were opened for it. Passing a version closes only that one.
+        """
+        shots = self._tree_map.get(treename, {})
+        if version is None:
+            keys = [k for k in list(shots.keys()) if k[0] == shot]
+        else:
+            keys = [(shot, version)]
+
+        for key in keys:
+            tree = shots.pop(key, None)
+            if tree is not None:
+                try:
+                    tree.close()
+                except Exception:
+                    pass
 
     def close_all_trees(self):
         for treename, shots_dict in list(self._tree_map.items()):
-            for shot in list(shots_dict.keys()):
-                self.close_tree(treename, shot)
+            for shot, version in list(shots_dict.keys()):
+                self.close_tree(treename, shot, version)
 
 

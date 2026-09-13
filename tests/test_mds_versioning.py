@@ -16,7 +16,13 @@ unittest.TestLoader().discover(), which sees TestCase subclasses only.
 
 import unittest
 
-from toksearch.signal.mds import MdsConnectionRegistry
+from unittest import mock
+
+from toksearch.signal.mds import (
+    MdsConnectionRegistry,
+    MdsTreePath,
+    MdsTreeRegistry,
+)
 
 
 class FakeConnection:
@@ -140,3 +146,100 @@ class TestTheMarkerTracksWhatIsOpen(RegistryTest):
         self.conn.calls.clear()
         self.registry.open_tree("srv", "bci", 165920, version=1, tree_path="/p1")
         self.assertEqual(len(self.opens()), 1)
+
+
+class LocalRegistryTest(unittest.TestCase):
+    """MdsTreeRegistry caches trees by (treename, shot), the same latch the
+    connection registry had: two versions of a shot are different data behind
+    one name, so a pinned re-read was served whatever was opened first.
+    """
+
+    def setUp(self):
+        self.registry = MdsTreeRegistry()
+        self.registry.reset()          # clears _tree_map on the singleton
+        self.opened = []
+
+    def tearDown(self):
+        self.registry.reset()
+
+    def fake_open(self, treename, shot, treepath):
+        self.opened.append((treename, shot, dict(treepath.paths)))
+        return mock.MagicMock()
+
+    def patched(self):
+        return mock.patch.object(
+            self.registry, "_open_tree", side_effect=self.fake_open)
+
+
+class TestLocalVersionedOpens(LocalRegistryTest):
+    def test_a_changed_version_reopens_the_tree(self):
+        with self.patched():
+            self.registry.open_tree(
+                "bci", 165920, treepath=MdsTreePath(bci="/v1"), version=1)
+            self.registry.open_tree(
+                "bci", 165920, treepath=MdsTreePath(bci="/v2"), version=2)
+
+        self.assertEqual(len(self.opened), 2)
+        self.assertEqual(self.opened[0][2]["bci"], "/v1")
+        self.assertEqual(self.opened[1][2]["bci"], "/v2")
+
+    def test_the_same_version_is_served_from_cache(self):
+        with self.patched():
+            self.registry.open_tree(
+                "bci", 165920, treepath=MdsTreePath(bci="/v1"), version=1)
+            self.registry.open_tree(
+                "bci", 165920, treepath=MdsTreePath(bci="/v1"), version=1)
+        self.assertEqual(len(self.opened), 1)
+
+    def test_versions_of_one_shot_coexist(self):
+        with self.patched():
+            a = self.registry.open_tree("bci", 165920, version=1)
+            b = self.registry.open_tree("bci", 165920, version=2)
+            again = self.registry.open_tree("bci", 165920, version=1)
+        self.assertIsNot(a, b)
+        self.assertIs(a, again)
+
+
+class TestLocalUnversionedCallersAreUnaffected(LocalRegistryTest):
+    def test_no_version_still_caches(self):
+        with self.patched():
+            self.registry.open_tree("bci", 165920)
+            self.registry.open_tree("bci", 165920)
+        self.assertEqual(len(self.opened), 1)
+
+    def test_get_tree_still_takes_two_arguments(self):
+        # tests/test_mds.py calls it this way, and so may anything else.
+        self.assertIsNone(self.registry._get_tree("blah", 123))
+
+
+class TestLocalClosing(LocalRegistryTest):
+    def test_closing_without_a_version_sweeps_every_version(self):
+        # cleanup_shot wants the shot gone, and does not know which versions
+        # were opened for it. Lookup is exact; closing defaults to sweeping.
+        with self.patched():
+            self.registry.open_tree("bci", 165920, version=1)
+            self.registry.open_tree("bci", 165920, version=2)
+            self.registry.close_tree("bci", 165920)
+
+            self.registry.open_tree("bci", 165920, version=1)
+        self.assertEqual(len(self.opened), 3)
+
+    def test_closing_one_version_leaves_the_others(self):
+        with self.patched():
+            self.registry.open_tree("bci", 165920, version=1)
+            self.registry.open_tree("bci", 165920, version=2)
+            self.registry.close_tree("bci", 165920, version=2)
+
+            self.registry.open_tree("bci", 165920, version=1)   # still cached
+            self.registry.open_tree("bci", 165920, version=2)   # reopened
+        self.assertEqual(len(self.opened), 3)
+
+    def test_close_all_trees_handles_versioned_keys(self):
+        # The keys are tuples now; iterating them as bare shots would raise.
+        with self.patched():
+            self.registry.open_tree("bci", 165920, version=1)
+            self.registry.open_tree("bes", 165921, version=2)
+            self.registry.close_all_trees()
+
+            self.registry.open_tree("bci", 165920, version=1)
+        self.assertEqual(len(self.opened), 3)
