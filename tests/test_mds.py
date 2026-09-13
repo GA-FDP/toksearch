@@ -30,6 +30,7 @@ from toksearch.signal.mds import (
     _BatchedGatherFailed,
     MdsConnectionRegistry,
     MdsTreeRegistry,
+    _VIEWS_ROOT,
     MdsTreePath,
     MdsLocalSignal,
     MdsRemoteSignal,
@@ -864,6 +865,12 @@ class TestMdsRemoteBatchedGather(unittest.TestCase):
         # _do_gather asks the registry for its connection, so that is where a
         # stand-in has to go.
         MdsConnectionRegistry()._connection_map[sig.server] = connection
+        # Mark the store probe as already done, with no store found. These
+        # tests measure the per-gather cost of fetching expressions; the probe
+        # is a one-time per-connection cost and would otherwise be counted as
+        # though it recurred. That it happens only once is asserted in
+        # test_mds_versioning.TestTheStoreProbeIsCheap.
+        setattr(connection, _VIEWS_ROOT, ("", ""))
         return connection
 
     def test_plan_covers_data_then_dims_then_units(self):

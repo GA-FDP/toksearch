@@ -243,3 +243,424 @@ class TestLocalClosing(LocalRegistryTest):
 
             self.registry.open_tree("bci", 165920, version=1)
         self.assertEqual(len(self.opened), 3)
+
+
+# ---------------------------------------------------------------------------
+# Carrying a pin from the record to the open.
+#
+# These assert on the version actually used, never on the absence of an
+# error. The toksearch_d3d>=0.13.0 / toksearch>=2.12.0 floor is unguarded: a
+# dropped pin returns unversioned data with errors == {}, so "no error" is
+# evidence of nothing at all.
+# ---------------------------------------------------------------------------
+
+VIEWS = "/mnt/beegfs/data/views"
+
+
+class FakeLookup:
+    def __init__(self, version=None, snapshot="catalog_X", miss="NoMiss",
+                 detail=""):
+        self.found = version is not None
+        self.version = version or 0
+        self.snapshot = snapshot
+        self.miss = miss
+        self.detail = detail
+
+
+class FakeIndex:
+    """Stands in for ptdata.StoreIndex, recording what it was asked."""
+
+    def __init__(self, shots=None, shards=None):
+        self.shots = shots if shots is not None else {165920: 1}
+        self.shards = shards if shards is not None else {"bci-0": 4}
+        self.calls = []
+
+    def resolve_version(self, shot, version=None, snapshot=None):
+        self.calls.append(("shot", shot, version, snapshot))
+        if snapshot == "bogus":
+            return FakeLookup(miss="SnapshotMissing", detail="no such snapshot")
+        if version is not None:
+            if version in (1, 2):
+                return FakeLookup(version=version)
+            return FakeLookup(miss="VersionMissing", detail="never minted")
+        got = self.shots.get(shot)
+        return FakeLookup(version=got) if got else FakeLookup(
+            miss="ShotNotInCatalog")
+
+    def resolve_shared_version(self, shard, version=None, snapshot=None):
+        self.calls.append(("shard", shard, version, snapshot))
+        got = self.shards.get(shard)
+        return FakeLookup(version=got) if got else FakeLookup(
+            miss="ShotNotInCatalog")
+
+
+class EnvConnection(FakeConnection):
+    """A connection whose sandbox declares a views root."""
+
+    def __init__(self, views_root=VIEWS, archives=""):
+        super().__init__()
+        self.views_root = views_root
+        self.archives = archives
+
+    def get(self, expr, *args):
+        self.calls.append(("get", expr, args))
+        if "fdp_views_root" in expr:
+            return self.views_root
+        if "default_tree_path" in expr:
+            return self.archives
+        return ""
+
+
+class PinTest(unittest.TestCase):
+    def setUp(self):
+        from toksearch.signal import mds as mds_mod
+
+        self.mds = mds_mod
+        self.registry = MdsConnectionRegistry()
+        self.registry._connection_map.clear()
+        self.conn = EnvConnection()
+        self.registry._connection_map["fdp://host/mdsip"] = self.conn
+
+        self.index = FakeIndex()
+        self._patch = mock.patch.object(
+            mds_mod, "_store_index", return_value=self.index)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+        self.seen = []
+        self._open = mock.patch.object(
+            MdsConnectionRegistry, "open_tree",
+            side_effect=self.capture_open)
+        self._open.start()
+        self.addCleanup(self._open.stop)
+
+    def tearDown(self):
+        self.registry._connection_map.clear()
+
+    def capture_open(self, server, treename, shot, version=None, tree_path=None):
+        self.seen.append(dict(server=server, treename=treename, shot=shot,
+                              version=version, tree_path=tree_path))
+        raise RuntimeError("stop here: the open itself is not under test")
+
+    def signal(self, treename="bci"):
+        return self.mds.MdsRemoteSignal(
+            r"\bci::top", treename, server="fdp://host/mdsip")
+
+    def gather(self, record):
+        with self.assertRaises(Exception):
+            self.signal().gather(165920, record=record)
+
+    def record(self, **kw):
+        from toksearch.record import Record
+        return Record.from_dict(dict(shot=165920, **kw))
+
+
+class TestThePinReachesTheOpen(PinTest):
+    def test_a_records_version_selects_the_version_and_path(self):
+        self.gather(self.record(version=2))
+        self.assertEqual(self.seen[-1]["version"], 2)
+        self.assertIn("/165920/v2/", self.seen[-1]["tree_path"])
+
+    def test_an_unpinned_record_resolves_the_latest(self):
+        self.gather(self.record())
+        self.assertEqual(self.seen[-1]["version"], 1)
+        self.assertIn("/165920/v1/", self.seen[-1]["tree_path"])
+
+    def test_a_pinned_path_carries_no_archives_entry(self):
+        self.gather(self.record(version=2))
+        self.assertNotIn("archives", self.seen[-1]["tree_path"])
+
+    def test_the_shard_entry_is_appended(self):
+        # bci-0 holds bci's model tree, so it belongs on the search path even
+        # for an ordinary per-shot tree.
+        self.gather(self.record(version=2))
+        self.assertIn("/shared/bci-0/v4/", self.seen[-1]["tree_path"])
+
+    def test_the_shots_pin_does_not_apply_to_the_shard(self):
+        # A shard has its own version chain. Passing the shot's version here
+        # would pin an unrelated artifact to a number that means nothing for
+        # it -- only the snapshot is shared.
+        self.gather(self.record(version=2, snapshot="catalog_Y"))
+        shard_calls = [c for c in self.index.calls if c[0] == "shard"]
+        self.assertTrue(shard_calls)
+        self.assertIsNone(shard_calls[-1][2])            # version
+        self.assertEqual(shard_calls[-1][3], "catalog_Y")  # snapshot
+
+
+class TestAnUnsatisfiablePinFailsLoudly(PinTest):
+    def test_a_version_never_minted_raises(self):
+        with self.assertRaises(self.mds.StoreVersionError):
+            self.signal().gather(165920, record=self.record(version=99))
+
+    def test_an_unknown_snapshot_raises(self):
+        with self.assertRaises(self.mds.StoreVersionError):
+            self.signal().gather(165920, record=self.record(snapshot="bogus"))
+
+    def test_a_failed_pin_never_opens_anything(self):
+        # The failure that matters is not raising late -- it is opening an
+        # unpinned tree and returning its data as though it were the pin.
+        try:
+            self.signal().gather(165920, record=self.record(version=99))
+        except Exception:
+            pass
+        self.assertEqual(self.seen, [])
+
+    def test_a_pin_against_an_origin_with_no_store_raises(self):
+        self.conn.views_root = ""
+        with self.assertRaises(self.mds.StoreVersionError):
+            self.signal().gather(165920, record=self.record(version=1))
+
+
+class TestOriginsWithoutAStoreAreUnchanged(PinTest):
+    def test_an_unpinned_read_with_no_store_opens_as_before(self):
+        self.conn.views_root = ""
+        self.gather(self.record())
+        self.assertIsNone(self.seen[-1]["version"])
+        self.assertIsNone(self.seen[-1]["tree_path"])
+
+    def test_no_record_at_all_opens_as_before(self):
+        self.conn.views_root = ""
+        with self.assertRaises(Exception):
+            self.signal().gather(165920)
+        self.assertIsNone(self.seen[-1]["version"])
+
+    def test_a_shot_absent_from_the_catalog_is_not_an_error(self):
+        # Unpinned and unknown: fall back rather than fail. A store that has
+        # not minted a shot yet must not break reads that worked before.
+        self.gather(self.record())
+        self.seen.clear()
+        with self.assertRaises(Exception):
+            self.signal().gather(999999, record=None)
+        self.assertIsNone(self.seen[-1]["version"])
+        self.assertIsNone(self.seen[-1]["tree_path"])
+
+
+class TestTheRetryPathCarriesTheRecord(PinTest):
+    def test_the_retry_after_an_mdsplus_error_keeps_the_pin(self):
+        # gather() retries once on MDSplusERROR against a fresh connection.
+        # Miss the record there and a pin is dropped exactly when a
+        # connection has been re-dialled -- the hardest case to notice.
+        calls = {"n": 0}
+
+        def fail_once_then_capture(server, treename, shot, version=None,
+                                   tree_path=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise self.mds.MDSplusERROR("%MDSPLUS-E-ERROR, Error")
+            self.seen.append(dict(version=version, tree_path=tree_path))
+            raise RuntimeError("stop")
+
+        self._open.stop()
+        with mock.patch.object(MdsConnectionRegistry, "open_tree",
+                               side_effect=fail_once_then_capture):
+            with mock.patch.object(MdsConnectionRegistry, "disconnect"):
+                self.registry._connection_map["fdp://host/mdsip"] = self.conn
+                with self.assertRaises(Exception):
+                    self.signal().gather(165920, record=self.record(version=2))
+        self._open.start()
+
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(self.seen[-1]["version"], 2)
+
+
+class TestTheArchivesFallback(PinTest):
+    """A setenv replaces the whole search path, so archives has to be carried.
+
+    Without this, an unpinned read of a tree the store has not absorbed yet
+    would start failing the moment its shot gained a version -- a regression
+    caused entirely by resolving successfully.
+    """
+
+    ARCHIVES = "/mnt/beegfs/data/archives/mdsplus/codes/~t;/x/archives/shots/~t"
+
+    def setUp(self):
+        super().setUp()
+        self.conn.archives = self.ARCHIVES
+
+    def test_an_unpinned_read_keeps_the_archives_entries(self):
+        self.gather(self.record())
+        self.assertIn("/archives/", self.seen[-1]["tree_path"])
+
+    def test_a_pinned_read_drops_them(self):
+        self.gather(self.record(version=2))
+        self.assertNotIn("/archives/", self.seen[-1]["tree_path"])
+
+    def test_the_store_entries_come_first_either_way(self):
+        # MDSplus walks the path in order, so the store must be consulted
+        # before archives or an unpinned read answers from the old tier.
+        self.gather(self.record())
+        path = self.seen[-1]["tree_path"]
+        self.assertLess(path.index("/views/"), path.index("/archives/"))
+
+
+class TestTheStoreProbeIsCheap(PinTest):
+    """Discovering whether an origin has a store costs round trips, so it has
+    to happen once per connection rather than once per read.
+
+    A pipeline fetches several signals per shot across thousands of shots on
+    one connection. Re-probing per gather would add two round trips to every
+    one of them, which is the kind of cost that only shows up in production.
+    """
+
+    def probes(self):
+        return [c for c in self.conn.calls
+                if c[0] == "get" and "getenv" in str(c[1])]
+
+    def test_the_probe_happens_once_across_many_reads(self):
+        for shot in (165920, 165920, 165921):
+            try:
+                self.signal().gather(shot, record=None)
+            except Exception:
+                pass
+        # Two variables, read together, exactly once.
+        self.assertEqual(len(self.probes()), 2)
+
+    def test_a_fresh_connection_probes_again(self):
+        try:
+            self.signal().gather(165920, record=None)
+        except Exception:
+            pass
+        before = len(self.probes())
+
+        fresh = EnvConnection()
+        self.registry._connection_map["fdp://host/mdsip"] = fresh
+        try:
+            self.signal().gather(165920, record=None)
+        except Exception:
+            pass
+
+        self.assertEqual(before, 2)
+        self.assertEqual(
+            len([c for c in fresh.calls
+                 if c[0] == "get" and "getenv" in str(c[1])]), 2)
+
+
+# ---------------------------------------------------------------------------
+# The pelican:// half. A local read has no session, so there is nothing to
+# getenv -- the store root comes from the environment, which `fdp env`
+# composes from the device locator.
+# ---------------------------------------------------------------------------
+
+PELICAN_VIEWS = "pelican://osg-htc.org:443/fdp-d3d/views"
+
+
+class LocalPinTest(unittest.TestCase):
+    def setUp(self):
+        from toksearch.signal import mds as mds_mod
+
+        self.mds = mds_mod
+        self.registry = MdsTreeRegistry()
+        self.registry.reset()
+
+        self.index = FakeIndex()
+        self._patch = mock.patch.object(
+            mds_mod, "_store_index", return_value=self.index)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+        self.seen = []
+        self._open = mock.patch.object(
+            MdsTreeRegistry, "open_tree", side_effect=self.capture_open)
+        self._open.start()
+        self.addCleanup(self._open.stop)
+
+        self._env = mock.patch.dict(
+            "os.environ", {"FDP_VIEWS_ROOT": PELICAN_VIEWS}, clear=False)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def tearDown(self):
+        self.registry.reset()
+
+    def capture_open(self, treename, shot, treepath=None, version=None):
+        paths = dict(treepath.paths) if treepath is not None else {}
+        self.seen.append(dict(treename=treename, shot=shot, version=version,
+                              paths=paths))
+        raise RuntimeError("stop here: the open itself is not under test")
+
+    def signal(self, treename="bci"):
+        return self.mds.MdsLocalSignal(r"\bci::top", treename)
+
+    def record(self, **kw):
+        from toksearch.record import Record
+        return Record.from_dict(dict(shot=165920, **kw))
+
+    def gather(self, record):
+        with self.assertRaises(Exception):
+            self.signal().gather(165920, record=record)
+
+    def path(self):
+        return self.seen[-1]["paths"].get("bci", "")
+
+
+class TestLocalPinReachesTheOpen(LocalPinTest):
+    def test_a_records_version_selects_the_version_and_path(self):
+        self.gather(self.record(version=2))
+        self.assertEqual(self.seen[-1]["version"], 2)
+        self.assertIn("/165920/v2/", self.path())
+
+    def test_the_path_is_a_pelican_url(self):
+        # Path() collapses '//' in a scheme, so a mangled root shows up here.
+        self.gather(self.record(version=2))
+        self.assertTrue(self.path().startswith("pelican://osg-htc.org:443/"))
+
+    def test_an_unsatisfiable_pin_raises(self):
+        with self.assertRaises(self.mds.StoreVersionError):
+            self.signal().gather(165920, record=self.record(version=99))
+
+    def test_no_store_configured_behaves_as_before(self):
+        with mock.patch.dict("os.environ", {"FDP_VIEWS_ROOT": ""}, clear=False):
+            self.gather(self.record())
+        self.assertIsNone(self.seen[-1]["version"])
+
+    def test_a_pin_with_no_store_configured_raises(self):
+        with mock.patch.dict("os.environ", {"FDP_VIEWS_ROOT": ""}, clear=False):
+            with self.assertRaises(self.mds.StoreVersionError):
+                self.signal().gather(165920, record=self.record(version=1))
+
+    def test_an_unpinned_read_keeps_the_ambient_archives_path(self):
+        # Setting <tree>_path overrides default_tree_path for that tree, so
+        # the ambient value has to be carried or the fallback disappears.
+        with mock.patch.dict(
+                "os.environ",
+                {"default_tree_path": "/x/archives/codes/~t"}, clear=False):
+            self.gather(self.record())
+        self.assertIn("/archives/", self.path())
+
+    def test_a_pinned_read_drops_the_ambient_archives_path(self):
+        with mock.patch.dict(
+                "os.environ",
+                {"default_tree_path": "/x/archives/codes/~t"}, clear=False):
+            self.gather(self.record(version=2))
+        self.assertNotIn("/archives/", self.path())
+
+
+class TestAMismatchedPtdataSaysSo(unittest.TestCase):
+    """toksearch does not depend on ptdata, so the pair can be mismatched.
+
+    Store support needs ptdata >= 2.7.0 for StoreIndex. Without a named
+    error, a user on an older ptdata sees a bare ImportError from a lazy
+    import three frames down and has nothing to act on.
+    """
+
+    def setUp(self):
+        from toksearch.signal import mds as mds_mod
+        self.mds = mds_mod
+        mds_mod._STORE_INDEX.clear()
+        self.addCleanup(mds_mod._STORE_INDEX.clear)
+
+    def test_a_missing_store_index_names_the_version_needed(self):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_store_index(name, *args, **kw):
+            if name == "ptdata":
+                raise ImportError("cannot import name 'StoreIndex'")
+            return real_import(name, *args, **kw)
+
+        with mock.patch.object(builtins, "__import__", no_store_index):
+            with self.assertRaises(self.mds.StoreVersionError) as caught:
+                self.mds._store_index("/some/root")
+
+        self.assertIn("2.7.0", str(caught.exception))
