@@ -169,29 +169,35 @@ class TestDimensionedSignal(unittest.TestCase):
         self.assertFalse("times" in res)
 
 
-class TestSignalReceivesRecord(unittest.TestCase):
-    """The pipeline hands the whole record to a signal.
+class TestSignalReceivesThePin(unittest.TestCase):
+    """The pipeline extracts the pin; the signal never sees a Record.
+
+    A Record is the pipeline's row. A Signal is a strategy for fetching one
+    shot's data, and making it destructure a pipeline type to learn two
+    values inverts the layering -- it also, in practice, let a one-line
+    delegation drop a version pin unnoticed, because a parameter called
+    `record` reads as generic plumbing.
+
+    The names are not new knowledge for toksearch: `version` and `snapshot`
+    are reserved Record fields in core, so the framework already knew them.
+    What changed is only where the destructuring happens -- in the pipeline,
+    which owns the type, rather than in every signal.
 
     A TestCase rather than module-level test_* functions: the suite is
     collected by unittest.TestLoader().discover() (tests/testit.py), which
     the conda recipe also runs. Bare functions import fine and are then
-    silently never executed -- so the mutation check behind these tests
-    would have been guarding nothing in CI.
+    silently never executed.
     """
 
-    def test_a_signal_receives_the_whole_record(self):
-        """The framework PASSES the record without interpreting it, which is
-        what keeps toksearch device-neutral: it never learns what `version`
-        means."""
+    def test_the_pipeline_extracts_the_pin_and_passes_it_on(self):
         from toksearch.pipeline.pipeline_funcs import _SafeFetch
         from toksearch.record import Record
 
         seen = {}
 
         class RecordingSignal(Signal):
-            def gather(self, shot, record=None):
-                seen["shot"] = shot
-                seen["record"] = record
+            def gather(self, shot, version=None, snapshot=None):
+                seen.update(shot=shot, version=version, snapshot=snapshot)
                 return {"data": np.array([1, 2, 3])}
 
             def cleanup_shot(self, shot):
@@ -200,22 +206,46 @@ class TestSignalReceivesRecord(unittest.TestCase):
             def cleanup(self):
                 pass
 
-        rec = Record.from_dict({"shot": 165920, "version": 2})
+        rec = Record.from_dict(
+            {"shot": 165920, "version": 2, "snapshot": "catalog_X"})
         _SafeFetch("sig", RecordingSignal())(rec)
 
         self.assertEqual(seen["shot"], 165920)
-        self.assertIsNotNone(seen["record"],
-                             "the pipeline passed only the shot")
-        self.assertEqual(seen["record"]["version"], 2)
+        self.assertEqual(seen["version"], 2, "the pipeline dropped the pin")
+        self.assertEqual(seen["snapshot"], "catalog_X")
 
-    def test_a_signal_that_ignores_the_record_still_works(self):
-        """Nothing requires a signal to want the record; the framework only
-        offers it."""
+    def test_no_record_object_reaches_the_signal(self):
         from toksearch.pipeline.pipeline_funcs import _SafeFetch
         from toksearch.record import Record
 
+        seen = {}
+
+        class NosySignal(Signal):
+            def gather(self, shot, version=None, snapshot=None):
+                seen["args"] = (shot, version, snapshot)
+                return {"data": np.array([1])}
+
+            def cleanup_shot(self, shot):
+                pass
+
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 165920, "version": 2})
+        _SafeFetch("sig", NosySignal())(rec)
+
+        for value in seen["args"]:
+            self.assertNotIsInstance(value, Record)
+
+    def test_an_unpinned_record_passes_no_pin(self):
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
+
+        seen = {}
+
         class PlainSignal(Signal):
-            def gather(self, shot, record=None):
+            def gather(self, shot, version=None, snapshot=None):
+                seen.update(version=version, snapshot=snapshot)
                 return {"data": np.array([shot])}
 
             def cleanup_shot(self, shot):
@@ -226,4 +256,50 @@ class TestSignalReceivesRecord(unittest.TestCase):
 
         rec = Record.from_dict({"shot": 42})
         _SafeFetch("sig", PlainSignal())(rec)
+
         self.assertEqual(rec["sig"]["data"][0], 42)
+        self.assertIsNone(seen["version"])
+        self.assertIsNone(seen["snapshot"])
+
+    def test_a_signal_predating_pinning_still_runs(self):
+        """toksearch_mast 0.1.0's shape. It must fetch, not TypeError."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
+
+        class LegacySignal(Signal):
+            def gather(self, shot):
+                return {"data": np.array([shot])}
+
+            def cleanup_shot(self, shot):
+                pass
+
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 42})
+        _SafeFetch("sig", LegacySignal())(rec)
+
+        self.assertEqual(rec.get("errors", {}), {})
+        self.assertEqual(rec["sig"]["data"][0], 42)
+
+    def test_pinning_a_signal_that_cannot_honour_it_is_an_error(self):
+        """Recorded as an error on the record rather than ignored."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
+
+        class LegacySignal(Signal):
+            def gather(self, shot):
+                return {"data": np.array([shot])}
+
+            def cleanup_shot(self, shot):
+                pass
+
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 42, "version": 2})
+        _SafeFetch("sig", LegacySignal())(rec)
+
+        self.assertIn("sig", rec["errors"])
+
+

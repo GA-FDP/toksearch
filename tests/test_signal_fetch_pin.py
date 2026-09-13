@@ -1,38 +1,24 @@
-"""B6: naming a version when fetching one shot directly.
+"""Naming a version when fetching, and what happens to signals that cannot.
 
-A pipeline pins per shot, by putting version/snapshot on the record --
-different shots can name different versions, which is the whole reason the
-pin lives there. But a signal fetched on its own, outside a pipeline, has no
-record, and building one by hand to read a single shot is silly.
+A pin is a locating coordinate -- which bytes to read -- so it travels as two
+plain values, version and snapshot. Signals never see a Record: the pipeline
+owns that type and extracts from it, which keeps a data-fetching strategy
+from having to know the shape of the pipeline's rows.
 
-So fetch grows the kwargs. It builds the record internally and hands it to
-gather, so the pin travels the one path that is already proven and gather's
-signature -- which every Signal subclass overrides -- does not change.
-
-Deliberately NOT on the constructor: a version is per-shot, so a signal-wide
-version= would pin every shot to its own Nth mint, which is almost never
-what anyone means.
+The compatibility matrix below is the load-bearing part. toksearch_mast 0.1.0
+declares gather(self, shot), and an earlier attempt at threading the pin
+through as a record broke it outright with a TypeError -- in a blessed set,
+undetected, because toksearch's tests do not exercise MAST.
 
 TestCase methods: tests/testit.py collects by unittest discovery.
 """
 
 import unittest
 
-from toksearch.record import Record
 from toksearch.signal.signal import Signal
 
 
-class RecordingSignal(Signal):
-    """Captures whatever record reaches gather."""
-
-    def __init__(self):
-        super().__init__()
-        self.seen = []
-
-    def gather(self, shot, record=None):
-        self.seen.append(record)
-        return {"data": [1, 2, 3]}
-
+class _Base(Signal):
     def cleanup_shot(self, shot):
         pass
 
@@ -40,79 +26,123 @@ class RecordingSignal(Signal):
         pass
 
     def cleanup_shot_key(self):
-        return ("recording", id(self))
+        return (type(self).__name__, id(self))
 
 
-class TestFetchTakesAPin(unittest.TestCase):
+class LegacySignal(_Base):
+    """Exactly the shape toksearch_mast 0.1.0 ships."""
+
+    def gather(self, shot):
+        return {"data": [1, 2, 3]}
+
+
+class InterimSignal(_Base):
+    """The record= shape toksearch_d3d 0.13.1 ships."""
+
+    def gather(self, shot, record=None):
+        return {"data": [4, 5]}
+
+
+class ModernSignal(_Base):
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+
+    def gather(self, shot, version=None, snapshot=None):
+        self.seen.append((shot, version, snapshot))
+        return {"data": [1]}
+
+
+class KwargsSignal(_Base):
+    """Accepts anything. A signal delegating to something else may do this."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+
+    def gather(self, shot, **kw):
+        self.seen.append(kw)
+        return {"data": [1]}
+
+
+class TestThePinReachesGather(unittest.TestCase):
     def setUp(self):
-        self.sig = RecordingSignal()
+        self.sig = ModernSignal()
 
-    def pin_seen(self):
-        rec = self.sig.seen[-1]
-        if rec is None:
-            return (None, None)
-        return rec.get("version", None), rec.get("snapshot", None)
-
-    def test_a_version_reaches_gather(self):
+    def test_a_version(self):
         self.sig.fetch(165920, version=2)
-        self.assertEqual(self.pin_seen(), (2, None))
+        self.assertEqual(self.sig.seen[-1], (165920, 2, None))
 
-    def test_a_snapshot_reaches_gather(self):
-        self.sig.fetch(165920, snapshot="catalog_20260907T232802Z")
-        self.assertEqual(self.pin_seen(), (None, "catalog_20260907T232802Z"))
+    def test_a_snapshot(self):
+        self.sig.fetch(165920, snapshot="catalog_X")
+        self.assertEqual(self.sig.seen[-1], (165920, None, "catalog_X"))
 
-    def test_both_together_reach_gather(self):
+    def test_both(self):
         self.sig.fetch(165920, version=3, snapshot="catalog_X")
-        self.assertEqual(self.pin_seen(), (3, "catalog_X"))
+        self.assertEqual(self.sig.seen[-1], (165920, 3, "catalog_X"))
 
-    def test_the_synthesized_record_carries_the_shot(self):
-        # Signals are entitled to read record.shot; a record without one is
-        # not a record a pipeline would ever have produced.
-        self.sig.fetch(165920, version=2)
-        self.assertEqual(self.sig.seen[-1].shot, 165920)
-
-    def test_it_is_a_real_record_not_a_dict(self):
-        self.sig.fetch(165920, version=2)
-        self.assertIsInstance(self.sig.seen[-1], Record)
-
-    def test_no_pin_passes_no_record(self):
-        # Unchanged behaviour: a bare fetch is exactly what it always was.
+    def test_no_pin_passes_none(self):
         self.sig.fetch(165920)
-        self.assertIsNone(self.sig.seen[-1])
+        self.assertEqual(self.sig.seen[-1], (165920, None, None))
 
     def test_a_version_of_zero_is_still_a_pin(self):
-        # Falsy but meaningful -- `if version:` would drop it.
+        # Falsy but meaningful; `if version:` would drop it.
         self.sig.fetch(165920, version=0)
-        self.assertEqual(self.pin_seen(), (0, None))
+        self.assertEqual(self.sig.seen[-1], (165920, 0, None))
+
+    def test_no_record_object_is_involved(self):
+        # The point of the change: a signal never has to know what a Record
+        # is in order to be told which version to read.
+        self.sig.fetch(165920, version=2)
+        for value in self.sig.seen[-1]:
+            self.assertNotIsInstance(value, object.__class__)
+        self.assertEqual(self.sig.seen[-1][1], 2)
 
 
-class TestAPipelineRecordStillWins(unittest.TestCase):
-    def setUp(self):
-        self.sig = RecordingSignal()
+class TestSignalsThatPredatePinning(unittest.TestCase):
+    """Fetching must keep working; being ASKED to pin must not be ignored."""
 
-    def test_a_record_passes_through_untouched(self):
-        rec = Record.from_dict({"shot": 165920, "version": 5})
-        self.sig.fetch(165920, record=rec)
-        self.assertIs(self.sig.seen[-1], rec)
+    def test_a_legacy_signal_still_fetches(self):
+        # The regression this fixes: this raised TypeError in 2.12.0-2.13.2.
+        self.assertEqual(LegacySignal().fetch(165920), {"data": [1, 2, 3]})
 
-    def test_a_record_and_a_pin_together_is_an_error(self):
-        # The pipeline supplies records and never supplies these kwargs; a
-        # direct caller supplies the kwargs and has no record. Both at once
-        # is ambiguous about which pin is authoritative, and this project
-        # does not answer that kind of question by picking one quietly.
-        rec = Record.from_dict({"shot": 165920, "version": 5})
+    def test_a_legacy_signal_refuses_a_pin(self):
         with self.assertRaises(ValueError) as caught:
-            self.sig.fetch(165920, record=rec, version=2)
-        self.assertIn("not both", str(caught.exception).lower())
+            LegacySignal().fetch(165920, version=2)
+        msg = str(caught.exception)
+        self.assertIn("version", msg)
+        # The error has to say how to fix it, not merely that it failed.
+        self.assertIn("gather(self, shot, version=None, snapshot=None)", msg)
 
-    def test_a_record_with_no_pin_plus_a_pin_is_also_an_error(self):
-        # Still ambiguous: the record is the pipeline's, and silently
-        # decorating it would mutate state the caller shares.
-        rec = Record.from_dict({"shot": 165920})
+    def test_the_interim_record_shape_still_fetches(self):
+        self.assertEqual(InterimSignal().fetch(165920), {"data": [4, 5]})
+
+    def test_the_interim_record_shape_refuses_a_pin(self):
+        # It would accept the CALL and quietly ignore the pin, which is the
+        # failure mode pinning exists to prevent. Refuse instead.
         with self.assertRaises(ValueError):
-            self.sig.fetch(165920, record=rec, snapshot="catalog_X")
+            InterimSignal().fetch(165920, version=2)
 
-    def test_the_callers_record_is_never_mutated(self):
-        rec = Record.from_dict({"shot": 165920})
-        self.sig.fetch(165920, record=rec)
-        self.assertNotIn("version", rec.keys())
+    def test_a_signal_taking_kwargs_is_trusted(self):
+        sig = KwargsSignal()
+        sig.fetch(165920, version=2)
+        self.assertEqual(sig.seen[-1], {"version": 2, "snapshot": None})
+
+
+class TestTheCapabilityCheck(unittest.TestCase):
+    def test_each_class_answers_for_itself(self):
+        self.assertFalse(LegacySignal._gather_accepts_pin())
+        self.assertFalse(InterimSignal._gather_accepts_pin())
+        self.assertTrue(ModernSignal._gather_accepts_pin())
+        self.assertTrue(KwargsSignal._gather_accepts_pin())
+
+    def test_a_subclass_does_not_inherit_its_parents_answer(self):
+        # Cached in the class's own __dict__, so a subclass that overrides
+        # gather is judged on its own signature.
+        class Upgraded(LegacySignal):
+            def gather(self, shot, version=None, snapshot=None):
+                return {"data": [9]}
+
+        self.assertFalse(LegacySignal._gather_accepts_pin())
+        self.assertTrue(Upgraded._gather_accepts_pin())
+        self.assertEqual(Upgraded().fetch(165920, version=2), {"data": [9]})

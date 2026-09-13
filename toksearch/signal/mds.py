@@ -139,18 +139,8 @@ def _store_index(store_root):
     return index
 
 
-def _pin_from_record(record):
-    """The (version, snapshot) a record pins, if any.
-
-    Record.get requires a default, unlike dict.get.
-    """
-    if record is None:
-        return None, None
-    return record.get("version", None), record.get("snapshot", None)
-
-
-def _resolve_store_path(treename, shot, record, catalog_root, views_root,
-                        fallback, subject):
+def _resolve_store_path(treename, shot, version, snapshot, catalog_root,
+                        views_root, fallback, subject):
     """The version to open, and the search path that selects it.
 
     Takes TWO roots, and they are genuinely different things:
@@ -173,7 +163,6 @@ def _resolve_store_path(treename, shot, record, catalog_root, views_root,
     means. Returns ``(None, None)`` when there is no pin and no version to
     resolve, leaving a deployment without a store exactly as it was.
     """
-    version, snapshot = _pin_from_record(record)
     pinned = version is not None or snapshot is not None
 
     if not catalog_root or not views_root:
@@ -337,7 +326,7 @@ class MdsLocalSignal(Signal):
             "treepath": treepath,
         }
 
-    def gather(self, shot, record=None):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot
 
         Arguments:
@@ -352,12 +341,12 @@ class MdsLocalSignal(Signal):
         """
         results = {}
 
-        version, store_path = self._store_path(shot, record)
+        resolved, store_path = self._store_path(shot, version, snapshot)
         treepath = (MdsTreePath(**{self.treename: store_path})
                     if store_path else self.treepath)
 
         tree = MdsTreeRegistry().open_tree(
-            self.treename, shot, treepath=treepath, version=version)
+            self.treename, shot, treepath=treepath, version=resolved)
         node = tree.getNode(self.expression)
         results["data"] = node.data()
 
@@ -382,7 +371,7 @@ class MdsLocalSignal(Signal):
 
         return results
 
-    def _store_path(self, shot, record):
+    def _store_path(self, shot, version, snapshot):
         """Resolve for this signal, taking the store root from the environment.
 
         A local read has no session to ask, so FDP_STORE_ROOT is the seam --
@@ -395,7 +384,7 @@ class MdsLocalSignal(Signal):
         root = os.environ.get("FDP_STORE_ROOT", "")
         # A local read opens the tree itself, so the two roots coincide.
         return _resolve_store_path(
-            self.treename, shot, record,
+            self.treename, shot, version, snapshot,
             root, (root + "/views") if root else "",
             os.environ.get("default_tree_path", ""),
             "this environment")
@@ -562,7 +551,7 @@ class MdsSignal(Signal):
         )
 
 
-    def gather(self, shot, record=None):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot
         
         Arguments:
@@ -579,7 +568,7 @@ class MdsSignal(Signal):
         # instantiate, so dropping it here discards any version pin before it
         # can reach the signal that would honour it -- silently, because an
         # unpinned read of a real shot returns perfectly good data.
-        return self.sig.gather(shot, record=record)
+        return self.sig.gather(shot, version=version, snapshot=snapshot)
 
 
     def cleanup_shot(self, shot: int):
@@ -769,7 +758,7 @@ class MdsRemoteSignal(Signal):
         return MdsConnectionRegistry().connect(self.server)
 
 
-    def gather(self, shot, record=None):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot, with one retry on MDSplusERROR.
 
         The mdsip server can leave per-connection state wedged after returning
@@ -793,7 +782,7 @@ class MdsRemoteSignal(Signal):
                 of the data and dimensions.
         """
         try:
-            return self._do_gather(shot, record=record)
+            return self._do_gather(shot, version=version, snapshot=snapshot)
         except MDSplusERROR as e:
             _log.warning(
                 "MDSplusERROR on %s for shot=%s expr=%r (%s); "
@@ -804,7 +793,7 @@ class MdsRemoteSignal(Signal):
             # The record travels into the retry too. Dropping it here would
             # lose the pin exactly when a connection has been re-dialled,
             # which is the hardest case to notice.
-            return self._do_gather(shot, record=record)
+            return self._do_gather(shot, version=version, snapshot=snapshot)
 
     def _gather_plan(self):
         """The expressions this signal needs, as (slot, name, expression).
@@ -911,7 +900,7 @@ class MdsRemoteSignal(Signal):
             setattr(connection, _VIEWS_ROOT, cached)
         return cached
 
-    def _store_path(self, registry, shot, record):
+    def _store_path(self, registry, shot, version, snapshot):
         """Resolve for this signal.
 
         The catalog is read from where THIS process can reach it, while the
@@ -921,16 +910,16 @@ class MdsRemoteSignal(Signal):
         """
         views_root, archives = self._sandbox_env(registry.connect(self.server))
         return _resolve_store_path(
-            self.treename, shot, record,
+            self.treename, shot, version, snapshot,
             os.environ.get("FDP_STORE_ROOT", ""), views_root,
             archives, self.server)
 
-    def _do_gather(self, shot, record=None):
+    def _do_gather(self, shot, version=None, snapshot=None):
         registry = MdsConnectionRegistry()
-        version, tree_path = self._store_path(registry, shot, record)
+        resolved, tree_path = self._store_path(registry, shot, version, snapshot)
         connection = registry.open_tree(
             self.server, self.treename, shot,
-            version=version, tree_path=tree_path)
+            version=resolved, tree_path=tree_path)
 
         plan = self._gather_plan()
 

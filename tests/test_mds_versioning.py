@@ -356,41 +356,37 @@ class PinTest(unittest.TestCase):
         return self.mds.MdsRemoteSignal(
             r"\bci::top", treename, server="fdp://host/mdsip")
 
-    def gather(self, record):
+    def gather(self, **pin):
         with self.assertRaises(Exception):
-            self.signal().gather(165920, record=record)
-
-    def record(self, **kw):
-        from toksearch.record import Record
-        return Record.from_dict(dict(shot=165920, **kw))
+            self.signal().gather(165920, **pin)
 
 
 class TestThePinReachesTheOpen(PinTest):
     def test_a_records_version_selects_the_version_and_path(self):
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertEqual(self.seen[-1]["version"], 2)
         self.assertIn("/165920/v2/", self.seen[-1]["tree_path"])
 
     def test_an_unpinned_record_resolves_the_latest(self):
-        self.gather(self.record())
+        self.gather()
         self.assertEqual(self.seen[-1]["version"], 1)
         self.assertIn("/165920/v1/", self.seen[-1]["tree_path"])
 
     def test_a_pinned_path_carries_no_archives_entry(self):
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertNotIn("archives", self.seen[-1]["tree_path"])
 
     def test_the_shard_entry_is_appended(self):
         # bci-0 holds bci's model tree, so it belongs on the search path even
         # for an ordinary per-shot tree.
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertIn("/shared/bci-0/v4/", self.seen[-1]["tree_path"])
 
     def test_the_shots_pin_does_not_apply_to_the_shard(self):
         # A shard has its own version chain. Passing the shot's version here
         # would pin an unrelated artifact to a number that means nothing for
         # it -- only the snapshot is shared.
-        self.gather(self.record(version=2, snapshot="catalog_Y"))
+        self.gather(version=2, snapshot="catalog_Y")
         shard_calls = [c for c in self.index.calls if c[0] == "shard"]
         self.assertTrue(shard_calls)
         self.assertIsNone(shard_calls[-1][2])            # version
@@ -400,17 +396,17 @@ class TestThePinReachesTheOpen(PinTest):
 class TestAnUnsatisfiablePinFailsLoudly(PinTest):
     def test_a_version_never_minted_raises(self):
         with self.assertRaises(self.mds.StoreVersionError):
-            self.signal().gather(165920, record=self.record(version=99))
+            self.signal().gather(165920, version=99)
 
     def test_an_unknown_snapshot_raises(self):
         with self.assertRaises(self.mds.StoreVersionError):
-            self.signal().gather(165920, record=self.record(snapshot="bogus"))
+            self.signal().gather(165920, snapshot="bogus")
 
     def test_a_failed_pin_never_opens_anything(self):
         # The failure that matters is not raising late -- it is opening an
         # unpinned tree and returning its data as though it were the pin.
         try:
-            self.signal().gather(165920, record=self.record(version=99))
+            self.signal().gather(165920, version=99)
         except Exception:
             pass
         self.assertEqual(self.seen, [])
@@ -418,13 +414,13 @@ class TestAnUnsatisfiablePinFailsLoudly(PinTest):
     def test_a_pin_against_an_origin_with_no_store_raises(self):
         self.conn.views_root = ""
         with self.assertRaises(self.mds.StoreVersionError):
-            self.signal().gather(165920, record=self.record(version=1))
+            self.signal().gather(165920, version=1)
 
 
 class TestOriginsWithoutAStoreAreUnchanged(PinTest):
     def test_an_unpinned_read_with_no_store_opens_as_before(self):
         self.conn.views_root = ""
-        self.gather(self.record())
+        self.gather()
         self.assertIsNone(self.seen[-1]["version"])
         self.assertIsNone(self.seen[-1]["tree_path"])
 
@@ -437,10 +433,10 @@ class TestOriginsWithoutAStoreAreUnchanged(PinTest):
     def test_a_shot_absent_from_the_catalog_is_not_an_error(self):
         # Unpinned and unknown: fall back rather than fail. A store that has
         # not minted a shot yet must not break reads that worked before.
-        self.gather(self.record())
+        self.gather()
         self.seen.clear()
         with self.assertRaises(Exception):
-            self.signal().gather(999999, record=None)
+            self.signal().gather(999999)
         self.assertIsNone(self.seen[-1]["version"])
         self.assertIsNone(self.seen[-1]["tree_path"])
 
@@ -466,7 +462,7 @@ class TestTheRetryPathCarriesTheRecord(PinTest):
             with mock.patch.object(MdsConnectionRegistry, "disconnect"):
                 self.registry._connection_map["fdp://host/mdsip"] = self.conn
                 with self.assertRaises(Exception):
-                    self.signal().gather(165920, record=self.record(version=2))
+                    self.signal().gather(165920, version=2)
         self._open.start()
 
         self.assertEqual(calls["n"], 2)
@@ -488,17 +484,17 @@ class TestTheArchivesFallback(PinTest):
         self.conn.archives = self.ARCHIVES
 
     def test_an_unpinned_read_keeps_the_archives_entries(self):
-        self.gather(self.record())
+        self.gather()
         self.assertIn("/archives/", self.seen[-1]["tree_path"])
 
     def test_a_pinned_read_drops_them(self):
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertNotIn("/archives/", self.seen[-1]["tree_path"])
 
     def test_the_store_entries_come_first_either_way(self):
         # MDSplus walks the path in order, so the store must be consulted
         # before archives or an unpinned read answers from the old tier.
-        self.gather(self.record())
+        self.gather()
         path = self.seen[-1]["tree_path"]
         self.assertLess(path.index("/views/"), path.index("/archives/"))
 
@@ -519,7 +515,7 @@ class TestTheStoreProbeIsCheap(PinTest):
     def test_the_probe_happens_once_across_many_reads(self):
         for shot in (165920, 165920, 165921):
             try:
-                self.signal().gather(shot, record=None)
+                self.signal().gather(shot)
             except Exception:
                 pass
         # Two variables, read together, exactly once.
@@ -527,7 +523,7 @@ class TestTheStoreProbeIsCheap(PinTest):
 
     def test_a_fresh_connection_probes_again(self):
         try:
-            self.signal().gather(165920, record=None)
+            self.signal().gather(165920)
         except Exception:
             pass
         before = len(self.probes())
@@ -535,7 +531,7 @@ class TestTheStoreProbeIsCheap(PinTest):
         fresh = EnvConnection()
         self.registry._connection_map["fdp://host/mdsip"] = fresh
         try:
-            self.signal().gather(165920, record=None)
+            self.signal().gather(165920)
         except Exception:
             pass
 
@@ -591,13 +587,9 @@ class LocalPinTest(unittest.TestCase):
     def signal(self, treename="bci"):
         return self.mds.MdsLocalSignal(r"\bci::top", treename)
 
-    def record(self, **kw):
-        from toksearch.record import Record
-        return Record.from_dict(dict(shot=165920, **kw))
-
-    def gather(self, record):
+    def gather(self, **pin):
         with self.assertRaises(Exception):
-            self.signal().gather(165920, record=record)
+            self.signal().gather(165920, **pin)
 
     def path(self):
         return self.seen[-1]["paths"].get("bci", "")
@@ -605,28 +597,28 @@ class LocalPinTest(unittest.TestCase):
 
 class TestLocalPinReachesTheOpen(LocalPinTest):
     def test_a_records_version_selects_the_version_and_path(self):
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertEqual(self.seen[-1]["version"], 2)
         self.assertIn("/165920/v2/", self.path())
 
     def test_the_path_is_a_pelican_url(self):
         # Path() collapses '//' in a scheme, so a mangled root shows up here.
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         self.assertTrue(self.path().startswith("pelican://osg-htc.org:443/"))
 
     def test_an_unsatisfiable_pin_raises(self):
         with self.assertRaises(self.mds.StoreVersionError):
-            self.signal().gather(165920, record=self.record(version=99))
+            self.signal().gather(165920, version=99)
 
     def test_no_store_configured_behaves_as_before(self):
         with mock.patch.dict("os.environ", {"FDP_STORE_ROOT": ""}, clear=False):
-            self.gather(self.record())
+            self.gather()
         self.assertIsNone(self.seen[-1]["version"])
 
     def test_a_pin_with_no_store_configured_raises(self):
         with mock.patch.dict("os.environ", {"FDP_STORE_ROOT": ""}, clear=False):
             with self.assertRaises(self.mds.StoreVersionError):
-                self.signal().gather(165920, record=self.record(version=1))
+                self.signal().gather(165920, version=1)
 
     def test_an_unpinned_read_keeps_the_ambient_archives_path(self):
         # Setting <tree>_path overrides default_tree_path for that tree, so
@@ -634,14 +626,14 @@ class TestLocalPinReachesTheOpen(LocalPinTest):
         with mock.patch.dict(
                 "os.environ",
                 {"default_tree_path": "/x/archives/codes/~t"}, clear=False):
-            self.gather(self.record())
+            self.gather()
         self.assertIn("/archives/", self.path())
 
     def test_a_pinned_read_drops_the_ambient_archives_path(self):
         with mock.patch.dict(
                 "os.environ",
                 {"default_tree_path": "/x/archives/codes/~t"}, clear=False):
-            self.gather(self.record(version=2))
+            self.gather(version=2)
         self.assertNotIn("/archives/", self.path())
 
 
@@ -716,64 +708,54 @@ class TestTheSetenvIsNotRepeated(RegistryTest):
         self.assertEqual(len(self.setenvs()), 2)
 
 
-class TestTheWrapperForwardsTheRecord(unittest.TestCase):
-    """MdsSignal is what users instantiate; MdsRemoteSignal is an implementation
-    detail it delegates to.
+class TestTheWrapperForwardsThePin(unittest.TestCase):
+    """MdsSignal is what users instantiate; MdsRemoteSignal is an
+    implementation detail it delegates to.
 
     Every other test in this file exercises the inner class directly, and all
-    of them passed while MdsSignal.gather accepted a record and threw it away
-    -- so a pinned pipeline read the latest version and returned perfectly
-    good data for the wrong shot version, with no error. Test the class the
-    user reaches for, not only the one that does the work.
+    of them passed while the wrapper accepted the pin and threw it away -- so
+    a pinned pipeline read the latest version and returned perfectly good data
+    for the wrong one, with no error. Test the class the user reaches for, not
+    only the one that does the work.
     """
 
-    def test_a_record_reaches_the_delegate(self):
+    def signal(self, location="fdp://host/mdsip"):
         from toksearch.signal.mds import MdsSignal
+        return MdsSignal(r"\bci::top:denr0", "bci", location=location)
 
-        sig = MdsSignal(r"\bci::top:denr0", "bci",
-                        location="fdp://host/mdsip")
-
+    def test_the_pin_reaches_the_delegate(self):
+        sig = self.signal()
         seen = {}
 
-        def capture(shot, record=None):
-            seen["shot"] = shot
-            seen["record"] = record
+        def capture(shot, version=None, snapshot=None):
+            seen.update(shot=shot, version=version, snapshot=snapshot)
             return {"data": None}
 
         with mock.patch.object(sig.sig, "gather", side_effect=capture):
-            sig.gather(165920, record={"shot": 165920, "version": 3})
+            sig.gather(165920, version=3, snapshot="catalog_X")
 
-        self.assertEqual(seen["shot"], 165920)
-        self.assertIsNotNone(seen["record"], "the record was dropped")
-        self.assertEqual(seen["record"]["version"], 3)
+        self.assertEqual(seen["version"], 3, "the pin was dropped")
+        self.assertEqual(seen["snapshot"], "catalog_X")
 
-    def test_no_record_still_works(self):
-        from toksearch.signal.mds import MdsSignal
-
-        sig = MdsSignal(r"\bci::top:denr0", "bci",
-                        location="fdp://host/mdsip")
+    def test_no_pin_still_works(self):
+        sig = self.signal()
         with mock.patch.object(sig.sig, "gather",
                                return_value={"data": None}) as inner:
             sig.gather(165920)
-        inner.assert_called_once_with(165920, record=None)
+        inner.assert_called_once_with(165920, version=None, snapshot=None)
 
     def test_the_local_wrapper_forwards_too(self):
-        # The same wrapper serves both transports; a local location routes to
-        # MdsLocalSignal, and the pin has to survive that path as well.
-        from toksearch.signal.mds import MdsSignal
-
-        sig = MdsSignal(r"\bci::top:denr0", "bci", location="/some/tree/path")
+        sig = self.signal(location="/some/tree/path")
         seen = {}
 
-        def capture(shot, record=None):
-            seen["record"] = record
+        def capture(shot, version=None, snapshot=None):
+            seen.update(version=version)
             return {"data": None}
 
         with mock.patch.object(sig.sig, "gather", side_effect=capture):
-            sig.gather(165920, record={"shot": 165920, "version": 3})
+            sig.gather(165920, version=3)
 
-        self.assertIsNotNone(seen["record"], "the record was dropped")
-        self.assertEqual(seen["record"]["version"], 3)
+        self.assertEqual(seen["version"], 3, "the pin was dropped")
 
 
 class TestTheTwoRootsAreNotTheSameThing(PinTest):
@@ -792,7 +774,7 @@ class TestTheTwoRootsAreNotTheSameThing(PinTest):
     """
 
     def test_the_catalog_is_read_from_the_client_root(self):
-        self.gather(self.record(version=2))
+        self.gather(version=2)
         # FakeIndex is handed whatever root _store_index was called with; the
         # patch records the call rather than the value, so assert on the path
         # that came out instead: it must name the SANDBOX root, not the
@@ -805,7 +787,7 @@ class TestTheTwoRootsAreNotTheSameThing(PinTest):
         seen_roots = []
         with mock.patch.object(mds_mod, "_store_index",
                                side_effect=lambda r: seen_roots.append(r) or self.index):
-            self.gather(self.record(version=2))
+            self.gather(version=2)
 
         self.assertTrue(seen_roots, "the resolver was never consulted")
         for root in seen_roots:
@@ -821,11 +803,11 @@ class TestTheTwoRootsAreNotTheSameThing(PinTest):
 
         rec = Record.from_dict({"shot": 165920, "version": 2})
         with self.assertRaises(StoreVersionError):
-            _resolve_store_path("bci", 165920, rec,
+            _resolve_store_path("bci", 165920, 2, None,
                                 "", "/mnt/beegfs/data/views", "", "origin")
 
         # ... and an unpinned read is unchanged rather than broken.
         self.assertEqual(
-            _resolve_store_path("bci", 165920, None,
+            _resolve_store_path("bci", 165920, None, None,
                                 "", "/mnt/beegfs/data/views", "", "origin"),
             (None, None))
