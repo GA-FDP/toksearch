@@ -52,7 +52,12 @@ class _SafeFetch(object):
 
     def __call__(self, record):
         try:
-            record[self.name] = self.signal.fetch(record.shot, record=record)
+            # The pipeline knows what a Record is; signals do not have to.
+            # Record.get REQUIRES a default -- it is not dict.get.
+            record[self.name] = self.signal.fetch(
+                record.shot,
+                version=record.get("version", None),
+                snapshot=record.get("snapshot", None))
         except Exception as e:
             record.set_error(self.name, e)
             record[self.name] = None
@@ -79,7 +84,10 @@ class _SafeFetchAsXarray(object):
             # Make sure that val is a DataArray
             # doing xr.DataArray(data_array) is
             # basically idempotent
-            val = self.signal.fetch_as_xarray(record.shot, record=record)
+            val = self.signal.fetch_as_xarray(
+                record.shot,
+                version=record.get("version", None),
+                snapshot=record.get("snapshot", None))
             record[self.ds_name] = xr.merge(
                 [record[self.ds_name], val.to_dataset(name=self.signame)],
                 join="outer",

@@ -37,7 +37,7 @@ class MockSignal(Signal):
             "times": list(self.times),
         }
 
-    def gather(self, shot, record=None):
+    def gather(self, shot, version=None, snapshot=None):
         results = {}
 
         results["data"] = self.data

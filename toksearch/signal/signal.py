@@ -262,13 +262,49 @@ class Signal(ABC):
         return self
 
 
-    def fetch(self, shot: int, record=None) -> dict:
-        """Fetch the data for a shot
+    @classmethod
+    def _gather_accepts_pin(cls) -> bool:
+        """Whether this signal's gather can be handed a version pin.
 
-        
+        Signals written before pinning declare ``gather(self, shot)``, and
+        calling those with a keyword they do not accept is a TypeError --
+        which is precisely what happened to toksearch_mast when the pin was
+        first threaded through as a record.
+
+        Cached per class in the class's own __dict__, so a subclass never
+        inherits its parent's answer.
+        """
+        cached = cls.__dict__.get("_gather_pin_ok")
+        if cached is None:
+            params = inspect.signature(cls.gather).parameters
+            cached = ("version" in params
+                      or any(p.kind is inspect.Parameter.VAR_KEYWORD
+                             for p in params.values()))
+            cls._gather_pin_ok = cached
+        return cached
+
+    def fetch(self, shot: int, version=None, snapshot=None) -> dict:
+        """Fetch the data for a shot, optionally pinned to a stored version
+
+        ::
+
+            sig.fetch(165920)
+            sig.fetch(165920, version=2)
+            sig.fetch(165920, snapshot="catalog_20260907T232802Z")
+
+        A pin is a *locating* coordinate, like the shot itself: it says which
+        bytes to read, not how to decode them. ``version`` pins one shot;
+        ``snapshot`` resolves through that catalog rather than the newest, so
+        one value reproduces a whole campaign.
+
+        A pin is a guarantee. If it cannot be satisfied the fetch raises
+        rather than quietly answering from another version -- including when
+        the signal itself has no idea what a version is.
 
         Arguments:
             shot (int): The shot number to fetch the data for
+            version (int): Pin this shot to a stored version.
+            snapshot (str): Resolve through this catalog snapshot.
 
         Returns:
             dict: A dictionary containing the data fetched for the signal. The dictionary
@@ -281,8 +317,21 @@ class Signal(ABC):
         SignalRegistry().register(self)
 
         with _gc_disabled():
-            results = self.gather(shot, record=record)
-
+            if self._gather_accepts_pin():
+                results = self.gather(shot, version=version, snapshot=snapshot)
+            else:
+                # A signal predating version pinning. Fetching is fine; being
+                # ASKED to pin is not, because silently ignoring the pin is
+                # exactly the failure pinning exists to prevent.
+                if version is not None or snapshot is not None:
+                    raise ValueError(
+                        "{}.gather does not accept a version pin, so "
+                        "version={!r} snapshot={!r} cannot be honoured for "
+                        "shot {}. Its signature is gather(self, shot, "
+                        "version=None, snapshot=None).".format(
+                            type(self).__name__, version, snapshot, shot)
+                    )
+                results = self.gather(shot)
 
         if results and (self._callback is not None):
             results = self._callback(results)
@@ -290,11 +339,11 @@ class Signal(ABC):
         return results
 
     @abstractmethod
-    def gather(self, shot: int, record=None) -> dict:
+    def gather(self, shot: int, version=None, snapshot=None) -> dict:
         """Collect the data for a shot"""
         pass
 
-    def fetch_as_xarray(self, shot: int, record=None) -> xr.DataArray:
+    def fetch_as_xarray(self, shot: int, version=None, snapshot=None) -> xr.DataArray:
         """Fetch the data for a shot as an xarray DataArray object
 
         Returns a DataArray object with dimensions specified in the
@@ -308,7 +357,7 @@ class Signal(ABC):
                 with dimensions specified in the dims attribute of the Signal object.
         """
 
-        signal_as_dict = self.fetch(shot, record=record)
+        signal_as_dict = self.fetch(shot, version=version, snapshot=snapshot)
         d = signal_as_dict["data"]
         coords = {}
         units = signal_as_dict.get("units", {})
