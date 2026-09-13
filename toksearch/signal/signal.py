@@ -262,13 +262,37 @@ class Signal(ABC):
         return self
 
 
-    def fetch(self, shot: int, record=None) -> dict:
-        """Fetch the data for a shot
+    def fetch(self, shot: int, record=None, version=None, snapshot=None) -> dict:
+        """Fetch the data for a shot, optionally pinned to a stored version
 
-        
+        A pipeline pins per shot, by putting ``version``/``snapshot`` on each
+        record -- different shots can name different versions, which is why
+        the pin lives there. Fetching one shot on its own has no record, and
+        building one by hand to read a single shot is silly, so the pin can be
+        named here instead::
+
+            sig.fetch(165920, version=2)
+            sig.fetch(165920, snapshot="catalog_20260907T232802Z")
+
+        The record is built internally and handed to :meth:`gather`, so the
+        pin travels the same path a pipeline's does.
+
+        A pin is a guarantee: if it cannot be satisfied the fetch raises
+        rather than quietly answering from another version.
 
         Arguments:
             shot (int): The shot number to fetch the data for
+            record: The record being fetched into, supplied by a pipeline.
+                Callers naming a pin do not pass this.
+            version (int): Pin this shot to a stored version.
+            snapshot (str): Resolve through this catalog snapshot rather than
+                the newest, so one value reproduces a whole campaign.
+
+        Raises:
+            ValueError: If a record is supplied alongside ``version`` or
+                ``snapshot``. Which pin should win is genuinely ambiguous,
+                and decorating the caller's record would mutate state a
+                pipeline shares.
 
         Returns:
             dict: A dictionary containing the data fetched for the signal. The dictionary
@@ -277,6 +301,25 @@ class Signal(ABC):
                 attribute is True, the dictionary will also contain a key 'units' with the units
                 of the data and dimensions.
         """
+
+        if version is not None or snapshot is not None:
+            if record is not None:
+                raise ValueError(
+                    "pass a version pin on the record or as an argument to "
+                    "fetch, not both -- which one is authoritative would "
+                    "otherwise be decided silently"
+                )
+            # Imported here: toksearch.record imports nothing from the signal
+            # package, and keeping it local avoids making that a standing
+            # constraint on either side.
+            from ..record import Record
+
+            fields = {"shot": shot}
+            if version is not None:
+                fields["version"] = version
+            if snapshot is not None:
+                fields["snapshot"] = snapshot
+            record = Record.from_dict(fields)
 
         SignalRegistry().register(self)
 
