@@ -98,6 +98,11 @@ _CURRENT_TREE = "_toksearch_current_tree"
 # release rather than a config change.
 _VIEWS_ROOT = "_toksearch_views_root"
 
+# The tree path last sent on a connection. Several trees read at one shot
+# resolve to the same search path, so without this each one re-sends an
+# identical setenv -- a round trip per tree per shot, for nothing.
+_CURRENT_PATH = "_toksearch_current_tree_path"
+
 # One resolver per store root per process. StoreIndex holds a catalog snapshot
 # and its bucket maps, so rebuilding it per record would re-read the catalog
 # for every shot.
@@ -646,8 +651,9 @@ class MdsConnectionRegistry(object):
         if current is not None and current[:2] == (treename, shot):
             connection.closeAllTrees()
 
-        if tree_path:
+        if tree_path and getattr(connection, _CURRENT_PATH, None) != tree_path:
             connection.get("setenv($)", "default_tree_path=" + tree_path)
+            setattr(connection, _CURRENT_PATH, tree_path)
 
         connection.openTree(treename, shot)
         setattr(connection, _CURRENT_TREE, wanted)

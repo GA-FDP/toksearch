@@ -664,3 +664,43 @@ class TestAMismatchedPtdataSaysSo(unittest.TestCase):
                 self.mds._store_index("/some/root")
 
         self.assertIn("2.7.0", str(caught.exception))
+
+
+class TestStoreVersionErrorIsCatchable(unittest.TestCase):
+    """The docs tell users to catch it, so it has to be reachable by name."""
+
+    def test_it_is_exported_from_the_package_root(self):
+        import toksearch
+        from toksearch.signal.mds import StoreVersionError
+
+        self.assertIs(toksearch.StoreVersionError, StoreVersionError)
+
+
+class TestTheSetenvIsNotRepeated(RegistryTest):
+    """Several trees at one shot resolve to the same path.
+
+    Re-sending an identical setenv costs a round trip per tree per shot for
+    nothing. The tree still has to be opened -- that is what the marker is
+    for -- but the path only has to be sent when it changes.
+    """
+
+    def setenvs(self):
+        return [c for c in self.conn.calls
+                if c[0] == "get" and "setenv" in str(c[1])]
+
+    def test_a_second_tree_on_the_same_path_sends_no_setenv(self):
+        self.registry.open_tree("srv", "bci", 165920, version=1, tree_path="/p1")
+        self.registry.open_tree("srv", "bes", 165920, version=1, tree_path="/p1")
+
+        self.assertEqual(len(self.setenvs()), 1)
+        self.assertEqual(len(self.opens()), 2)   # both trees still opened
+
+    def test_a_changed_path_is_sent(self):
+        self.registry.open_tree("srv", "bci", 165920, version=1, tree_path="/p1")
+        self.registry.open_tree("srv", "bci", 165921, version=1, tree_path="/p2")
+        self.assertEqual(len(self.setenvs()), 2)
+
+    def test_a_changed_version_on_one_shot_resends(self):
+        self.registry.open_tree("srv", "bci", 165920, version=1, tree_path="/p1")
+        self.registry.open_tree("srv", "bci", 165920, version=2, tree_path="/p2")
+        self.assertEqual(len(self.setenvs()), 2)
