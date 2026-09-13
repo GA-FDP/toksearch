@@ -704,3 +704,63 @@ class TestTheSetenvIsNotRepeated(RegistryTest):
         self.registry.open_tree("srv", "bci", 165920, version=1, tree_path="/p1")
         self.registry.open_tree("srv", "bci", 165920, version=2, tree_path="/p2")
         self.assertEqual(len(self.setenvs()), 2)
+
+
+class TestTheWrapperForwardsTheRecord(unittest.TestCase):
+    """MdsSignal is what users instantiate; MdsRemoteSignal is an implementation
+    detail it delegates to.
+
+    Every other test in this file exercises the inner class directly, and all
+    of them passed while MdsSignal.gather accepted a record and threw it away
+    -- so a pinned pipeline read the latest version and returned perfectly
+    good data for the wrong shot version, with no error. Test the class the
+    user reaches for, not only the one that does the work.
+    """
+
+    def test_a_record_reaches_the_delegate(self):
+        from toksearch.signal.mds import MdsSignal
+
+        sig = MdsSignal(r"\bci::top:denr0", "bci",
+                        location="fdp://host/mdsip")
+
+        seen = {}
+
+        def capture(shot, record=None):
+            seen["shot"] = shot
+            seen["record"] = record
+            return {"data": None}
+
+        with mock.patch.object(sig.sig, "gather", side_effect=capture):
+            sig.gather(165920, record={"shot": 165920, "version": 3})
+
+        self.assertEqual(seen["shot"], 165920)
+        self.assertIsNotNone(seen["record"], "the record was dropped")
+        self.assertEqual(seen["record"]["version"], 3)
+
+    def test_no_record_still_works(self):
+        from toksearch.signal.mds import MdsSignal
+
+        sig = MdsSignal(r"\bci::top:denr0", "bci",
+                        location="fdp://host/mdsip")
+        with mock.patch.object(sig.sig, "gather",
+                               return_value={"data": None}) as inner:
+            sig.gather(165920)
+        inner.assert_called_once_with(165920, record=None)
+
+    def test_the_local_wrapper_forwards_too(self):
+        # The same wrapper serves both transports; a local location routes to
+        # MdsLocalSignal, and the pin has to survive that path as well.
+        from toksearch.signal.mds import MdsSignal
+
+        sig = MdsSignal(r"\bci::top:denr0", "bci", location="/some/tree/path")
+        seen = {}
+
+        def capture(shot, record=None):
+            seen["record"] = record
+            return {"data": None}
+
+        with mock.patch.object(sig.sig, "gather", side_effect=capture):
+            sig.gather(165920, record={"shot": 165920, "version": 3})
+
+        self.assertIsNotNone(seen["record"], "the record was dropped")
+        self.assertEqual(seen["record"]["version"], 3)

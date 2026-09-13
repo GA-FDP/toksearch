@@ -559,7 +559,11 @@ class MdsSignal(Signal):
                 attribute is True, the dictionary will also contain a key 'units' with the units
                 of the data and dimensions.
         """
-        return self.sig.gather(shot)
+        # The record travels through. MdsSignal is the class users actually
+        # instantiate, so dropping it here discards any version pin before it
+        # can reach the signal that would honour it -- silently, because an
+        # unpinned read of a real shot returns perfectly good data.
+        return self.sig.gather(shot, record=record)
 
 
     def cleanup_shot(self, shot: int):
