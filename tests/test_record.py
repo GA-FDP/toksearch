@@ -103,8 +103,13 @@ def test_version_and_snapshot_cannot_be_deleted():
     r = Record.from_dict({"shot": 165920, "version": 2})
     r.pop("version")
     assert r["version"] == 2
-    with pytest.raises(KeyError):
+    with pytest.raises(InvalidRecordField):
         del r["version"]
+    assert r["version"] == 2
+    # Attribute deletion is the natural dual of item deletion in a class whose
+    # fields ARE attributes, and it bypassed every guard until it was closed.
+    with pytest.raises(InvalidRecordField):
+        del r.version
     assert r["version"] == 2
 
 
@@ -112,8 +117,10 @@ def test_shot_cannot_be_deleted_either():
     """Pre-existing hole: __delitem__ bypassed the guard pop() applies, so
     `del record["shot"]` succeeded while `record.pop("shot")` did not."""
     r = Record.from_dict({"shot": 165920})
-    with pytest.raises(KeyError):
+    with pytest.raises(InvalidRecordField):
         del r["shot"]
+    with pytest.raises(InvalidRecordField):
+        del r.shot
     assert r["shot"] == 165920
 
 
@@ -122,7 +129,11 @@ def test_pop_returns_the_value_it_removed():
     r = Record.from_dict({"shot": 165920, "scratch": 42})
     assert r.pop("scratch") == 42
     assert "scratch" not in r
+    # NOT `assert r.pop("shot") is None` alone: the old broken pop had no
+    # return statement, so that passed against it too. Assert the guard's
+    # real effect -- the field survives.
     assert r.pop("shot") is None
+    assert r["shot"] == 165920
 
 
 def test_a_user_may_still_supply_version_and_snapshot():

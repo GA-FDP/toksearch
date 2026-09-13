@@ -112,10 +112,31 @@ class Record(object):
         pop() applies, so `del record["shot"]` succeeded while
         `record.pop("shot")` did not -- a field protected from keep() but not
         from del is inconsistently protected, which is to say not protected.
+
+        Raises InvalidRecordField, not KeyError, so that "you may not remove
+        this" is distinguishable from "there is no such field". A caller
+        writing `try: del rec[k] except KeyError: pass` would otherwise
+        swallow a refusal as an absence.
         """
         if key in self._UNDELETABLE:
-            raise KeyError(f"{key!r} cannot be deleted from a Record")
+            raise InvalidRecordField(
+                f"{key!r} cannot be deleted from a Record")
         del self.__dict__[key]
+
+    def __delattr__(self, name):
+        """Delete a field by attribute. Refuses the undeletable ones.
+
+        Fields live in __dict__ as both dict entries and attributes -- the
+        class sets `self.shot` directly and the codebase reads `record.shot`
+        throughout -- so `del record.version` is the natural attribute-style
+        dual of `del record["version"]`, and it bypassed every guard until
+        this existed. Protection that only covers one of two equivalent
+        idioms is not protection.
+        """
+        if name in self._UNDELETABLE:
+            raise InvalidRecordField(
+                f"{name!r} cannot be deleted from a Record")
+        object.__delattr__(self, name)
 
     def __contains__(self, key):
         """Check if a field is in the record"""
@@ -173,7 +194,10 @@ class Record(object):
         """
         if key in self._UNDELETABLE:
             return None
-        return self.__dict__.pop(key, None)
+        # No default: popping a key that was never set still raises KeyError,
+        # as it always has. Adding a silent default here would have been an
+        # unrelated behaviour change riding on this one.
+        return self.__dict__.pop(key)
 
     def keep(self, keys: List[Any]):
         """Remove all fields from the record that are not in keys
