@@ -106,7 +106,15 @@ class Record(object):
         self.__dict__[key] = value
 
     def __delitem__(self, key):
-        """Delete a field from the record"""
+        """Delete a field from the record.
+
+        Refuses the undeletable fields. This used to bypass the guard that
+        pop() applies, so `del record["shot"]` succeeded while
+        `record.pop("shot")` did not -- a field protected from keep() but not
+        from del is inconsistently protected, which is to say not protected.
+        """
+        if key in self._UNDELETABLE:
+            raise KeyError(f"{key!r} cannot be deleted from a Record")
         del self.__dict__[key]
 
     def __contains__(self, key):
@@ -147,10 +155,25 @@ class Record(object):
 
         self.errors[f] = capture_exception(f, exception)
 
+    # Fields that cannot be removed. `shot` identifies the record, `key` and
+    # `errors` are framework bookkeeping, and `version`/`snapshot` are the
+    # provenance a pinned read depends on -- losing them to a routine
+    # keep(["peak"]) would make a recorded run unreproducible.
+    #
+    # NOT the same set from_dict rejects. `key` and `errors` are FORBIDDEN as
+    # input; `shot`, `version` and `snapshot` may be supplied by the caller.
+    # Conflating the two would reject the very shot list that seeds a pinned
+    # run -- Pipeline([{"shot": N, "version": V}]).
+    _UNDELETABLE = frozenset({"key", "shot", "errors", "version", "snapshot"})
+
     def pop(self, key) -> Any:
-        """Remove a field from the record"""
-        if key not in {"key", "shot", "errors"}:
-            self.__dict__.pop(key)
+        """Remove a field and return its value.
+
+        Undeletable fields are left in place and return None.
+        """
+        if key in self._UNDELETABLE:
+            return None
+        return self.__dict__.pop(key, None)
 
     def keep(self, keys: List[Any]):
         """Remove all fields from the record that are not in keys

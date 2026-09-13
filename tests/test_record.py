@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 import unittest
 import numpy as np
 import sys
@@ -82,3 +83,51 @@ class TestRecord(unittest.TestCase):
         # We tried to discard shot, but it won't let us
         # (on purpose)
         self.assertIn("shot", rec)
+
+
+def test_version_and_snapshot_survive_keep():
+    """Provenance a routine keep() discards is provenance a reproduction
+    cannot rely on, so these join shot and errors."""
+    r = Record.from_dict({"shot": 165920, "version": 2,
+                          "snapshot": "catalog_x", "peak": 1.5})
+    r.keep(["peak"])
+    assert r["version"] == 2
+    assert r["snapshot"] == "catalog_x"
+    assert r["shot"] == 165920
+    assert r["peak"] == 1.5
+
+
+def test_version_and_snapshot_cannot_be_deleted():
+    """Both routes must refuse. pop() and __delitem__ are separate code paths
+    and only pop() guarded anything before this."""
+    r = Record.from_dict({"shot": 165920, "version": 2})
+    r.pop("version")
+    assert r["version"] == 2
+    with pytest.raises(KeyError):
+        del r["version"]
+    assert r["version"] == 2
+
+
+def test_shot_cannot_be_deleted_either():
+    """Pre-existing hole: __delitem__ bypassed the guard pop() applies, so
+    `del record["shot"]` succeeded while `record.pop("shot")` did not."""
+    r = Record.from_dict({"shot": 165920})
+    with pytest.raises(KeyError):
+        del r["shot"]
+    assert r["shot"] == 165920
+
+
+def test_pop_returns_the_value_it_removed():
+    """Declared `-> Any` with no return, so it yielded None for every key."""
+    r = Record.from_dict({"shot": 165920, "scratch": 42})
+    assert r.pop("scratch") == 42
+    assert "scratch" not in r
+    assert r.pop("shot") is None
+
+
+def test_a_user_may_still_supply_version_and_snapshot():
+    """Optional-known, NOT forbidden. Reserving them the way key and errors are
+    reserved would reject the very shot list that seeds a pinned run."""
+    r = Record.from_dict({"shot": 165920, "version": 2, "snapshot": "catalog_x"})
+    assert r["version"] == 2
+    assert r["snapshot"] == "catalog_x"
