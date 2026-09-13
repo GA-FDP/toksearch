@@ -169,50 +169,61 @@ class TestDimensionedSignal(unittest.TestCase):
         self.assertFalse("times" in res)
 
 
-def test_a_signal_receives_the_whole_record():
-    """The framework PASSES the record without interpreting it, which is what
-    keeps toksearch device-neutral: it never learns what `version` means."""
-    from toksearch.pipeline.pipeline_funcs import _SafeFetch
-    from toksearch.record import Record
+class TestSignalReceivesRecord(unittest.TestCase):
+    """The pipeline hands the whole record to a signal.
 
-    seen = {}
+    A TestCase rather than module-level test_* functions: the suite is
+    collected by unittest.TestLoader().discover() (tests/testit.py), which
+    the conda recipe also runs. Bare functions import fine and are then
+    silently never executed -- so the mutation check behind these tests
+    would have been guarding nothing in CI.
+    """
 
-    class RecordingSignal(Signal):
-        def gather(self, shot, record=None):
-            seen["shot"] = shot
-            seen["record"] = record
-            return {"data": np.array([1, 2, 3])}
+    def test_a_signal_receives_the_whole_record(self):
+        """The framework PASSES the record without interpreting it, which is
+        what keeps toksearch device-neutral: it never learns what `version`
+        means."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
 
-        def cleanup_shot(self, shot):
-            pass
+        seen = {}
 
-        def cleanup(self):
-            pass
+        class RecordingSignal(Signal):
+            def gather(self, shot, record=None):
+                seen["shot"] = shot
+                seen["record"] = record
+                return {"data": np.array([1, 2, 3])}
 
-    rec = Record.from_dict({"shot": 165920, "version": 2})
-    _SafeFetch("sig", RecordingSignal())(rec)
+            def cleanup_shot(self, shot):
+                pass
 
-    assert seen["shot"] == 165920
-    assert seen["record"] is not None, "the pipeline passed only the shot"
-    assert seen["record"]["version"] == 2
+            def cleanup(self):
+                pass
 
+        rec = Record.from_dict({"shot": 165920, "version": 2})
+        _SafeFetch("sig", RecordingSignal())(rec)
 
-def test_a_signal_that_ignores_the_record_still_works():
-    """Nothing requires a signal to want the record; the framework only offers
-    it."""
-    from toksearch.pipeline.pipeline_funcs import _SafeFetch
-    from toksearch.record import Record
+        self.assertEqual(seen["shot"], 165920)
+        self.assertIsNotNone(seen["record"],
+                             "the pipeline passed only the shot")
+        self.assertEqual(seen["record"]["version"], 2)
 
-    class PlainSignal(Signal):
-        def gather(self, shot, record=None):
-            return {"data": np.array([shot])}
+    def test_a_signal_that_ignores_the_record_still_works(self):
+        """Nothing requires a signal to want the record; the framework only
+        offers it."""
+        from toksearch.pipeline.pipeline_funcs import _SafeFetch
+        from toksearch.record import Record
 
-        def cleanup_shot(self, shot):
-            pass
+        class PlainSignal(Signal):
+            def gather(self, shot, record=None):
+                return {"data": np.array([shot])}
 
-        def cleanup(self):
-            pass
+            def cleanup_shot(self, shot):
+                pass
 
-    rec = Record.from_dict({"shot": 42})
-    _SafeFetch("sig", PlainSignal())(rec)
-    assert rec["sig"]["data"][0] == 42
+            def cleanup(self):
+                pass
+
+        rec = Record.from_dict({"shot": 42})
+        _SafeFetch("sig", PlainSignal())(rec)
+        self.assertEqual(rec["sig"]["data"][0], 42)
