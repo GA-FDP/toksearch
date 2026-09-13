@@ -149,21 +149,34 @@ def _pin_from_record(record):
     return record.get("version", None), record.get("snapshot", None)
 
 
-def _resolve_store_path(treename, shot, record, views_root, fallback, subject):
+def _resolve_store_path(treename, shot, record, catalog_root, views_root,
+                        fallback, subject):
     """The version to open, and the search path that selects it.
 
-    Shared by both transports, which differ only in where ``views_root`` and
-    ``fallback`` come from -- a session getenv over fdp://, the environment
-    for a local read. One body so there is one definition of what a pin
-    means.
+    Takes TWO roots, and they are genuinely different things:
 
-    Returns ``(None, None)`` when there is no pin and no version to resolve,
-    so a deployment without a store behaves exactly as it did before.
+    ``catalog_root`` is where **this client** reads ``catalog/`` from, so it
+    must be readable here -- ``pelican://osg-htc.org:443/fdp-d3d``, say.
+
+    ``views_root`` is the prefix written into the tree path, which is read by
+    **whoever opens the tree**. Over ``fdp://`` that is the origin's mdsip
+    sandbox, so it is the sandbox's own filesystem path and the client can
+    never read it. For a local read the two coincide.
+
+    Deriving one from the other looks natural and is wrong: it makes a client
+    try to list the origin's filesystem, which fails as
+    ``ShotNotInCatalog`` -- so pinned reads raise for a reason that has
+    nothing to do with the pin, and unpinned reads quietly fall back to
+    archives having resolved nothing at all.
+
+    Shared by both transports, so there is one definition of what a pin
+    means. Returns ``(None, None)`` when there is no pin and no version to
+    resolve, leaving a deployment without a store exactly as it was.
     """
     version, snapshot = _pin_from_record(record)
     pinned = version is not None or snapshot is not None
 
-    if not views_root:
+    if not catalog_root or not views_root:
         if pinned:
             raise StoreVersionError(
                 "{} has no store configured, so it cannot honour "
@@ -171,8 +184,7 @@ def _resolve_store_path(treename, shot, record, views_root, fallback, subject):
                     subject, version, snapshot, shot))
         return None, None
 
-    # views/ and catalog/ are siblings under the store root.
-    index = _store_index(views_root.rsplit("/", 1)[0])
+    index = _store_index(catalog_root)
 
     got = index.resolve_version(shot, version=version, snapshot=snapshot)
     if not got.found:
@@ -373,14 +385,18 @@ class MdsLocalSignal(Signal):
     def _store_path(self, shot, record):
         """Resolve for this signal, taking the store root from the environment.
 
-        A local read has no session to ask, so FDP_VIEWS_ROOT is the seam --
-        `fdp env` composes it from the device locator. The ambient
-        default_tree_path is the fallback, because setting <tree>_path
-        overrides it for this tree and it would otherwise disappear.
+        A local read has no session to ask, so FDP_STORE_ROOT is the seam --
+        `fdp env` composes it from the device locator. It names the namespace
+        holding catalog/ and views/, and because this process opens the tree
+        itself, the same root serves both roles. The ambient
+        default_tree_path is the fallback, since setting <tree>_path overrides
+        it for this tree and it would otherwise disappear.
         """
+        root = os.environ.get("FDP_STORE_ROOT", "")
+        # A local read opens the tree itself, so the two roots coincide.
         return _resolve_store_path(
             self.treename, shot, record,
-            os.environ.get("FDP_VIEWS_ROOT", ""),
+            root, (root + "/views") if root else "",
             os.environ.get("default_tree_path", ""),
             "this environment")
 
@@ -896,10 +912,18 @@ class MdsRemoteSignal(Signal):
         return cached
 
     def _store_path(self, registry, shot, record):
-        """Resolve for this signal, asking the origin where its store is."""
+        """Resolve for this signal.
+
+        The catalog is read from where THIS process can reach it, while the
+        path is written for the sandbox that will open the tree. Two roots,
+        two sources: the client's own configuration, and the origin's
+        declaration of its own layout.
+        """
         views_root, archives = self._sandbox_env(registry.connect(self.server))
         return _resolve_store_path(
-            self.treename, shot, record, views_root, archives, self.server)
+            self.treename, shot, record,
+            os.environ.get("FDP_STORE_ROOT", ""), views_root,
+            archives, self.server)
 
     def _do_gather(self, shot, record=None):
         registry = MdsConnectionRegistry()
