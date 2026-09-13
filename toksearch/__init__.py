@@ -75,6 +75,33 @@ For multi-dimensional data, use ``dims`` to label axes::
 
     MdsSignal(r'\\psirz', 'efit01', dims=('times',))
 
+Reading a pinned version
+========================
+
+A record can name which version of a shot to read, and ``MdsSignal`` honours
+it on both transports::
+
+    Pipeline([
+        {'shot': 165920, 'version': 2},                   # one shot, one version
+        {'shot': 165921, 'snapshot': 'catalog_20260907T232802Z'},
+    ])
+
+``version`` pins a single shot. ``snapshot`` resolves through that catalog
+rather than the newest, so one recorded value reproduces a whole campaign.
+Omit both and the newest version is read, falling back to the unversioned
+archive for anything the store has not absorbed.
+
+**A pin is a guarantee, not a preference.** If it cannot be satisfied the
+fetch raises ``StoreVersionError``; it never quietly answers from another
+version or from the archive. That is the point -- a pin exists so a rerun can
+prove it read the same bytes, and a silent substitution would destroy exactly
+that.
+
+Reading from the store needs ``ptdata >= 2.7.0`` and a deployment that
+declares where its store is. Over ``fdp://`` the origin declares it; for a
+local read set ``FDP_VIEWS_ROOT``. Without one, pinned reads raise and
+unpinned reads behave exactly as they always have.
+
 Datasets and Alignment
 ======================
 
@@ -153,7 +180,7 @@ Run the pipeline for one shot without building the full list::
 
 from .signal.signal import Signal
 from .signal.zarr import ZarrSignal
-from .signal.mds import MdsSignal, MdsTreePath
+from .signal.mds import MdsSignal, MdsTreePath, StoreVersionError
 from .pipeline.align import XarrayAligner
 from .pipeline import Pipeline
 
