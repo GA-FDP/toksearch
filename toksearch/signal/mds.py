@@ -122,6 +122,8 @@ class StoreVersionError(Exception):
 # by toksearch settling one snapshot before the workers start. Named here
 # rather than imported from store_catalog to keep this module's dependency
 # on it one-way: store_catalog knows nothing about signals.
+from .store_catalog import pinned_shards
+
 _RUN_PIN = "FDP_STORE_CATALOG"
 
 
@@ -237,9 +239,23 @@ def _resolve_store_path(treename, shot, version, snapshot, catalog_root,
     # model tree has no shot to belong to, so a hit here is ordinary rather
     # than evidence that the tree is a shared one.
     shard = shard_key(treename, shot)
-    shared = index.resolve_shared_version(shard, snapshot=snapshot)
-    if shared.found:
-        entries += shared_tree_paths(views_root, shard, shared.version, treename)
+
+    # A saved snapshot names its shards explicitly, and that beats the
+    # catalog's answer. Without this a replay reads the right DATA and
+    # whatever instrument description happens to be current -- reproducible
+    # for the measurement and not for what it means.
+    # NOT named `pinned`: that is the flag deciding whether the archives
+    # fallback is dropped, and shadowing it here silently kept the archive
+    # path on pinned reads -- the exact thing join_tree_path(pinned=) exists
+    # to prevent.
+    shard_version = pinned_shards().get(shard)
+    if shard_version is not None:
+        entries += shared_tree_paths(views_root, shard, shard_version, treename)
+    else:
+        shared = index.resolve_shared_version(shard, snapshot=snapshot)
+        if shared.found:
+            entries += shared_tree_paths(views_root, shard, shared.version,
+                                         treename)
 
     # Setting a tree path replaces the whole search path, so the fallback --
     # where archives/ lives -- vanishes unless carried along. Unpinned reads

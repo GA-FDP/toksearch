@@ -86,7 +86,7 @@ from ..provenance.base import safe_call
 from ..provenance.code import capture_code
 from ..provenance.context import RunContext, SourceSpec, BackendSpec
 from ..provenance.hashing import sha256_of
-from ..signal.store_catalog import pin_run
+from ..signal.store_catalog import load_snapshot, pin_run, pin_shards
 
 
 class MissingColumnName(Exception):
@@ -108,6 +108,7 @@ class Pipeline:
     Methods:
         from_sql: Initialize a Pipeline using the results of an sql query
         from_catalog: Initialize a Pipeline pinned to a published catalog
+        from_snapshot: Initialize a Pipeline replaying a saved snapshot file
         __init__: Initialize a Pipeline object
         fetch: Add a signal to be fetched by the pipeline
         fetch_dataset: Create an xarray dataset field in the record
@@ -130,22 +131,44 @@ class Pipeline:
     """
 
     @classmethod
-    def from_snapshot(cls, path, parent=None) -> "Pipeline":
-        """Initialize a Pipeline from a SAVED SNAPSHOT file (B7b).
+    def from_snapshot(cls, path) -> "Pipeline":
+        """Initialize a Pipeline replaying a saved snapshot file.
 
-        Until that lands this exists only to refuse its former argument. It
-        used to take a catalog stamp; passing one now would otherwise be
-        accepted as a filename and silently leave the run unpinned.
+        A saved snapshot names the exact version of every shot and shard a
+        run read, with the hashes that let a third party check them. This
+        replays it: one record per shot, each carrying its `version`, with
+        the file's catalog and shard versions pinned for the run.
+
+        It needs no new resolution path. The whole mapping is known before
+        the run starts, so the shots become ordinary per-record `version`
+        pins -- B5's path, which already works on both transports and every
+        compute backend.
+
+        Arguments:
+            path: a file written by `fdp snapshot save`, or lifted out of a
+                CMF-recorded run's `inputs.json`.
+
+        Raises:
+            SnapshotFileError: the file is missing, is not a snapshot, or
+                names no shots. Refused rather than partially honoured --
+                replaying half a snapshot reads data the citation does not
+                describe.
+            ValueError: `path` looks like a published catalog. That is
+                `Pipeline.from_catalog`.
+
+        Examples:
+            ```python
+            recs = Pipeline.from_snapshot("betan-2024.json").compute_ray()
+            ```
         """
-        if isinstance(path, str) and path.strip().lower().startswith("catalog_"):
-            raise ValueError(
-                "Pipeline.from_snapshot({!r}) looks like a published catalog. "
-                "That is now Pipeline.from_catalog(...); from_snapshot takes "
-                "the path of a saved snapshot file.".format(path))
-        raise NotImplementedError(
-            "Pipeline.from_snapshot reads a saved snapshot file, which is not "
-            "implemented yet (B7b). Use Pipeline.from_catalog(...) to pin a "
-            "published catalog.")
+        doc = load_snapshot(path)
+        pipe = cls([{"shot": e["shot"], "version": e["version"]}
+                    for e in doc["shots"]])
+        pipe._catalog = doc["catalog"]
+        # Held on the pipeline and exported at compute time, beside the
+        # catalog: a shard is resolved in the worker.
+        pipe._shards = doc.get("shared", [])
+        return pipe
 
     @classmethod
     def from_catalog(cls, catalog: Optional[str], parent) -> "Pipeline":
@@ -315,6 +338,11 @@ class Pipeline:
         # withdrawn. Assigned outside the branch so neither arm can forget it.
         self._catalog = (
             getattr(parent, "_catalog", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
+        self._shards = (
+            getattr(parent, "_shards", None)
             if isinstance(parent, Pipeline)
             else None
         )
@@ -576,6 +604,7 @@ class Pipeline:
         # cannot be contingent on opting into provenance recording, and the
         # worker disagreement can only be fixed before any worker exists.
         catalog = pin_run(self._catalog)
+        pin_shards(self._shards)
 
         ctx = None
         if provenance is not None:
