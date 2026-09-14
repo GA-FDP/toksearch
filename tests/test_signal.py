@@ -207,7 +207,7 @@ class TestSignalReceivesThePin(unittest.TestCase):
                 pass
 
         rec = Record.from_dict(
-            {"shot": 165920, "version": 2, "snapshot": "catalog_X"})
+            {"shot": 165920, "version": 2, "catalog": "catalog_X"})
         _SafeFetch("sig", RecordingSignal())(rec)
 
         self.assertEqual(seen["shot"], 165920)

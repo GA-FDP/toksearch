@@ -71,6 +71,16 @@ class Record(object):
                 raise InvalidRecordField(
                     f"Illegal field: {key} when trying to create Record"
                 )
+            elif key == "snapshot":
+                # Pre-B7b this field named the published catalog. Accepting
+                # it silently would leave the record unpinned while looking
+                # pinned, which is the failure a pin exists to prevent.
+                raise InvalidRecordField(
+                    "the record field 'snapshot' was renamed to 'catalog': "
+                    "it names the origin's published catalog "
+                    "(catalog_<stamp>). A saved snapshot is a file, loaded "
+                    "with Pipeline.from_snapshot."
+                )
 
             rec[key] = val
 
@@ -177,15 +187,15 @@ class Record(object):
         self.errors[f] = capture_exception(f, exception)
 
     # Fields that cannot be removed. `shot` identifies the record, `key` and
-    # `errors` are framework bookkeeping, and `version`/`snapshot` are the
+    # `errors` are framework bookkeeping, and `version`/`catalog` are the
     # provenance a pinned read depends on -- losing them to a routine
     # keep(["peak"]) would make a recorded run unreproducible.
     #
     # NOT the same set from_dict rejects. `key` and `errors` are FORBIDDEN as
-    # input; `shot`, `version` and `snapshot` may be supplied by the caller.
+    # input; `shot`, `version` and `catalog` may be supplied by the caller.
     # Conflating the two would reject the very shot list that seeds a pinned
     # run -- Pipeline([{"shot": N, "version": V}]).
-    _UNDELETABLE = frozenset({"key", "shot", "errors", "version", "snapshot"})
+    _UNDELETABLE = frozenset({"key", "shot", "errors", "version", "catalog"})
 
     def pop(self, key) -> Any:
         """Remove a field and return its value.

@@ -91,34 +91,34 @@ class RunContext:
             "store": self.store,
         }
 
-    def _input_identity_payload(self) -> dict:
-        payload = {
-            "source": self.source.to_dict(),
-            "signals": self.signals,
-            "device": self.device,
-        }
-        # Included only when something is pinned, so a device with no store
-        # keeps the artifact ids it already has. Adding a permanent
-        # "store": None would churn every existing id without recording a
-        # single new fact.
-        if self.store:
-            payload["store"] = self.store
-        return payload
-
     def input_identity(self) -> str:
-        """Hash of *what data this run reads* -- source, signals, store.
+        """Hash of *what data this run reads* -- source plus signals.
 
         Deliberately excludes ops, backend, and code: two runs that read the
         same data share an input artifact even if they then do different
         things with it. That shared artifact is what connects the lineage
         graph.
 
-        The catalog snapshot is part of *what data*, not of how it is
-        processed: it decides which VERSION of each shot is read, so two runs
-        with identical signals but different snapshots read different bytes
-        and must not collapse to one input artifact.
+        It also excludes ``store``, and that is the point rather than an
+        oversight. Identity here is LOGICAL -- which shots, which signals --
+        and it is meant to dedupe across store states, so that two runs over
+        the same shots at different catalog snapshots are recognised as the
+        same input. The PHYSICAL identity (which exact bytes) belongs to the
+        provenance backend, which records the resolved versions alongside
+        this and hashes the pair; see toksearch_cmf's inputs.py, whose
+        content hash is what CMF actually dedupes on.
+
+        Folding the snapshot in here collapses those two levels into one and
+        loses the logical notion entirely. It was briefly folded in (2.15.0,
+        2.15.1) before that was noticed.
         """
-        return sha256_of(self._input_identity_payload())
+        return sha256_of(
+            {
+                "source": self.source.to_dict(),
+                "signals": self.signals,
+                "device": self.device,
+            }
+        )
 
     def write_directories(self) -> list:
         """Output directories declared by Pipeline.write operations.

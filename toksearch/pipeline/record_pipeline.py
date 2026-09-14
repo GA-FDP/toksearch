@@ -86,7 +86,7 @@ from ..provenance.base import safe_call
 from ..provenance.code import capture_code
 from ..provenance.context import RunContext, SourceSpec, BackendSpec
 from ..provenance.hashing import sha256_of
-from ..signal.store_snapshot import pin_run
+from ..signal.store_catalog import pin_run
 
 
 class MissingColumnName(Exception):
@@ -107,7 +107,7 @@ class Pipeline:
 
     Methods:
         from_sql: Initialize a Pipeline using the results of an sql query
-        from_snapshot: Initialize a Pipeline pinned to a catalog snapshot
+        from_catalog: Initialize a Pipeline pinned to a published catalog
         __init__: Initialize a Pipeline object
         fetch: Add a signal to be fetched by the pipeline
         fetch_dataset: Create an xarray dataset field in the record
@@ -130,18 +130,36 @@ class Pipeline:
     """
 
     @classmethod
-    def from_snapshot(cls, snapshot: Optional[str], parent) -> "Pipeline":
-        """Initialize a Pipeline pinned to a catalog snapshot
+    def from_snapshot(cls, path, parent=None) -> "Pipeline":
+        """Initialize a Pipeline from a SAVED SNAPSHOT file (B7b).
+
+        Until that lands this exists only to refuse its former argument. It
+        used to take a catalog stamp; passing one now would otherwise be
+        accepted as a filename and silently leave the run unpinned.
+        """
+        if isinstance(path, str) and path.strip().lower().startswith("catalog_"):
+            raise ValueError(
+                "Pipeline.from_snapshot({!r}) looks like a published catalog. "
+                "That is now Pipeline.from_catalog(...); from_snapshot takes "
+                "the path of a saved snapshot file.".format(path))
+        raise NotImplementedError(
+            "Pipeline.from_snapshot reads a saved snapshot file, which is not "
+            "implemented yet (B7b). Use Pipeline.from_catalog(...) to pin a "
+            "published catalog.")
+
+    @classmethod
+    def from_catalog(cls, catalog: Optional[str], parent) -> "Pipeline":
+        """Initialize a Pipeline pinned to a published catalog
 
         Every store read the pipeline performs resolves through `snapshot`,
-        on every backend, and the pin outranks FDP_STORE_SNAPSHOT.
+        on every backend, and the pin outranks FDP_STORE_CATALOG.
 
         Arguments:
-            snapshot: A catalog snapshot, e.g. "catalog_20260907T232802Z".
+            catalog: A published catalog, e.g. "catalog_20260907T232802Z".
 
                 "latest" (or None) names nothing: the pipeline resolves and
                 freezes the newest snapshot when it computes, and an ambient
-                FDP_STORE_SNAPSHOT still wins. That is so a script can take
+                FDP_STORE_CATALOG still wins. That is so a script can take
                 the snapshot as an argument and default it to the word,
                 without special-casing it and without losing the pin.
             parent: As Pipeline.__init__ — shot numbers, dicts, Records, a
@@ -149,12 +167,12 @@ class Pipeline:
                 lets this compose with from_sql.
 
         Raises:
-            SnapshotConflict: at compute time, if FDP_STORE_SNAPSHOT names a
-                different snapshot. A run cannot honour two pins.
+            CatalogConflict: at compute time, if FDP_STORE_CATALOG names a
+                different catalog. A run cannot honour two pins.
 
         Examples:
             ```python
-            pipe = Pipeline.from_snapshot(
+            pipe = Pipeline.from_catalog(
                 "catalog_20260907T232802Z",
                 Pipeline.from_sql(conn, query))
             ```
@@ -163,16 +181,16 @@ class Pipeline:
             and `fdp run --snapshot X` still overrides it:
 
             ```python
-            parser.add_argument("--snapshot", default="latest")
+            parser.add_argument("--catalog", default="latest")
             args = parser.parse_args()
-            pipe = Pipeline.from_snapshot(args.snapshot, shots)
+            pipe = Pipeline.from_catalog(args.catalog, shots)
             ```
         """
         pipe = cls(parent)
         # Consumed at the boundary: the word is never carried, so it cannot
         # reach the environment as a pin value.
-        if snapshot and snapshot.strip().lower() != "latest":
-            pipe._snapshot = snapshot
+        if catalog and catalog.strip().lower() != "latest":
+            pipe._catalog = catalog
         return pipe
 
     @classmethod
@@ -295,8 +313,8 @@ class Pipeline:
         # Same shape, and for a sharper reason: a pin that quietly stopped
         # applying when a pipeline was extended would be a guarantee silently
         # withdrawn. Assigned outside the branch so neither arm can forget it.
-        self._snapshot = (
-            getattr(parent, "_snapshot", None)
+        self._catalog = (
+            getattr(parent, "_catalog", None)
             if isinstance(parent, Pipeline)
             else None
         )
@@ -557,11 +575,11 @@ class Pipeline:
         # Unconditional, and before create_recordset: the correctness fix
         # cannot be contingent on opting into provenance recording, and the
         # worker disagreement can only be fixed before any worker exists.
-        snapshot = pin_run(self._snapshot)
+        catalog = pin_run(self._catalog)
 
         ctx = None
         if provenance is not None:
-            ctx = self._run_context(recordset_cls, config, snapshot)
+            ctx = self._run_context(recordset_cls, config, catalog)
             safe_call(provenance, "on_compute_start", ctx)
 
         if isinstance(self.parent, RecordSet):
@@ -711,7 +729,7 @@ class Pipeline:
         shots = sorted(rec.shot for rec in records)
         return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
 
-    def _run_context(self, recordset_cls, config, snapshot=None) -> RunContext:
+    def _run_context(self, recordset_cls, config, catalog=None) -> RunContext:
         """Derive the full description of the run about to happen."""
         op_specs = tuple(
             op.spec() for op in self._operations if hasattr(op, "spec")
@@ -739,7 +757,7 @@ class Pipeline:
             code=capture_code(),
             device=self._device_hint(signals),
             parent_run=getattr(self.parent, "run_id", None),
-            store={"snapshot": snapshot} if snapshot else None,
+            store={"catalog": catalog} if catalog else None,
         )
 
     @staticmethod

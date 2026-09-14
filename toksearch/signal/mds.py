@@ -120,9 +120,9 @@ class StoreVersionError(Exception):
 
 # The run-wide pin, set by `fdp run --snapshot`, by a user's own export, or
 # by toksearch settling one snapshot before the workers start. Named here
-# rather than imported from store_snapshot to keep this module's dependency
-# on it one-way: store_snapshot knows nothing about signals.
-_RUN_PIN = "FDP_STORE_SNAPSHOT"
+# rather than imported from store_catalog to keep this module's dependency
+# on it one-way: store_catalog knows nothing about signals.
+_RUN_PIN = "FDP_STORE_CATALOG"
 
 
 def _snapshot_missing():

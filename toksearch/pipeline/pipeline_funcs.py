@@ -57,7 +57,7 @@ class _SafeFetch(object):
             record[self.name] = self.signal.fetch(
                 record.shot,
                 version=record.get("version", None),
-                snapshot=record.get("snapshot", None))
+                snapshot=record.get("catalog", None))
         except Exception as e:
             record.set_error(self.name, e)
             record[self.name] = None
@@ -87,7 +87,7 @@ class _SafeFetchAsXarray(object):
             val = self.signal.fetch_as_xarray(
                 record.shot,
                 version=record.get("version", None),
-                snapshot=record.get("snapshot", None))
+                snapshot=record.get("catalog", None))
             record[self.ds_name] = xr.merge(
                 [record[self.ds_name], val.to_dataset(name=self.signame)],
                 join="outer",

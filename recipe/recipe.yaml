@@ -80,7 +80,8 @@ requirements:
   # touches a store; ptdata is imported lazily and a MAST-only install needs
   # none of it. But an older ptdata alongside this toksearch is silently
   # wrong rather than broken: compute() exports FDP_STORE_SNAPSHOT and
-  # ptdata < 2.8.0 does not read it, so every pin would be accepted, recorded
+  # ptdata < 2.9.0 does not read FDP_STORE_CATALOG (it read the pre-B7b
+  # FDP_STORE_SNAPSHOT), so every pin would be accepted, recorded
   # in the provenance, and ignored -- a run that says it read one snapshot
   # while reading whatever was newest.
   #
@@ -88,7 +89,7 @@ requirements:
   # if the package is present at all. The solver is the only protection,
   # because nothing at runtime can tell an ignored pin from an honoured one.
   run_constraints:
-    - ptdata >=2.8.0
+    - ptdata >=2.9.0
 
 tests:
   - script:
