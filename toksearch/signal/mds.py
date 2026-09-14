@@ -42,11 +42,20 @@ set the environment variables for the MDSplus trees.
 """
 
 import logging
+import os
+import sys
+
+# MDSplus locates its DCL command tables (e.g. mdsdcl_commands.xml) via
+# $MDSPLUS_DIR/xml/, falling back to the cwd if unset. Conda/mamba/pixi
+# don't export this, and users often invoke the interpreter directly
+# without activating the environment, so set it from sys.prefix before
+# MDSplus loads its shared libraries. setdefault preserves an explicit
+# user override.
+os.environ.setdefault("MDSPLUS_DIR", sys.prefix)
 
 import MDSplus as mds
 from MDSplus.mdsExceptions import MDSplusERROR
 import pdb
-import os
 import contextlib
 from urllib.parse import urlparse
 import numpy as np
