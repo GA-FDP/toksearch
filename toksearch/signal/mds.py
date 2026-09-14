@@ -256,6 +256,25 @@ def _resolve_store_path(treename, shot, version, snapshot, catalog_root,
         if shared.found:
             entries += shared_tree_paths(views_root, shard, shared.version,
                                          treename)
+        elif shared.miss == _snapshot_missing():
+            # Same reasoning as the shot branch above, and it was missing
+            # here: a catalog that does not EXIST is a broken configuration,
+            # not an un-ingested tree. Skipping it dropped the model tree out
+            # of the search path with no message -- and under a pin there is
+            # no archives fallback behind it, so the read either failed with
+            # an MDSplus node error naming nothing relevant, or succeeded
+            # because the shot's own tree happened to carry the node. Both
+            # are worse than saying so.
+            raise StoreVersionError(
+                "the shared shard for {!r} resolves through catalog {!r}, "
+                "and that catalog does not exist on {} ({}). A saved "
+                "snapshot that names its shards does not need the catalog "
+                "at all -- rebuild it with `--tree {}`.".format(
+                    treename, snapshot or os.environ.get(_RUN_PIN, ""),
+                    subject, shared.detail, treename))
+        # A shard the catalog simply does not list is an un-ingested tree,
+        # not a broken pin, and still skips: failing there would break every
+        # pinned read of a tree the shared area has not absorbed yet.
 
     # Setting a tree path replaces the whole search path, so the fallback --
     # where archives/ lives -- vanishes unless carried along. Unpinned reads

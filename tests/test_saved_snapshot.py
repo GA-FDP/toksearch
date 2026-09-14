@@ -154,10 +154,6 @@ class TestShardsBeatTheCatalog(unittest.TestCase):
         self.assertEqual(seen["version"], 2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestSelfContainment(unittest.TestCase):
     """The claim that makes a citation outlive catalog pruning.
 
@@ -301,3 +297,61 @@ class TestAnOrdinaryRunIsUnaffected(unittest.TestCase):
         # is a TypeError -- which would surface at compute() on every run.
         pipe = Pipeline([165920])
         pipe._warn_uncovered_trees()      # must simply return
+
+
+class TestABogusCatalogIsRefusedForShardsToo(unittest.TestCase):
+    """Spec rule 6, the half that did not hold.
+
+    The shot half works by construction: a pinned version outlives its
+    catalog. The shard half did not. `if shared.found:` skipped a failed
+    resolution without a word, so a replay naming a pruned catalog and no
+    shards read its measurements from the pin and quietly dropped the model
+    tree out of the search path -- and under a pin the archives fallback is
+    dropped too, so there was nothing behind it.
+
+    Whether a user ever saw this depended on whether the shot's own tree
+    happened to carry the node they asked for. Against the live origin it
+    did: three shots returned data at `catalog_nope`, which is the acceptance
+    control passing when it was supposed to fail.
+    """
+
+    def _resolve(self, miss, detail="no such snapshot"):
+        got = mock.Mock(found=True, version=7, snapshot=CATALOG, detail="")
+        shared = mock.Mock(found=False, miss=miss, detail=detail)
+        index = mock.Mock(**{"resolve_version.return_value": got,
+                             "resolve_shared_version.return_value": shared})
+        with env(FDP_STORE_SHARDS=None, FDP_STORE_CATALOG="catalog_nope"), \
+             mock.patch.object(mds_module, "_store_index", return_value=index), \
+             mock.patch.object(mds_module, "_snapshot_missing",
+                               lambda: "SnapshotMissing"), \
+             mock.patch.object(mds_module, "shared_tree_paths",
+                               lambda *a, **k: ["/p"]):
+            return mds_module._resolve_store_path(
+                "bci", 165920, 1, None,
+                "pelican://host/ns", "/views", "archives", "subject")
+
+    def test_a_catalog_that_does_not_exist_raises(self):
+        with self.assertRaises(mds_module.StoreVersionError) as cm:
+            self._resolve("SnapshotMissing")
+        self.assertIn("catalog_nope", str(cm.exception))
+
+    def test_the_message_says_how_to_stop_needing_the_catalog(self):
+        # Naming the shards is the fix, and it is the whole point of the
+        # feature. A message that only reports the breakage sends the user
+        # looking for a catalog that was pruned on purpose.
+        with self.assertRaises(mds_module.StoreVersionError) as cm:
+            self._resolve("SnapshotMissing")
+        self.assertIn("--tree", str(cm.exception))
+        self.assertIn("bci", str(cm.exception))
+
+    def test_a_shard_simply_not_in_the_catalog_still_skips(self):
+        # Different fact, different handling: the catalog exists and does not
+        # list this shard, which is an un-ingested tree, not a broken pin.
+        # Failing here would break every pinned read of a tree the shared
+        # area has not absorbed -- the migration story B5 deliberately kept.
+        version, path = self._resolve("ShardNotInCatalog")
+        self.assertEqual(version, 7)
+
+
+if __name__ == "__main__":
+    unittest.main()
