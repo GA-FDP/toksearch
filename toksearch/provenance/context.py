@@ -73,6 +73,11 @@ class RunContext:
     code: CodeSpec
     device: Optional[str] = None
     parent_run: Optional[str] = None
+    # The versioned store this run read from: {"snapshot": "catalog_..."}.
+    # A dict rather than a bare string because a cohort id joins it later,
+    # and a backend that has learned to read ctx["store"]["snapshot"] should
+    # not have to change shape then.
+    store: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -83,23 +88,37 @@ class RunContext:
             "code": self.code.to_dict(),
             "device": self.device,
             "parent_run": self.parent_run,
+            "store": self.store,
         }
 
+    def _input_identity_payload(self) -> dict:
+        payload = {
+            "source": self.source.to_dict(),
+            "signals": self.signals,
+            "device": self.device,
+        }
+        # Included only when something is pinned, so a device with no store
+        # keeps the artifact ids it already has. Adding a permanent
+        # "store": None would churn every existing id without recording a
+        # single new fact.
+        if self.store:
+            payload["store"] = self.store
+        return payload
+
     def input_identity(self) -> str:
-        """Hash of *what data this run reads* -- source plus signals.
+        """Hash of *what data this run reads* -- source, signals, store.
 
         Deliberately excludes ops, backend, and code: two runs that read the
         same data share an input artifact even if they then do different
         things with it. That shared artifact is what connects the lineage
         graph.
+
+        The catalog snapshot is part of *what data*, not of how it is
+        processed: it decides which VERSION of each shot is read, so two runs
+        with identical signals but different snapshots read different bytes
+        and must not collapse to one input artifact.
         """
-        return sha256_of(
-            {
-                "source": self.source.to_dict(),
-                "signals": self.signals,
-                "device": self.device,
-            }
-        )
+        return sha256_of(self._input_identity_payload())
 
     def write_directories(self) -> list:
         """Output directories declared by Pipeline.write operations.
