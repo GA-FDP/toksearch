@@ -205,26 +205,33 @@ class TestTheRunContextCarriesIt(unittest.TestCase):
             ctx = self._record(Pipeline([1, 2]))
         self.assertIsNone(ctx.to_dict()["store"])
 
-    def test_the_snapshot_changes_the_input_identity(self):
-        # input_identity is "what data this run reads". The snapshot decides
-        # WHICH VERSION of each shot is read, so two runs with identical
-        # signals but different snapshots read different bytes and must not
-        # share an input artifact id in the lineage graph.
+    def test_the_snapshot_does_not_change_the_input_identity(self):
+        # input_identity is the LOGICAL input -- which shots, which signals.
+        # It must dedupe across store states, so that two runs over the same
+        # shots at different snapshots are recognised as the same input. The
+        # PHYSICAL identity (which exact bytes) belongs to the provenance
+        # backend, which records the resolved versions alongside this; see
+        # toksearch_cmf/inputs.py, whose content hash is what CMF dedupes on.
+        #
+        # This asserted the opposite in 2.15.0/2.15.1. Folding the snapshot
+        # in collapsed the two levels and lost the logical notion.
         ids = []
         for snap in ("catalog_A", "catalog_B"):
             with env(FDP_STORE_ROOT="/some/root", FDP_STORE_SNAPSHOT=None), \
                  mock.patch.object(store_snapshot, "_resolve",
                                    return_value=snap):
                 ids.append(self._record(Pipeline([1, 2])).input_identity())
-        self.assertNotEqual(ids[0], ids[1])
+        self.assertEqual(ids[0], ids[1])
 
-    def test_an_unpinned_run_keeps_its_previous_identity(self):
-        # The key is omitted entirely when nothing is pinned, so a device
-        # with no store -- MAST -- keeps the artifact ids it already has.
-        # Including `None` would churn every existing id for no new fact.
-        with env(FDP_STORE_ROOT=None, FDP_STORE_SNAPSHOT=None):
+    def test_the_snapshot_still_reaches_the_backend(self):
+        # Excluded from the hash, NOT from the context: the backend needs it
+        # to record the physical identity.
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_SNAPSHOT=None), \
+             mock.patch.object(store_snapshot, "_resolve",
+                               return_value="catalog_A"):
             ctx = self._record(Pipeline([1, 2]))
-        self.assertNotIn("store", ctx._input_identity_payload())
+        self.assertEqual(ctx.store, {"snapshot": "catalog_A"})
+        self.assertEqual(ctx.to_dict()["store"], {"snapshot": "catalog_A"})
 
 
 if __name__ == "__main__":
