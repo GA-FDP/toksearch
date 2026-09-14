@@ -97,10 +97,44 @@ version or from the archive. That is the point -- a pin exists so a rerun can
 prove it read the same bytes, and a silent substitution would destroy exactly
 that.
 
-Reading from the store needs ``ptdata >= 2.7.0`` and a deployment that
+Reading from the store needs ``ptdata >= 2.8.0`` and a deployment that
 declares where its store is. Over ``fdp://`` the origin declares it; for a
 local read set ``FDP_VIEWS_ROOT``. Without one, pinned reads raise and
 unpinned reads behave exactly as they always have.
+
+Pinning a whole run
+===================
+
+"Latest" is a lookup that moves. A run that performs it more than once can
+read its early shots from one catalog snapshot and its later ones from the
+next -- and under ``compute_multiprocessing``, Ray or Spark each worker
+resolves independently, so they can disagree from the first fetch. Every
+``compute_*`` call therefore settles one snapshot *before any worker exists*
+and hands it to them, so a run always reads from exactly one catalog.
+
+Three places can name it, most specific first::
+
+    Pipeline.from_snapshot('catalog_20260907T232802Z', shots)   # 1. in code
+    $ fdp run --snapshot catalog_20260907T232802Z python x.py   # 2. FDP_STORE_SNAPSHOT
+    Pipeline(shots)                                             # 3. newest, frozen
+
+Code outranks the environment. The environment outranks the default, because
+there it was *told* rather than guessed. Whichever wins is recorded in the
+provenance ``RunContext`` and folded into ``input_identity()`` -- two runs
+over the same shots at different snapshots read different bytes, so they are
+different inputs.
+
+``from_snapshot('latest', ...)`` names *nothing*: it falls through to (2) and
+then (3). That is so a script can take the snapshot as an argument without
+special-casing the word, and still be overridable from the command line::
+
+    parser.add_argument('--snapshot', default='latest')
+    pipe = Pipeline.from_snapshot(args.snapshot, shots)
+
+**A process reads from one snapshot.** Worker processes are reused between
+runs and keep the environment they were started with, so a second run in the
+same process cannot be pinned differently -- it raises rather than reading
+from a catalog it did not report. To compare snapshots, run one process each.
 
 Datasets and Alignment
 ======================
