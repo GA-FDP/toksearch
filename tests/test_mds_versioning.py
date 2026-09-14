@@ -14,10 +14,12 @@ TestCase methods, not module-level functions: tests/testit.py collects with
 unittest.TestLoader().discover(), which sees TestCase subclasses only.
 """
 
+import os
 import unittest
 
 from unittest import mock
 
+from toksearch.signal import mds as mds_module
 from toksearch.signal.mds import (
     MdsConnectionRegistry,
     MdsTreePath,
@@ -811,3 +813,46 @@ class TestTheTwoRootsAreNotTheSameThing(PinTest):
             _resolve_store_path("bci", 165920, None, None,
                                 "", "/mnt/beegfs/data/views", "", "origin"),
             (None, None))
+
+
+class TestAnUnsatisfiableRunPinIsRefused(unittest.TestCase):
+    """B7a: a run-wide pin naming a snapshot that does not exist.
+
+    Found by the live acceptance test, not by a unit test: `fdp run
+    --snapshot catalog_nope` returned DATA, because `pinned` counted only
+    the record's own pin. The run-wide variable was invisible to that check,
+    so an unsatisfiable pin fell through to the unversioned archive while
+    the run believed it was pinned.
+    """
+
+    def setUp(self):
+        self._old = dict(os.environ)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._old)
+
+    def _resolve(self, miss):
+        got = mock.Mock(found=False, miss=miss, detail="no catalog snapshot X")
+        index = mock.Mock(**{"resolve_version.return_value": got})
+        with mock.patch.object(mds_module, "_store_index", return_value=index), \
+             mock.patch.object(mds_module, "_snapshot_missing",
+                               return_value="SNAPSHOT_MISSING"):
+            return mds_module._resolve_store_path(
+                "bci", 165920, None, None,
+                "pelican://host/ns", "/views", "archives", "subject")
+
+    def test_a_nonexistent_run_pin_raises_and_names_the_variable(self):
+        os.environ["FDP_STORE_SNAPSHOT"] = "catalog_nope"
+        with self.assertRaises(mds_module.StoreVersionError) as cm:
+            self._resolve("SNAPSHOT_MISSING")
+        msg = str(cm.exception)
+        self.assertIn("catalog_nope", msg)
+        self.assertIn("FDP_STORE_SNAPSHOT", msg)
+
+    def test_an_unminted_shot_still_falls_back(self):
+        # The migration story. toksearch sets the run-wide variable on EVERY
+        # run with a store, so treating its presence as a pin would turn
+        # every not-yet-ingested shot into an error.
+        os.environ["FDP_STORE_SNAPSHOT"] = "catalog_real"
+        self.assertEqual(self._resolve("SHOT_NOT_IN_CATALOG"), (None, None))

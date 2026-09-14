@@ -118,6 +118,28 @@ class StoreVersionError(Exception):
     """
 
 
+# The run-wide pin, set by `fdp run --snapshot`, by a user's own export, or
+# by toksearch settling one snapshot before the workers start. Named here
+# rather than imported from store_snapshot to keep this module's dependency
+# on it one-way: store_snapshot knows nothing about signals.
+_RUN_PIN = "FDP_STORE_SNAPSHOT"
+
+
+def _snapshot_missing():
+    """``StoreMiss.SnapshotMissing``, or a sentinel matching nothing.
+
+    Imported lazily for the same reason as StoreIndex: toksearch is
+    device-neutral and an install without ptdata must not fail here. If the
+    enum is unavailable the store is unreachable anyway, so nothing is lost
+    by matching no miss at all.
+    """
+    try:
+        from ptdata import StoreMiss
+    except ImportError:
+        return object()
+    return StoreMiss.SnapshotMissing
+
+
 def _store_index(store_root):
     index = _STORE_INDEX.get(store_root)
     if index is None:
@@ -182,6 +204,28 @@ def _resolve_store_path(treename, shot, version, snapshot, catalog_root,
                 "cannot honour version={!r} snapshot={!r} for shot {} on "
                 "{}: {} {}".format(version, snapshot, shot, subject,
                                    got.miss, got.detail))
+
+        # A snapshot that does not EXIST is a broken configuration, not an
+        # unminted shot, and it is broken for every shot this run will read.
+        # Falling back here would answer from the unversioned archive while
+        # the run believed it was pinned -- silently serving data from
+        # nowhere near the snapshot it reports, which is precisely the
+        # failure this whole feature exists to remove.
+        #
+        # Distinguished from the record-level pin above because the run-wide
+        # variable is set on EVERY run with a store, including unpinned ones
+        # (toksearch settles one snapshot before the workers start). Treating
+        # its mere presence as a pin would turn every not-yet-ingested shot
+        # into an error and break the migration story; treating a NONEXISTENT
+        # snapshot as an error does not.
+        if got.miss == _snapshot_missing():
+            raise StoreVersionError(
+                "this run is pinned to snapshot {!r} by {}, and it does not "
+                "exist on {} ({}). Nothing can be read at that pin. Check "
+                "the value, or unset it to read the newest.".format(
+                    os.environ.get(_RUN_PIN, ""), _RUN_PIN, subject,
+                    got.detail))
+
         # Unpinned and unminted: fall back rather than fail. A store that has
         # not reached this shot yet must not break reads that worked before.
         return None, None
