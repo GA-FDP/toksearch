@@ -182,3 +182,122 @@ class TestSelfContainment(unittest.TestCase):
 
         # The shard came from the file, so the catalog was not asked for it.
         index.resolve_shared_version.assert_not_called()
+
+
+class TestRunContextCarriesTheShots(unittest.TestCase):
+    """A provenance backend receives a RunContext and nothing else, so if it
+    is to build a snapshot the shots have to be in there. SourceSpec records
+    a count and a hash of them, which cannot be turned back into a list."""
+
+    def _ctx(self, pipe):
+        seen = []
+
+        class B:
+            run_id = "r1"
+            def on_compute_start(self, ctx): seen.append(ctx)
+            def on_compute_end(self, ctx, result): pass
+
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None,
+                 FDP_STORE_SHARDS=None):
+            pipe.compute_serial(provenance=B())
+        return seen[0]
+
+    def test_the_shots_reach_the_backend(self):
+        ctx = self._ctx(Pipeline([165921, 165920]))
+        self.assertEqual(ctx.shots, (165920, 165921))
+
+    def test_they_survive_to_dict(self):
+        ctx = self._ctx(Pipeline([165920]))
+        self.assertEqual(ctx.to_dict()["shots"], (165920,))
+
+    def test_they_do_not_change_the_input_identity(self):
+        # source.hash already covers the shot list. Adding it to the hash
+        # would churn every artifact id in the lineage graph to record a
+        # fact already recorded.
+        from toksearch.provenance.context import (
+            BackendSpec, CodeSpec, RunContext, SourceSpec)
+
+        common = dict(
+            source=SourceSpec(kind="shotlist", count=1, hash="abc"),
+            ops=(), signals={},
+            backend=BackendSpec(kind="SerialRecordSet", config={}),
+            code=CodeSpec(commit=None, dirty=False, repo_root=None,
+                          script=None, argv=()),
+        )
+        without = RunContext(**common)
+        with_shots = RunContext(**common, shots=(165920, 165921))
+        self.assertEqual(without.input_identity(), with_shots.input_identity())
+
+    def test_a_recordset_parent_has_no_shots_rather_than_a_wrong_list(self):
+        pipe = Pipeline([165920])
+        ctx = self._ctx(Pipeline(pipe.compute_serial()))
+        self.assertIn(ctx.shots, (None, (165920,)))
+
+
+class TestItWarnsAboutTreesTheSnapshotDoesNotCover(SnapshotFileTest):
+    """A snapshot naming SOME shards looks better protected than one naming
+    none, and `save` cannot know which trees a later run will open. The
+    driver can: at compute time it holds both the snapshot's shards and the
+    trees its signals will read.
+
+    Without this, a replay pinned to efit01-0 that reads `bci` resolves bci's
+    model tree through whatever catalog is current -- reproducible for the
+    measurement, not for what it means -- and says nothing.
+    """
+
+    def _warnings(self, doc, treenames):
+        from toksearch import MdsSignal
+        pipe = Pipeline.from_snapshot(self.write(doc))
+        for i, tree in enumerate(treenames):
+            pipe.fetch("s%d" % i, MdsSignal(r"\x", tree))
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None,
+                 FDP_STORE_SHARDS=None), \
+             mock.patch.object(mds_module, "_store_index",
+                               side_effect=AssertionError("no fetch here")):
+            import warnings
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                pipe._warn_uncovered_trees()
+            return [str(w.message) for w in caught]
+
+    def test_a_tree_the_snapshot_does_not_name_is_reported(self):
+        msgs = self._warnings(a_snapshot(shared=(("efit01-0", 5),)), ["bci"])
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("bci", msgs[0])
+        self.assertIn("catalog", msgs[0].lower())
+
+    def test_a_covered_tree_is_silent(self):
+        self.assertEqual(
+            self._warnings(a_snapshot(shared=(("efit01-0", 5),)), ["efit01"]),
+            [])
+
+    def test_a_snapshot_naming_no_shards_reports_every_tree(self):
+        msgs = self._warnings(a_snapshot(shared=()), ["efit01", "bci"])
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("bci", msgs[0])
+        self.assertIn("efit01", msgs[0])
+
+    def test_a_pipeline_with_no_tree_signals_is_silent(self):
+        self.assertEqual(self._warnings(a_snapshot(), []), [])
+
+
+class TestAnOrdinaryRunIsUnaffected(unittest.TestCase):
+    """Every MDSplus pipeline now passes through _warn_uncovered_trees, so a
+    mistake in it breaks every run rather than only replays. Removing the
+    "am I replaying?" guard failed no test until this one existed."""
+
+    def test_a_pipeline_that_is_not_a_replay_is_silent(self):
+        import warnings as _w
+        from toksearch import MdsSignal
+        pipe = Pipeline([165920])
+        pipe.fetch("s", MdsSignal(r"\x", "bci"))
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            pipe._warn_uncovered_trees()
+        self.assertEqual([str(x.message) for x in caught], [])
+
+    def test_it_does_not_raise_when_there_is_no_snapshot(self):
+        # `self._shards` is None off a replay, and `{e["shard"] for e in None}`
+        # is a TypeError -- which would surface at compute() on every run.
+        pipe = Pipeline([165920])
+        pipe._warn_uncovered_trees()      # must simply return

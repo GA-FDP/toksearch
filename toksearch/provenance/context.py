@@ -78,6 +78,11 @@ class RunContext:
     # and a backend that has learned to read ctx["store"]["snapshot"] should
     # not have to change shape then.
     store: Optional[dict] = None
+    #: The shot numbers this run reads, sorted, or None when the source
+    #: cannot name them. SourceSpec records a count and a hash, which a
+    #: backend cannot turn back into a list -- and a backend receives a
+    #: RunContext and nothing else, so a snapshot builder needs them here.
+    shots: Optional[Tuple[int, ...]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -89,6 +94,7 @@ class RunContext:
             "device": self.device,
             "parent_run": self.parent_run,
             "store": self.store,
+            "shots": self.shots,
         }
 
     def input_identity(self) -> str:

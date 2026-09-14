@@ -22,6 +22,7 @@ user-defined functions.
 
 from __future__ import annotations
 
+import warnings
 import os
 import copy
 import importlib
@@ -605,6 +606,7 @@ class Pipeline:
         # worker disagreement can only be fixed before any worker exists.
         catalog = pin_run(self._catalog)
         pin_shards(self._shards)
+        self._warn_uncovered_trees()
 
         ctx = None
         if provenance is not None:
@@ -758,6 +760,74 @@ class Pipeline:
         shots = sorted(rec.shot for rec in records)
         return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
 
+    def _warn_uncovered_trees(self) -> None:
+        """Say which trees this replay is NOT pinning.
+
+        A saved snapshot naming some shards looks better protected than one
+        naming none, and `fdp snapshot save` cannot know which trees a later
+        run will open. Here, at compute time, both are known: the snapshot's
+        shards and the trees the pipeline's signals will read.
+
+        An uncovered tree still resolves -- through whatever catalog is
+        current -- so this is a warning and not an error. What it must not be
+        is silence: the run is then reproducible for the measurement and not
+        for what it means, and nothing says so.
+        """
+        if self._shards is None:
+            return                      # not replaying a snapshot
+
+        try:
+            from ..signal.store_path import shard_key
+        except ImportError:
+            return
+
+        shots = self._shots()
+        if not shots:
+            return
+
+        trees = set()
+        for op in self._operations:
+            spec = op.spec() if hasattr(op, "spec") else None
+            if spec is None or spec.op not in ("fetch", "fetch_dataset"):
+                continue
+            fields = (spec.detail.get("signal") or {}).get("fields") or {}
+            if fields.get("treename"):
+                trees.add(fields["treename"])
+        if not trees:
+            return
+
+        covered = {e["shard"] for e in self._shards}
+        uncovered = sorted({t for t in trees
+                            if any(shard_key(t, s) not in covered
+                                   for s in shots)})
+        if not uncovered:
+            return
+
+        warnings.warn(
+            "this saved snapshot does not name the shared shards for "
+            "{}. Those trees' model data will resolve through the catalog "
+            "the snapshot names ({}), not through the snapshot -- so this "
+            "replay is pinned for the measurements and not for the "
+            "instrument description, and stops being reproducible when that "
+            "catalog is pruned. Rebuild with `--tree {}`.".format(
+                ", ".join(uncovered), self._catalog or "unset",
+                ",".join(uncovered)),
+            stacklevel=3)
+
+    def _shots(self):
+        """The shots this run will read, sorted, or None if not knowable.
+
+        `_source_spec` already computes this and keeps only its hash, which
+        cannot be turned back into a list.
+        """
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return None
+        try:
+            return tuple(sorted(rec.shot for rec in records))
+        except (AttributeError, TypeError):
+            return None
+
     def _run_context(self, recordset_cls, config, catalog=None) -> RunContext:
         """Derive the full description of the run about to happen."""
         op_specs = tuple(
@@ -787,6 +857,7 @@ class Pipeline:
             device=self._device_hint(signals),
             parent_run=getattr(self.parent, "run_id", None),
             store={"catalog": catalog} if catalog else None,
+            shots=self._shots(),
         )
 
     @staticmethod
