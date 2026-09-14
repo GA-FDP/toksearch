@@ -843,16 +843,16 @@ class TestAnUnsatisfiableRunPinIsRefused(unittest.TestCase):
                 "pelican://host/ns", "/views", "archives", "subject")
 
     def test_a_nonexistent_run_pin_raises_and_names_the_variable(self):
-        os.environ["FDP_STORE_SNAPSHOT"] = "catalog_nope"
+        os.environ["FDP_STORE_CATALOG"] = "catalog_nope"
         with self.assertRaises(mds_module.StoreVersionError) as cm:
             self._resolve("SNAPSHOT_MISSING")
         msg = str(cm.exception)
         self.assertIn("catalog_nope", msg)
-        self.assertIn("FDP_STORE_SNAPSHOT", msg)
+        self.assertIn("FDP_STORE_CATALOG", msg)
 
     def test_an_unminted_shot_still_falls_back(self):
         # The migration story. toksearch sets the run-wide variable on EVERY
         # run with a store, so treating its presence as a pin would turn
         # every not-yet-ingested shot into an error.
-        os.environ["FDP_STORE_SNAPSHOT"] = "catalog_real"
+        os.environ["FDP_STORE_CATALOG"] = "catalog_real"
         self.assertEqual(self._resolve("SHOT_NOT_IN_CATALOG"), (None, None))

@@ -83,11 +83,11 @@ it on both transports::
 
     Pipeline([
         {'shot': 165920, 'version': 2},                   # one shot, one version
-        {'shot': 165921, 'snapshot': 'catalog_20260907T232802Z'},
+        {'shot': 165921, 'catalog': 'catalog_20260907T232802Z'},
     ])
 
-``version`` pins a single shot. ``snapshot`` resolves through that catalog
-rather than the newest, so one recorded value reproduces a whole campaign.
+``version`` pins a single shot. ``catalog`` resolves through that published
+catalog rather than the newest, so one recorded value reproduces a whole campaign.
 Omit both and the newest version is read, falling back to the unversioned
 archive for anything the store has not absorbed.
 
@@ -97,7 +97,7 @@ version or from the archive. That is the point -- a pin exists so a rerun can
 prove it read the same bytes, and a silent substitution would destroy exactly
 that.
 
-Reading from the store needs ``ptdata >= 2.8.0`` and a deployment that
+Reading from the store needs ``ptdata >= 2.9.0`` and a deployment that
 declares where its store is. Over ``fdp://`` the origin declares it; for a
 local read set ``FDP_VIEWS_ROOT``. Without one, pinned reads raise and
 unpinned reads behave exactly as they always have.
@@ -114,8 +114,8 @@ and hands it to them, so a run always reads from exactly one catalog.
 
 Three places can name it, most specific first::
 
-    Pipeline.from_snapshot('catalog_20260907T232802Z', shots)   # 1. in code
-    $ fdp run --snapshot catalog_20260907T232802Z python x.py   # 2. FDP_STORE_SNAPSHOT
+    Pipeline.from_catalog('catalog_20260907T232802Z', shots)    # 1. in code
+    $ fdp run --catalog catalog_20260907T232802Z python x.py    # 2. FDP_STORE_CATALOG
     Pipeline(shots)                                             # 3. newest, frozen
 
 Code outranks the environment. The environment outranks the default, because
@@ -124,17 +124,17 @@ provenance ``RunContext`` and folded into ``input_identity()`` -- two runs
 over the same shots at different snapshots read different bytes, so they are
 different inputs.
 
-``from_snapshot('latest', ...)`` names *nothing*: it falls through to (2) and
+``from_catalog('latest', ...)`` names *nothing*: it falls through to (2) and
 then (3). That is so a script can take the snapshot as an argument without
 special-casing the word, and still be overridable from the command line::
 
-    parser.add_argument('--snapshot', default='latest')
-    pipe = Pipeline.from_snapshot(args.snapshot, shots)
+    parser.add_argument('--catalog', default='latest')
+    pipe = Pipeline.from_catalog(args.catalog, shots)
 
-**A process reads from one snapshot.** Worker processes are reused between
+**A process reads from one catalog.** Worker processes are reused between
 runs and keep the environment they were started with, so a second run in the
 same process cannot be pinned differently -- it raises rather than reading
-from a catalog it did not report. To compare snapshots, run one process each.
+from a catalog it did not report. To compare catalogs, run one process each.
 
 Datasets and Alignment
 ======================

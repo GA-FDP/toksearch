@@ -26,10 +26,10 @@ import unittest
 from unittest import mock
 
 from toksearch import Pipeline
-from toksearch.signal import store_snapshot
+from toksearch.signal import store_catalog
 
 
-# Duplicated from test_store_snapshot.py rather than imported. The canonical
+# Duplicated from test_store_catalog.py rather than imported. The canonical
 # runner (tests/testit) cds into tests/ and discovers from there, so a plain
 # cross-module import works under it and fails under `pytest` from the repo
 # root. A fourteen-line fixture is cheaper than a test file that runs only
@@ -58,7 +58,7 @@ def report_pinned_snapshot(rec):
     Module level because loky pickles by reference; a closure or a lambda
     would not survive the trip to a worker.
     """
-    rec["snap"] = os.environ.get(store_snapshot.VAR, "")
+    rec["snap"] = os.environ.get(store_catalog.VAR, "")
     return rec
 
 
@@ -76,7 +76,7 @@ def fresh_workers():
     from the previous one runs on workers still holding the previous value --
     which is not a test artefact but the real constraint (see
     TestWorkersKeepTheEnvironmentTheyStartedWith below). Production is
-    protected from it by SnapshotConflict; these tests defeat that by writing
+    protected from it by CatalogConflict; these tests defeat that by writing
     the variable directly, so they have to clear the workers themselves.
     """
     from joblib.externals.loky import get_reusable_executor
@@ -97,8 +97,8 @@ class TestEveryWorkerAgrees(unittest.TestCase):
         fresh_workers()
 
     def test_multiprocessing_workers_share_one_snapshot(self):
-        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_SNAPSHOT=None), \
-             mock.patch.object(store_snapshot, "_resolve",
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
                                return_value="catalog_RESOLVED"):
             got = _snapshots_from(report_pinned_snapshot)
 
@@ -110,7 +110,7 @@ class TestEveryWorkerAgrees(unittest.TestCase):
 
     def test_an_explicit_pin_reaches_every_worker_too(self):
         with env(FDP_STORE_ROOT="/some/root",
-                 FDP_STORE_SNAPSHOT="catalog_FROM_CLI"):
+                 FDP_STORE_CATALOG="catalog_FROM_CLI"):
             got = _snapshots_from(report_pinned_snapshot)
 
         self.assertEqual(set(got), {"catalog_FROM_CLI"})
@@ -144,30 +144,30 @@ class TestWorkersKeepTheEnvironmentTheyStartedWith(unittest.TestCase):
     def test_a_pin_set_after_the_workers_exist_does_not_reach_them(self):
         fresh_workers()
         with env(FDP_STORE_ROOT="/some/root",
-                 FDP_STORE_SNAPSHOT="catalog_FIRST"):
+                 FDP_STORE_CATALOG="catalog_FIRST"):
             first = _snapshots_from(report_pinned_snapshot, shots=2)
             self.assertEqual(set(first), {"catalog_FIRST"})
 
             # Written directly, behind pin_run's back: production cannot
-            # reach this state without raising SnapshotConflict.
-            os.environ[store_snapshot.VAR] = "catalog_SECOND"
+            # reach this state without raising CatalogConflict.
+            os.environ[store_catalog.VAR] = "catalog_SECOND"
             second = _snapshots_from(report_pinned_snapshot, shots=2)
 
         self.assertEqual(set(second), {"catalog_FIRST"},
                          "workers picked up a pin set after they started; if "
                          "this now passes, the one-snapshot-per-process rule "
-                         "in store_snapshot.pin_run can be relaxed")
+                         "in store_catalog.pin_run can be relaxed")
         fresh_workers()
 
     def test_a_second_differently_pinned_run_is_refused(self):
         # What stands between that stale worker and a wrong answer.
-        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_SNAPSHOT=None), \
-             mock.patch.object(store_snapshot, "_PINNED_THIS_PROCESS", False), \
-             mock.patch.object(store_snapshot, "_resolve",
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_PINNED_THIS_PROCESS", False), \
+             mock.patch.object(store_catalog, "_resolve",
                                return_value="catalog_FIRST"):
             Pipeline([1]).compute_serial()
-            with self.assertRaises(store_snapshot.SnapshotConflict) as cm:
-                Pipeline.from_snapshot("catalog_SECOND", [1]).compute_serial()
+            with self.assertRaises(store_catalog.CatalogConflict) as cm:
+                Pipeline.from_catalog("catalog_SECOND", [1]).compute_serial()
 
         msg = str(cm.exception)
         self.assertIn("catalog_FIRST", msg)
@@ -186,8 +186,8 @@ class TestPinningIsNotContingentOnProvenance(unittest.TestCase):
         # The correctness fix cannot depend on opting into recording. In a
         # multiprocess run the consequence is visible: unpinned, the workers
         # would read an unset variable and report "".
-        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_SNAPSHOT=None), \
-             mock.patch.object(store_snapshot, "_resolve",
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
                                return_value="catalog_RESOLVED"):
             got = _snapshots_from(report_pinned_snapshot)
         self.assertNotIn("", got)

@@ -85,7 +85,7 @@ class TestRecord(unittest.TestCase):
 
 
 class TestReservedProvenanceFields(unittest.TestCase):
-    """version/snapshot as reserved Record fields.
+    """version/catalog as reserved Record fields.
 
     These live in a TestCase, not as module-level test_* functions: the
     suite is collected by unittest.TestLoader().discover() (see
@@ -93,14 +93,14 @@ class TestReservedProvenanceFields(unittest.TestCase):
     functions import cleanly and are then silently never executed.
     """
 
-    def test_version_and_snapshot_survive_keep(self):
+    def test_version_and_catalog_survive_keep(self):
         """Provenance a routine keep() discards is provenance a reproduction
         cannot rely on, so these join shot and errors."""
         r = Record.from_dict({"shot": 165920, "version": 2,
-                              "snapshot": "catalog_x", "peak": 1.5})
+                              "catalog": "catalog_x", "peak": 1.5})
         r.keep(["peak"])
         self.assertEqual(r["version"], 2)
-        self.assertEqual(r["snapshot"], "catalog_x")
+        self.assertEqual(r["catalog"], "catalog_x")
         self.assertEqual(r["shot"], 165920)
         self.assertEqual(r["peak"], 1.5)
 
@@ -142,11 +142,11 @@ class TestReservedProvenanceFields(unittest.TestCase):
         self.assertIsNone(r.pop("shot"))
         self.assertEqual(r["shot"], 165920)
 
-    def test_a_user_may_still_supply_version_and_snapshot(self):
+    def test_a_user_may_still_supply_version_and_catalog(self):
         """Optional-known, NOT forbidden. Reserving them the way key and
         errors are reserved would reject the very shot list that seeds a
         pinned run."""
         r = Record.from_dict({"shot": 165920, "version": 2,
-                              "snapshot": "catalog_x"})
+                              "catalog": "catalog_x"})
         self.assertEqual(r["version"], 2)
-        self.assertEqual(r["snapshot"], "catalog_x")
+        self.assertEqual(r["catalog"], "catalog_x")
