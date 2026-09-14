@@ -17,13 +17,62 @@ import asyncio
 import os
 import sys
 import unittest
+from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from mcp.shared.memory import create_connected_server_and_client_session as connect
+try:
+    # mcp 1.x: one-call in-memory client/server bridge.
+    from mcp.shared.memory import (
+        create_connected_server_and_client_session as _connect_v1)
+except ImportError:
+    # mcp >= 2.0: the helper is gone; wire the memory streams by hand.
+    _connect_v1 = None
+    import anyio
+    from mcp import ClientSession
+    from mcp.shared.memory import create_client_server_memory_streams
 
 from toksearch.llm.mcp.server import build_server, discover_filtered_skills
+
+
+def _lowlevel(server):
+    """The wrapped lowlevel server: _mcp_server (1.x) / _lowlevel_server (2.x)."""
+    return getattr(server, "_mcp_server", None) or server._lowlevel_server
+
+
+def _is_error(result):
+    """CallToolResult error flag: isError (mcp 1.x) / is_error (2.x)."""
+    return getattr(result, "isError", None) if hasattr(result, "isError") \
+        else result.is_error
+
+
+def _mime_type(contents):
+    """Resource contents mime type: mimeType (mcp 1.x) / mime_type (2.x)."""
+    return getattr(contents, "mimeType", None) if hasattr(contents, "mimeType") \
+        else contents.mime_type
+
+
+@asynccontextmanager
+async def connect(server):
+    """Yield an un-initialized in-memory ClientSession for either mcp major."""
+    low = _lowlevel(server)
+    if _connect_v1 is not None:
+        async with _connect_v1(low) as client:
+            yield client
+        return
+    async with create_client_server_memory_streams() as (client_s, server_s):
+        client_read, client_write = client_s
+        server_read, server_write = server_s
+        async with anyio.create_task_group() as tg:
+            async def _serve():
+                await low.run(server_read, server_write,
+                              low.create_initialization_options(),
+                              raise_exceptions=True)
+            tg.start_soon(_serve)
+            async with ClientSession(client_read, client_write) as client:
+                yield client
+            tg.cancel_scope.cancel()
 
 
 def _make_skill(root: Path, name: str, description: str, body: str) -> None:
@@ -86,7 +135,7 @@ class TestServerInMemory(unittest.TestCase):
             server = build_server(extra_dirs=[root], packages=[])
 
             async def go():
-                async with connect(server._mcp_server) as client:
+                async with connect(server) as client:
                     await client.initialize()
                     listed = await client.list_resources()
                     uris = {str(r.uri): r for r in listed.resources}
@@ -95,7 +144,8 @@ class TestServerInMemory(unittest.TestCase):
                         uris["skill://alpha"].description, "Alpha skill")
                     read = await client.read_resource("skill://alpha")
                     self.assertIn("ALPHA BODY", read.contents[0].text)
-                    self.assertEqual(read.contents[0].mimeType, "text/markdown")
+                    self.assertEqual(_mime_type(read.contents[0]),
+                                     "text/markdown")
             asyncio.run(go())
 
     def test_read_skill_tool_ok_and_unknown(self):
@@ -105,15 +155,15 @@ class TestServerInMemory(unittest.TestCase):
             server = build_server(extra_dirs=[root], packages=[])
 
             async def go():
-                async with connect(server._mcp_server) as client:
+                async with connect(server) as client:
                     await client.initialize()
                     ok = await client.call_tool(
                         "read_skill", {"skill_name": "alpha"})
-                    self.assertIs(ok.isError, False)
+                    self.assertIs(_is_error(ok), False)
                     self.assertIn("ALPHA BODY", ok.content[0].text)
                     bad = await client.call_tool(
                         "read_skill", {"skill_name": "nope"})
-                    self.assertIs(bad.isError, True)
+                    self.assertIs(_is_error(bad), True)
                     self.assertIn("Unknown skill", bad.content[0].text)
             asyncio.run(go())
 

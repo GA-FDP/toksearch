@@ -23,6 +23,7 @@ llm = [
     "openai>=1.50",
     "matplotlib",
     "claude-agent-sdk>=0.2",
+    # <2 held only by claude-agent-sdk; toksearch's mcp code runs on 1.x and 2.x
     "mcp>=1.23,<2",
 ]
 
