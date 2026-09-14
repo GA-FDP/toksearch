@@ -31,6 +31,20 @@ import os
 
 VAR = "FDP_STORE_SNAPSHOT"
 
+# Set once this process has pinned a run, so a second run can tell "the user
+# told us" from "we decided this earlier". The two need different advice: the
+# first is a conflict the caller can resolve, the second is a constraint they
+# cannot.
+#
+# Why a run cannot be re-pinned: joblib/loky reuse worker processes across
+# Parallel calls, and a worker's environment is fixed when it is spawned. A
+# later os.environ change in the driver reaches workers that do not exist
+# yet, and no others -- so a second, differently pinned run would execute on
+# workers still holding the first pin. Ray and Spark executors are long-lived
+# for the same reason. One snapshot per process is not a limitation of this
+# module; it is what the backends make true.
+_PINNED_THIS_PROCESS = False
+
 
 class SnapshotConflict(Exception):
     """Two sources named different snapshots for one run.
@@ -72,10 +86,22 @@ def pin_run(snapshot=None):
     reached will raise a real error, with real context, at the first fetch.
     Nothing was asked for, so nothing is refused.
     """
+    global _PINNED_THIS_PROCESS
     existing = os.environ.get(VAR, "")
 
     if snapshot:
         if existing and existing != snapshot:
+            if _PINNED_THIS_PROCESS:
+                raise SnapshotConflict(
+                    "an earlier run in this process is already pinned to "
+                    "{!r}, and this one asks for {!r}. A process reads from "
+                    "one snapshot: its worker processes are reused between "
+                    "runs and keep the environment they were started with, "
+                    "so a second pin would not reach them. To compare "
+                    "snapshots, run one per process -- e.g. "
+                    "`fdp run --snapshot {} python sweep.py` once per "
+                    "snapshot.".format(existing, snapshot, snapshot)
+                )
             raise SnapshotConflict(
                 "this run is pinned to {!r} by {} and to {!r} in code; they "
                 "cannot both be honoured. Drop one -- either unset {} or "
@@ -84,6 +110,7 @@ def pin_run(snapshot=None):
                 )
             )
         os.environ[VAR] = snapshot
+        _PINNED_THIS_PROCESS = True
         return snapshot
 
     if existing:
@@ -106,4 +133,5 @@ def pin_run(snapshot=None):
         return None
 
     os.environ[VAR] = resolved
+    _PINNED_THIS_PROCESS = True
     return resolved
