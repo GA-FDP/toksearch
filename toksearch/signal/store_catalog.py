@@ -27,10 +27,20 @@ and an environment variable is the only channel that survives ``fork``,
 ``spawn``, a Ray worker on another host and a Spark executor alike.
 """
 
+import json
 import os
 
 VAR = "FDP_STORE_CATALOG"
 OLD_VAR = "FDP_STORE_SNAPSHOT"
+
+#: Shard versions a saved snapshot names, as a compact JSON map
+#: ``{"efit01-0": 5}``. An environment variable for the same
+#: reason the catalog is one: a shard is resolved in the WORKER,
+#: and no Python argument survives fork, spawn or a Ray worker on
+#: another host. A few shards per run, so it stays small.
+SHARDS_VAR = "FDP_STORE_SHARDS"
+
+SCHEMA = "fdp-snapshot/1"
 
 # Set once this process has pinned a run, so a second run can tell "the user
 # told us" from "we decided this earlier". The two need different advice: the
@@ -45,6 +55,15 @@ OLD_VAR = "FDP_STORE_SNAPSHOT"
 # for the same reason. One catalog per process is not a limitation of this
 # module; it is what the backends make true.
 _PINNED_THIS_PROCESS = False
+
+
+class SnapshotFileError(Exception):
+    """A saved-snapshot file that cannot be replayed.
+
+    Refused rather than partially honoured: replaying half a snapshot reads
+    data the citation does not describe, which is worse than not replaying
+    it at all.
+    """
 
 
 class RenamedVariable(Exception):
@@ -155,3 +174,61 @@ def pin_run(catalog=None):
     os.environ[VAR] = resolved
     _PINNED_THIS_PROCESS = True
     return resolved
+
+
+def load_snapshot(path):
+    """Read and validate a saved-snapshot file. Returns the document.
+
+    Raises SnapshotFileError with the path in the message: a replay that
+    cannot say which file it could not read is a bad citizen of a workflow
+    where the file is the citation.
+    """
+    if isinstance(path, str) and path.strip().lower().startswith("catalog_"):
+        raise ValueError(
+            "{!r} looks like a published catalog, not a saved-snapshot file. "
+            "That is Pipeline.from_catalog(...); from_snapshot takes a "
+            "path.".format(path))
+
+    try:
+        with open(path) as fh:
+            doc = json.load(fh)
+    except OSError as exc:
+        raise SnapshotFileError(
+            "cannot read saved snapshot {}: {}".format(path, exc)) from exc
+    except ValueError as exc:
+        raise SnapshotFileError(
+            "{} is not valid JSON: {}".format(path, exc)) from exc
+
+    schema = doc.get("schema")
+    if schema != SCHEMA:
+        raise SnapshotFileError(
+            "{} declares schema {!r}; this toksearch reads {!r}.".format(
+                path, schema, SCHEMA))
+    if not doc.get("shots"):
+        raise SnapshotFileError(
+            "{} names no shots, so there is nothing to replay.".format(path))
+    return doc
+
+
+def pin_shards(shards):
+    """Export the shard versions a saved snapshot names. Returns the map."""
+    mapping = {e["shard"]: e["version"] for e in shards or ()}
+    if mapping:
+        os.environ[SHARDS_VAR] = json.dumps(mapping, sort_keys=True)
+    return mapping
+
+
+def pinned_shards():
+    """The shard versions in force, as ``{shard: version}``. Never raises.
+
+    Read in the worker, on the tree-opening path, so a malformed value must
+    degrade to "nothing pinned" rather than take down every read.
+    """
+    raw = os.environ.get(SHARDS_VAR, "")
+    if not raw:
+        return {}
+    try:
+        got = json.loads(raw)
+        return {str(k): int(v) for k, v in got.items()}
+    except (ValueError, AttributeError, TypeError):
+        return {}

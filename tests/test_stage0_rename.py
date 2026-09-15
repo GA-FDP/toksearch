@@ -69,7 +69,7 @@ class TestTheOldRecordField(unittest.TestCase):
 class TestTheOldClassmethod(unittest.TestCase):
     def test_from_snapshot_refuses_a_catalog_stamp(self):
         with self.assertRaises(ValueError) as cm:
-            Pipeline.from_snapshot("catalog_20260907T232802Z", [1])
+            Pipeline.from_snapshot("catalog_20260907T232802Z")
         self.assertIn("from_catalog", str(cm.exception))
 
     def test_from_catalog_does_what_from_snapshot_used_to(self):

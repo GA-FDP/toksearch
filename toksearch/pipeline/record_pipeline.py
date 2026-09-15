@@ -22,6 +22,7 @@ user-defined functions.
 
 from __future__ import annotations
 
+import warnings
 import os
 import copy
 import importlib
@@ -86,7 +87,7 @@ from ..provenance.base import safe_call
 from ..provenance.code import capture_code
 from ..provenance.context import RunContext, SourceSpec, BackendSpec
 from ..provenance.hashing import sha256_of
-from ..signal.store_catalog import pin_run
+from ..signal.store_catalog import load_snapshot, pin_run, pin_shards
 
 
 class MissingColumnName(Exception):
@@ -108,6 +109,7 @@ class Pipeline:
     Methods:
         from_sql: Initialize a Pipeline using the results of an sql query
         from_catalog: Initialize a Pipeline pinned to a published catalog
+        from_snapshot: Initialize a Pipeline replaying a saved snapshot file
         __init__: Initialize a Pipeline object
         fetch: Add a signal to be fetched by the pipeline
         fetch_dataset: Create an xarray dataset field in the record
@@ -130,22 +132,44 @@ class Pipeline:
     """
 
     @classmethod
-    def from_snapshot(cls, path, parent=None) -> "Pipeline":
-        """Initialize a Pipeline from a SAVED SNAPSHOT file (B7b).
+    def from_snapshot(cls, path) -> "Pipeline":
+        """Initialize a Pipeline replaying a saved snapshot file.
 
-        Until that lands this exists only to refuse its former argument. It
-        used to take a catalog stamp; passing one now would otherwise be
-        accepted as a filename and silently leave the run unpinned.
+        A saved snapshot names the exact version of every shot and shard a
+        run read, with the hashes that let a third party check them. This
+        replays it: one record per shot, each carrying its `version`, with
+        the file's catalog and shard versions pinned for the run.
+
+        It needs no new resolution path. The whole mapping is known before
+        the run starts, so the shots become ordinary per-record `version`
+        pins -- B5's path, which already works on both transports and every
+        compute backend.
+
+        Arguments:
+            path: a file written by `fdp snapshot save`, or lifted out of a
+                CMF-recorded run's `inputs.json`.
+
+        Raises:
+            SnapshotFileError: the file is missing, is not a snapshot, or
+                names no shots. Refused rather than partially honoured --
+                replaying half a snapshot reads data the citation does not
+                describe.
+            ValueError: `path` looks like a published catalog. That is
+                `Pipeline.from_catalog`.
+
+        Examples:
+            ```python
+            recs = Pipeline.from_snapshot("betan-2024.json").compute_ray()
+            ```
         """
-        if isinstance(path, str) and path.strip().lower().startswith("catalog_"):
-            raise ValueError(
-                "Pipeline.from_snapshot({!r}) looks like a published catalog. "
-                "That is now Pipeline.from_catalog(...); from_snapshot takes "
-                "the path of a saved snapshot file.".format(path))
-        raise NotImplementedError(
-            "Pipeline.from_snapshot reads a saved snapshot file, which is not "
-            "implemented yet (B7b). Use Pipeline.from_catalog(...) to pin a "
-            "published catalog.")
+        doc = load_snapshot(path)
+        pipe = cls([{"shot": e["shot"], "version": e["version"]}
+                    for e in doc["shots"]])
+        pipe._catalog = doc["catalog"]
+        # Held on the pipeline and exported at compute time, beside the
+        # catalog: a shard is resolved in the worker.
+        pipe._shards = doc.get("shared", [])
+        return pipe
 
     @classmethod
     def from_catalog(cls, catalog: Optional[str], parent) -> "Pipeline":
@@ -315,6 +339,11 @@ class Pipeline:
         # withdrawn. Assigned outside the branch so neither arm can forget it.
         self._catalog = (
             getattr(parent, "_catalog", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
+        self._shards = (
+            getattr(parent, "_shards", None)
             if isinstance(parent, Pipeline)
             else None
         )
@@ -576,6 +605,8 @@ class Pipeline:
         # cannot be contingent on opting into provenance recording, and the
         # worker disagreement can only be fixed before any worker exists.
         catalog = pin_run(self._catalog)
+        pin_shards(self._shards)
+        self._warn_uncovered_trees()
 
         ctx = None
         if provenance is not None:
@@ -729,6 +760,74 @@ class Pipeline:
         shots = sorted(rec.shot for rec in records)
         return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
 
+    def _warn_uncovered_trees(self) -> None:
+        """Say which trees this replay is NOT pinning.
+
+        A saved snapshot naming some shards looks better protected than one
+        naming none, and `fdp snapshot save` cannot know which trees a later
+        run will open. Here, at compute time, both are known: the snapshot's
+        shards and the trees the pipeline's signals will read.
+
+        An uncovered tree still resolves -- through whatever catalog is
+        current -- so this is a warning and not an error. What it must not be
+        is silence: the run is then reproducible for the measurement and not
+        for what it means, and nothing says so.
+        """
+        if self._shards is None:
+            return                      # not replaying a snapshot
+
+        try:
+            from ..signal.store_path import shard_key
+        except ImportError:
+            return
+
+        shots = self._shots()
+        if not shots:
+            return
+
+        trees = set()
+        for op in self._operations:
+            spec = op.spec() if hasattr(op, "spec") else None
+            if spec is None or spec.op not in ("fetch", "fetch_dataset"):
+                continue
+            fields = (spec.detail.get("signal") or {}).get("fields") or {}
+            if fields.get("treename"):
+                trees.add(fields["treename"])
+        if not trees:
+            return
+
+        covered = {e["shard"] for e in self._shards}
+        uncovered = sorted({t for t in trees
+                            if any(shard_key(t, s) not in covered
+                                   for s in shots)})
+        if not uncovered:
+            return
+
+        warnings.warn(
+            "this saved snapshot does not name the shared shards for "
+            "{}. Those trees' model data will resolve through the catalog "
+            "the snapshot names ({}), not through the snapshot -- so this "
+            "replay is pinned for the measurements and not for the "
+            "instrument description, and stops being reproducible when that "
+            "catalog is pruned. Rebuild with `--tree {}`.".format(
+                ", ".join(uncovered), self._catalog or "unset",
+                ",".join(uncovered)),
+            stacklevel=3)
+
+    def _shots(self):
+        """The shots this run will read, sorted, or None if not knowable.
+
+        `_source_spec` already computes this and keeps only its hash, which
+        cannot be turned back into a list.
+        """
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return None
+        try:
+            return tuple(sorted(rec.shot for rec in records))
+        except (AttributeError, TypeError):
+            return None
+
     def _run_context(self, recordset_cls, config, catalog=None) -> RunContext:
         """Derive the full description of the run about to happen."""
         op_specs = tuple(
@@ -758,6 +857,7 @@ class Pipeline:
             device=self._device_hint(signals),
             parent_run=getattr(self.parent, "run_id", None),
             store={"catalog": catalog} if catalog else None,
+            shots=self._shots(),
         )
 
     @staticmethod
