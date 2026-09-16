@@ -7,7 +7,10 @@ VCS = "git"
 style = "pep440"
 versionfile_source = "toksearch/_version.py"
 versionfile_build = "toksearch/_version.py"
-tag_prefix = "release-"
+# Two events, one version: fdp-core spec 2026-09-15 section 3. `staging-X.Y.Z`
+# builds; `release-X.Y.Z` promotes those exact bytes and must NOT rebuild, so
+# versioneer reads the staging tag.
+tag_prefix = "staging-"
 parentdir_prefix = "toksearch-"
 
 [project]

@@ -1,10 +1,19 @@
 name: Conda Package CI/CD
 
+# Two events, one version. See
+# fdp-core/docs/specs/2026-09-15-staging-and-promotion.md section 3.
+#
+#   staging-X.Y.Z  -> build, upload to ga-fdp/label/staging
+#   release-X.Y.Z  -> relabel those exact bytes to main. NO rebuild.
+#
+# The release tag performs no build on purpose: promotion must ship the
+# bytes that were verified, and a rebuild would not.
 on:
   push:
     branches:
       - main
     tags:
+      - 'staging-*'
       - 'release-*'
   pull_request:
     branches:
@@ -12,6 +21,8 @@ on:
 
 jobs:
   build_and_test:
+    # Not on a release tag: that promotes an artifact that already exists.
+    if: "!startsWith(github.ref, 'refs/tags/release-')"
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,43 +36,118 @@ jobs:
         with:
           pixi-version: latest
 
-      - name: Set staging channel for pre-release builds
-        if: startsWith(github.ref, 'refs/tags/release-')
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/release-}"
-          if [[ "$VERSION" =~ (rc|a|b)[0-9] ]]; then
-            echo "EXTRA_CHANNEL=ga-fdp/label/staging" >> $GITHUB_ENV
-          fi
-
       - name: Build Conda package
         env:
-          EXTRA_CHANNEL: ${{ env.EXTRA_CHANNEL }}
+          # Unconditional, not just for pre-releases. rattler-build's TEST
+          # phase installs the package it just built and resolves run deps
+          # from this channel list; siblings live in staging until a bless
+          # promotes them. Without it a recipe floor on a sibling cannot
+          # resolve, which forced a serial release order on 2026-09-14.
+          EXTRA_CHANNEL: ga-fdp/label/staging
         run: |
           pixi global install rattler-build
           ./build_package.sh ${HOME}/outdir
 
-      - name: Upload to Anaconda
-        if: startsWith(github.ref, 'refs/tags/release-')
+      - name: The built version must match the tag
+        # versioneer derives the version from `git describe`, which picks ONE
+        # tag when a commit carries several. Without this, a second staging
+        # tag on the same commit uploads the EARLIER version under the newer
+        # tag, and the retire step then files the just-published artifact in
+        # the attic. That happened during the pilot; nothing noticed.
+        if: startsWith(github.ref, 'refs/tags/staging-')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/staging-}"
+          shopt -s nullglob
+          built=(${HOME}/outdir/*/*-${VERSION}-*.conda)
+          if [ ${#built[@]} -eq 0 ]; then
+            echo "::error::tag says ${VERSION}, but nothing of that version was built."
+            echo "::error::Usually: this commit carries another staging- tag and"
+            echo "::error::git describe chose it. Tag a fresh commit."
+            ls -la ${HOME}/outdir/*/ || true
+            exit 1
+          fi
+          printf 'ARTIFACTS<<EOF\n%s\nEOF\n' "$(printf '%s\n' "${built[@]}")" >> $GITHUB_ENV
+          echo "version ${VERSION}: ${#built[@]} artifact(s)"
+
+      - name: Upload to staging
+        if: startsWith(github.ref, 'refs/tags/staging-')
+        run: |
+          # Always staging. The old rc/a/b test is gone: a pre-release is now
+          # simply a staging tag that never earns a release tag.
+          echo "$ARTIFACTS" | while read -r f; do
+            [ -n "$f" ] && rattler-build upload anaconda \
+              --owner ga-fdp \
+              --channel staging \
+              --api-key ${{ secrets.ANACONDA_API_TOKEN }} \
+              --force \
+              "$f"
+          done
+
+      - name: Retire the superseded staging candidate
+        # AFTER the upload, never before. DELETES NOTHING: the old candidate
+        # is downloaded, checksum-verified and moved to the `attic` label.
+        # A failed candidate is evidence.
+        if: startsWith(github.ref, 'refs/tags/staging-')
+        env:
+          ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/staging-}"
+          python .github/scripts/channel_tools.py retire \
+            toksearch "${VERSION}" "${RUNNER_TEMP}/attic"
+
+      - name: Keep the retired bytes off-channel
+        if: always() && startsWith(github.ref, 'refs/tags/staging-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: retired-staging-candidates
+          path: ${{ runner.temp }}/attic
+          if-no-files-found: ignore
+          retention-days: 90
+
+  promote:
+    # No build. Relabels the artifact that was already built and verified.
+    if: startsWith(github.ref, 'refs/tags/release-')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
+      PKG: toksearch
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Move staging -> main
         run: |
           VERSION="${GITHUB_REF#refs/tags/release-}"
-          if [[ "$VERSION" =~ (rc|a|b)[0-9] ]]; then
-            LABEL="staging"
-          else
-            LABEL="main"
-          fi
-          rattler-build upload anaconda \
-            --owner ga-fdp \
-            --channel "$LABEL" \
-            --api-key ${{ secrets.ANACONDA_API_TOKEN }} \
-            --force \
-            ${HOME}/outdir/linux-64/*.conda
+          # NOT `anaconda move`: it ignores the version and moves everything
+          # in the source label. See fdp-core spec section 4.2.
+          python .github/scripts/channel_tools.py promote "${PKG}" "${VERSION}"
+
+  deploy_docs:
+    # On the RELEASE tag, not the staging one: published docs should
+    # describe what is installable from the main label. Its own job because
+    # build_and_test no longer runs on a release tag.
+    if: startsWith(github.ref, 'refs/tags/release-')
+    needs: promote
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: latest
 
       - name: Deploy Docs
-        # Pre-release detection happens in bash below: contains(github.ref, 'a')
+        # Pre-release detection happens in bash: contains(github.ref, 'a')
         # can never work as a guard because every ref contains the letter 'a'
         # ("refs/tags/release-..."), which silently skipped this step on every
         # stable release from 2.5 to 2.8.3.
-        if: startsWith(github.ref, 'refs/tags/release-')
         run: |
           TAG=${GITHUB_REF#refs/tags/release-}
           if [[ "$TAG" =~ (rc|a|b)[0-9] ]]; then
