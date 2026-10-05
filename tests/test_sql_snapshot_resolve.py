@@ -96,12 +96,16 @@ class TestListing(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             for name in ("d3drdb_20261005T120000Z", "_spike", "d3drdb_20260901T000000Z",
-                         "d3drdb_staging", "d3drdb_a+b", "notes.txt"):
+                         "d3drdb_staging", "d3drdb_a+b", "notes.txt",
+                         "d3drdb_copy_20250101T000000Z",
+                         "d3drdb_20270101T000000Z\n"):
                 os.makedirs(os.path.join(d, name), exist_ok=True)
             with open(os.path.join(d, "d3drdb_20270101T000000Z.txt"), "w"):
                 pass
             self.assertEqual(snapshot.list_ids(d, "d3drdb_*", token=None),
-                             ["d3drdb_20260901T000000Z", "d3drdb_20261005T120000Z"])
+                             ["d3drdb_copy_20250101T000000Z",
+                              "d3drdb_20260901T000000Z",
+                              "d3drdb_20261005T120000Z"])
 
 class TestManifest(unittest.TestCase):
     def test_fetched_and_validated(self):
