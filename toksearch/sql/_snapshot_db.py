@@ -14,10 +14,10 @@
 """The connection half of `toksearch.sql.snapshot`: DuckDB over a resolved
 snapshot's Parquet, and the DB-API-shaped objects callers hold.
 
-Import it through `toksearch.sql.snapshot`, which re-exports `connect`,
-`SnapshotConnection`, `SnapshotCursor` and `SnapshotNotice`. This module
-imports from `snapshot`, and `snapshot` imports from it only at its end,
-so importing this one first is a circular import.
+`toksearch.sql.snapshot` re-exports `connect`, `SnapshotConnection` and
+`SnapshotCursor` (and defines `SnapshotNotice`). This module imports from
+`snapshot` at import time; `snapshot` reaches back here only lazily, through
+its module `__getattr__`, so either module may be imported first.
 """
 
 import os
