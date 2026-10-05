@@ -361,9 +361,10 @@ class _Opener:
     """Scripted: each call pops the next item, returning or raising it."""
 
     def __init__(self, *script):
-        self.script, self.seen = list(script), []
+        self.script, self.seen, self.agents = list(script), [], []
 
     def open(self, req, timeout=None):
+        self.agents.append(req.get_header("User-agent"))
         self.seen.append((req.full_url, req.get_method(),
                           req.get_header("Authorization"), req.get_header("Depth")))
         item = self.script.pop(0)
@@ -397,6 +398,18 @@ class TestRequest(unittest.TestCase):
                      _redirect("u", "https://a.example/2"), _Resp())
         self.run_with(op, token="t")
         self.assertEqual([s[2] for s in op.seen], ["Bearer t", None, None])
+
+    def test_user_agent_is_sent_on_every_hop(self):
+        op = _Opener(_redirect("u", "/next"), _Resp())
+        self.run_with(op)
+        self.assertEqual(len(op.agents), 2)
+        for ua in op.agents:
+            self.assertTrue(ua and ua.startswith("toksearch-sql-snapshot"), ua)
+
+    def test_caller_supplied_user_agent_is_kept(self):
+        op = _Opener(_Resp())
+        self.run_with(op, headers={"User-Agent": "custom/1"})
+        self.assertEqual(op.agents, ["custom/1"])
 
     def test_out_of_hops(self):
         op = _Opener(*[_redirect("u", "/again") for _ in range(3)])
