@@ -98,6 +98,13 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
     means. Network and read failures are SnapshotError.
     """
     hdrs = dict(headers or {})
+    # osg-htc.org rejects urllib's default User-Agent with 403.
+    if not any(k.lower() == "user-agent" for k in hdrs):
+        try:
+            from toksearch import __version__
+            hdrs["User-Agent"] = "toksearch-sql-snapshot/{}".format(__version__)
+        except Exception:
+            hdrs["User-Agent"] = "toksearch-sql-snapshot"
     if token:
         hdrs["Authorization"] = "Bearer " + token
     first_host = urllib.parse.urlsplit(url).netloc
