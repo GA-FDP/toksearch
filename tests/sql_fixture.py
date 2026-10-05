@@ -20,14 +20,30 @@ SHOTS = [(1, "2024-06-03 10:00:00", "run1", "ELM study"),
 SHOTS_TYPE = [(1, "plasma"), (2, "plasma"), (3, "calibration")]
 RUNS = [("run1", "ELMs"), ("RUN2", "cal day")]   # RUN2 upper-case on purpose
 
+# SHOTS carries an incompressible NOTES column so its file is several times
+# DuckDB's parquet footer prefetch (16 KiB in 1.5). A smaller file is read
+# whole by that one prefetch, and "a query reads a slice" could not be told
+# from "a query reads the file".
+NOTES_BYTES = 32 * 1024
+
+
+def _notes(shot):
+    import hashlib
+    out, i = [], 0
+    while len(out) * 64 < NOTES_BYTES:
+        out.append(hashlib.sha256("{}:{}".format(shot, i).encode()).hexdigest())
+        i += 1
+    return "".join(out)
+
 
 def build(root, sid, collation="nocase"):
     import duckdb
     d = os.path.join(root, sid)
     os.makedirs(d, exist_ok=True)
     con = duckdb.connect()
-    con.execute("CREATE TABLE SHOTS(SHOT INTEGER, ENTERED TIMESTAMP, RUN VARCHAR, BRIEF VARCHAR)")
-    con.executemany("INSERT INTO SHOTS VALUES (?, ?, ?, ?)", SHOTS)
+    con.execute("CREATE TABLE SHOTS(SHOT INTEGER, ENTERED TIMESTAMP, RUN VARCHAR, BRIEF VARCHAR, NOTES VARCHAR)")
+    con.executemany("INSERT INTO SHOTS VALUES (?, ?, ?, ?, ?)",
+                    [row + (_notes(row[0]),) for row in SHOTS])
     con.execute("CREATE TABLE SHOTS_TYPE(shot INTEGER, shot_type VARCHAR)")
     con.executemany("INSERT INTO SHOTS_TYPE VALUES (?, ?)", SHOTS_TYPE)
     con.execute("CREATE TABLE RUNS(RUN VARCHAR, BRIEF VARCHAR)")
