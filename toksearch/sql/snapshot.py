@@ -45,7 +45,7 @@ ENV_PREFIX = "FDP_SQL_SNAPSHOT_"
 COLLATIONS = {"nocase": "NOCASE", "binary": None}
 
 #: a snapshot id ends in the UTC stamp it was taken at
-STAMP_RE = re.compile(r"\d{8}T\d{6}Z$")
+STAMP_RE = re.compile(r"\d{8}T\d{6}Z\Z")
 
 CONDA_PACKAGES = "python-duckdb duckdb-extension-httpfs sqlglot"
 
@@ -179,8 +179,8 @@ def is_local(base):
 def list_ids(base, id_pattern, token):
     """Snapshot ids under `base` matching `id_pattern`, oldest first.
 
-    An id ends in a UTC stamp `YYYYMMDDTHHMMSSZ`, so the oldest-first order
-    is chronological. Anything else beside the snapshots -- a file, a
+    An id ends in a UTC stamp `YYYYMMDDTHHMMSSZ`, and the order is by that
+    stamp, whatever precedes it, so the last id is the latest. Anything else beside the snapshots -- a file, a
     scratch directory, a half-uploaded directory under another name -- is
     ignored, so it can never be chosen as the newest.
     """
@@ -204,8 +204,9 @@ def list_ids(base, id_pattern, token):
             name = posixpath.basename(urllib.parse.unquote(href.text).rstrip("/"))
             if name:
                 names.append(name)
-    return sorted(n for n in set(names)
-                  if fnmatch.fnmatchcase(n, id_pattern) and STAMP_RE.search(n))
+    return sorted((n for n in set(names)
+                   if fnmatch.fnmatchcase(n, id_pattern) and STAMP_RE.search(n)),
+                  key=lambda n: STAMP_RE.search(n).group())
 
 
 def fetch_manifest(base, snapshot_id, token):
