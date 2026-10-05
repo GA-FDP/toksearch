@@ -463,5 +463,28 @@ class TestLocalCatalogPairing(unittest.TestCase):
                 self.assertIn(repr(bad), str(cm.exception))
 
 
+class TestLocatorLookup(unittest.TestCase):
+    def test_finds_the_sql_snapshot_locator_by_tokamak_and_name(self):
+        from fdp_schema import Tokamak
+        tk = Tokamak(name="dev", locators=[
+            {"kind": "sql", "name": "db", "driver": "mssql", "host": "h", "database": "d"},
+            {"kind": "sql_snapshot", "name": "db", "base_url": "https://x/y", "id_pattern": "db_*"},
+        ])
+        with mock.patch("toksearch.sql.mssql._discover_catalogs", return_value={"dev": tk}):
+            loc = snapshot.locator_for("dev", "db")
+        self.assertEqual(loc.kind, "sql_snapshot")
+        self.assertEqual(loc.base_url, "https://x/y")
+
+    def test_names_what_exists_when_missing(self):
+        from fdp_schema import Tokamak
+        tk = Tokamak(name="dev", locators=[
+            {"kind": "sql_snapshot", "name": "other", "base_url": "https://x/y", "id_pattern": "o_*"},
+        ])
+        with mock.patch("toksearch.sql.mssql._discover_catalogs", return_value={"dev": tk}):
+            with self.assertRaises(KeyError) as cm:
+                snapshot.locator_for("dev", "db")
+        self.assertIn("other", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
