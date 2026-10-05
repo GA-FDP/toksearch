@@ -193,7 +193,7 @@ class TestConnection(unittest.TestCase):
         # is off, so LOAD fails here instead of fetching from DuckDB's server.
         with tempfile.TemporaryDirectory() as prefix:
             os.makedirs(os.path.join(prefix, "duckdb", "extensions"))
-            with mock.patch.object(snapshot.sys, "prefix", prefix):
+            with mock.patch("sys.prefix", prefix):
                 with self.assertRaises(snapshot.SnapshotError) as cm:
                     snapshot._open_duckdb(duckdb, None)
         self.assertIn("duckdb-extension-httpfs", str(cm.exception))
