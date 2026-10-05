@@ -165,6 +165,8 @@ def resolve_base(base_url):
         return base_url.rstrip("/")
     if u.scheme == "file":
         return u.path.rstrip("/") or "/"
+    if u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost"):
+        return base_url.rstrip("/")      # the test server only; never a real origin
     if u.scheme == "pelican":
         return _director_endpoint(u.netloc) + u.path.rstrip("/")
     raise SnapshotError(
@@ -173,7 +175,7 @@ def resolve_base(base_url):
 
 
 def is_local(base):
-    return not base.startswith("https://")
+    return not base.startswith(("https://", "http://"))
 
 
 def list_ids(base, id_pattern, token):
@@ -358,3 +360,269 @@ def resolve(locator, snapshot=None, token=None):
     os.environ[var] = sid
     _pinned.add(locator.name)
     return sid
+
+
+# -- the connection ------------------------------------------------------------
+
+_noticed = set()
+
+
+def _import_duckdb():
+    try:
+        import duckdb
+        import sqlglot  # noqa: F401
+    except ImportError as exc:
+        raise SnapshotError(
+            "reading a SQL snapshot needs DuckDB and sqlglot ({}). Install "
+            "them: `conda install {}`. A device package that ships a "
+            "sql_snapshot locator, such as toksearch_d3d, declares them.".format(
+                exc, CONDA_PACKAGES)) from exc
+    return duckdb
+
+
+def _token_for(locator, base):
+    """The bearer token the locator's AuthHint names, or None for a local
+    base. Missing for a remote base is an error before any HTTP."""
+    if is_local(base):
+        return None
+    auth = locator.auth
+    if auth is None or auth.kind != "bearer_token" or not auth.env:
+        raise SnapshotError(
+            "sql_snapshot locator {!r} names no bearer_token env var; nothing "
+            "to authenticate with".format(locator.name))
+    token = os.environ.get(auth.env, "")
+    if not token:
+        raise SnapshotError(
+            "{} is not set; run under `fdp run`, or `fdp login`".format(auth.env))
+    return token
+
+
+def _open_duckdb(duckdb, token):
+    """An in-memory DuckDB with httpfs loaded from the conda prefix.
+
+    Extensions are never fetched from DuckDB's own server: an FDP
+    environment gets its binaries from conda-forge. That package installs
+    the extension under <prefix>/duckdb/extensions and does not sign it,
+    so both the directory and allow_unsigned_extensions are needed. The
+    trust is conda-forge's build, the same trust every other package in
+    the environment has.
+    """
+    ext_dir = os.path.join(sys.prefix, "duckdb", "extensions")
+    config = {
+        "autoinstall_known_extensions": False,
+        "autoload_known_extensions": False,
+        "allow_unsigned_extensions": True,
+    }
+    if os.path.isdir(ext_dir):
+        config["extension_directory"] = ext_dir
+    con = duckdb.connect(config=config)
+    try:
+        con.execute("LOAD httpfs")
+    except duckdb.Error as exc:
+        raise SnapshotError(
+            "DuckDB's httpfs extension is not installed ({}). Install "
+            "duckdb-extension-httpfs from conda-forge; it is not fetched "
+            "from the network at first use.".format(
+                str(exc).splitlines()[0])) from exc
+    if token:
+        con.execute(_create_secret(token))
+    con.execute("SET enable_object_cache = true")
+    return con
+
+
+def _create_secret(token):
+    # CREATE SECRET does not take bound parameters (DuckDB 1.5), so the
+    # token is quoted as a SQL literal.
+    return "CREATE SECRET fdp_snapshot (TYPE http, BEARER_TOKEN '{}')".format(
+        token.replace("'", "''"))
+
+
+def _define_views(con, base, sid, manifest):
+    con.execute("CREATE SCHEMA dbo")
+    for table in manifest["tables"]:
+        if is_local(base):
+            urls = [os.path.join(base, sid, f["path"]) for f in table["files"]]
+        else:
+            urls = ["{}/{}/{}".format(base, sid, f["path"]) for f in table["files"]]
+        literal = "[" + ", ".join("'" + u.replace("'", "''") + "'" for u in urls) + "]"
+        con.execute('CREATE VIEW dbo."{}" AS SELECT * FROM read_parquet({})'.format(
+            table["name"].replace('"', '""'), literal))
+    con.execute("SET search_path = 'dbo'")
+    collation = COLLATIONS[manifest.get("transforms", {}).get("collation", "binary")]
+    if collation:
+        con.execute("PRAGMA default_collation = '{}'".format(collation))
+
+
+def _notice_once(name, sid, base_url):
+    if name in _noticed:
+        return
+    _noticed.add(name)
+    warnings.warn(
+        "{}: reading snapshot {} from {}. For the live database pass "
+        "live=True. Silence this with warnings.filterwarnings('ignore', "
+        "category=SnapshotNotice).".format(name, sid, base_url),
+        SnapshotNotice, stacklevel=4)
+
+
+def connect(locator, snapshot=None):
+    """A DB-API-shaped connection to one snapshot of `locator`'s database.
+
+    Resolves the snapshot (`resolve`), fetches and validates its manifest,
+    opens DuckDB over the manifest's Parquet files and returns a
+    SnapshotConnection. Bytes are never checked against the manifest's
+    hashes here -- a range read cannot hash a file; `fdp snapshot verify`
+    does that.
+    """
+    duckdb = _import_duckdb()
+    base = resolve_base(locator.base_url)
+    token = _token_for(locator, base)
+    pinned_before = locator.name in _pinned
+    sid = resolve(locator, snapshot=snapshot, token=token)
+    try:
+        manifest = fetch_manifest(base, sid, token)
+    except SnapshotError:
+        # A pin this call made for a snapshot that turned out not to exist
+        # must not survive it; one the user exported is theirs to keep.
+        if not pinned_before and locator.name in _pinned:
+            _pinned.discard(locator.name)
+            os.environ.pop(env_var(locator.name), None)
+        raise
+    con = _open_duckdb(duckdb, token)
+    _define_views(con, base, sid, manifest)
+    _notice_once(locator.name, sid, locator.base_url)
+    return SnapshotConnection(con, sid, manifest, locator, base)
+
+
+class SnapshotConnection:
+    """What `connect` returns. The shape pd.read_sql and `with` expect."""
+
+    def __init__(self, con, sid, manifest, locator, base):
+        self._con = con
+        self.snapshot = sid
+        self.manifest = manifest
+        self._locator = locator
+        self._base = base
+        self._nocase = manifest.get("transforms", {}).get("collation") == "nocase"
+        self._excluded = {e["table"].lower(): e.get("reason", "")
+                          for e in manifest.get("excluded", [])}
+        auth = locator.auth
+        self._token_seen = os.environ.get(auth.env, "") if auth and auth.env else None
+
+    @property
+    def duckdb(self):
+        """The native DuckDB connection, for callers who want it."""
+        return self._con
+
+    def cursor(self):
+        # A DuckDB cursor is a duplicate connection: it shares the database
+        # (views, secrets, global settings such as default_collation) but
+        # not session settings, and search_path is one of those.
+        cur = self._con.cursor()
+        cur.execute("SET search_path = 'dbo'")
+        return SnapshotCursor(self, cur)
+
+    def close(self):
+        self._con.close()
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    # -- used by the cursor --
+
+    def _refresh_token(self):
+        """Re-read the token once; True if it changed and the secret was replaced."""
+        auth = self._locator.auth
+        if is_local(self._base) or auth is None or not auth.env:
+            return False
+        new = os.environ.get(auth.env, "")
+        if not new or new == self._token_seen:
+            return False
+        self._token_seen = new
+        self._con.execute("DROP SECRET IF EXISTS fdp_snapshot")
+        self._con.execute(_create_secret(new))
+        return True
+
+    def _explain(self, exc, note):
+        """A DuckDB error as a SnapshotError a user can act on."""
+        msg = _scrub(str(exc)).strip()
+        m = re.search(r"Table with name (\w+) does not exist", msg)
+        if m and m.group(1).lower() in self._excluded:
+            msg += ("\n{} is excluded from snapshots of this database "
+                    "(reason recorded in the manifest: {!r}).".format(
+                        m.group(1).upper(), self._excluded[m.group(1).lower()]))
+        if note:
+            msg += "\n" + note
+        return SnapshotError("[snapshot {}] {}".format(self.snapshot, msg))
+
+
+class SnapshotCursor:
+    def __init__(self, conn, cur):
+        self._conn = conn
+        self._cur = cur
+
+    def execute(self, sql, params=None):
+        from . import _tsql
+        import duckdb
+        rewritten, style, note = _tsql.rewrite(sql, nocase=self._conn._nocase)
+        if style == "named" and not isinstance(params, dict):
+            raise SnapshotError("%(name)s placeholders need a mapping of parameters")
+        if style == "qmark" and params is not None and isinstance(params, dict):
+            raise SnapshotError("%s placeholders need a sequence of parameters")
+        for attempt in (1, 2):
+            try:
+                if params is None:
+                    self._cur.execute(rewritten)
+                else:
+                    self._cur.execute(rewritten, params)
+                return self
+            except duckdb.Error as exc:
+                text = str(exc)
+                if attempt == 1 and ("401" in text or "403" in text) and self._conn._refresh_token():
+                    continue
+                if "401" in text or "403" in text:
+                    raise SnapshotError(
+                        "[snapshot {}] not authorized (HTTP 401/403) and the bearer "
+                        "token has not changed; run `fdp login`. {}".format(
+                            self._conn.snapshot, _scrub(text).splitlines()[0])) from exc
+                raise self._conn._explain(exc, note) from exc
+
+    def fetchone(self):
+        return self._cur.fetchone()
+
+    def fetchmany(self, size=1):
+        return self._cur.fetchmany(size)
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+    @property
+    def description(self):
+        return self._cur.description
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    def __iter__(self):
+        row = self._cur.fetchone()
+        while row is not None:
+            yield row
+            row = self._cur.fetchone()
+
+    def close(self):
+        self._cur.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
