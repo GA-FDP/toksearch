@@ -61,6 +61,24 @@ class TestPlaceholders(unittest.TestCase):
         sql, style = _tsql.convert_placeholders("SELECT shot % 10 FROM shots")
         self.assertEqual((sql, style), ("SELECT shot % 10 FROM shots", None))
 
+    def test_percent_d_is_a_qmark(self):
+        sql, style = _tsql.convert_placeholders("WHERE shot = %d")
+        self.assertEqual((sql, style), ("WHERE shot = ?", "qmark"))
+
+    def test_named_percent_d(self):
+        sql, style = _tsql.convert_placeholders("WHERE shot = %(shot)d")
+        self.assertEqual((sql, style), ("WHERE shot = $shot", "named"))
+
+    def test_mixed_percent_d_and_named_refused(self):
+        with self.assertRaises(ValueError):
+            _tsql.convert_placeholders("WHERE a = %d AND b = %(x)s")
+
+    def test_escaped_bracket_in_identifier(self):
+        sql, style = _tsql.convert_placeholders(
+            "SELECT [a]]'b] FROM t WHERE x = %s")
+        self.assertEqual(
+            (sql, style), ("SELECT [a]]'b] FROM t WHERE x = ?", "qmark"))
+
     def test_mixed_styles_are_refused(self):
         with self.assertRaises(ValueError):
             _tsql.convert_placeholders("SELECT 1 WHERE a = %s AND b = %(b)s")
@@ -109,6 +127,22 @@ class TestTranspile(unittest.TestCase):
         sql, note = _tsql.transpile(src)
         self.assertEqual(sql, src)
         self.assertIn("ParseError", note)
+
+    def test_tokenizer_failure_passes_through(self):
+        src = "select 'abc"
+        sql, note = _tsql.transpile(src)
+        self.assertEqual(sql, src)
+        self.assertIn("TokenError", note)
+
+    def test_like_character_class_is_refused(self):
+        for nocase in (False, True):
+            with self.assertRaises(ValueError) as cm:
+                _tsql.transpile("SELECT 1 WHERE a LIKE '[0-9]%'", nocase=nocase)
+            self.assertIn("regexp_matches", str(cm.exception))
+
+    def test_like_without_class_or_with_parameter_is_fine(self):
+        _tsql.transpile("SELECT 1 WHERE a LIKE 'x%'")
+        _tsql.transpile("SELECT 1 WHERE a LIKE ?")
 
     def test_two_statements(self):
         sql, _ = _tsql.transpile("SELECT TOP 1 a FROM t; SELECT TOP 2 b FROM u")
