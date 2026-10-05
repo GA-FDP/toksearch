@@ -98,6 +98,8 @@ tests:
     requirements:
       run:
         - openjdk >=17
+        # the snapshot tests import SqlSnapshotLocator at module level; test-only, the run dep on fdp-schema is unchanged
+        - fdp-schema >=0.3.0
     files:
       source:
         - tests/

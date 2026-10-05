@@ -60,7 +60,8 @@ class TestConnection(unittest.TestCase):
     def setUp(self):
         snapshot._pinned.clear()
         snapshot._noticed.clear()
-        self._env = env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None)
+        self._env = env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_SQL_SNAPSHOT_BINARY_CASE=None,
+                        FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None)
         self._env.__enter__()
 
     def tearDown(self):
@@ -147,7 +148,7 @@ class TestConnection(unittest.TestCase):
             self.connect(snapshot="d3drdb_NOPE")
         self.assertIn("d3drdb_NOPE", str(cm.exception))
         # and the failed pin did not stick
-        self.assertNotIn("FDP_SQL_SNAPSHOT_D3DRDB", os.environ)
+        self.assertIsNone(os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB"))
 
     def test_a_failed_snapshot_leaves_an_exported_pin_alone(self):
         # The user exported the id and the code names the same one; the
@@ -197,6 +198,24 @@ class TestConnection(unittest.TestCase):
                 with self.assertRaises(snapshot.SnapshotError) as cm:
                     snapshot._open_duckdb(duckdb, None)
         self.assertIn("duckdb-extension-httpfs", str(cm.exception))
+
+    def test_the_extension_directory_is_set_even_when_absent(self):
+        # Unset, DuckDB would use ~/.duckdb -- with unsigned loading allowed.
+        fake = mock.Mock(Error=duckdb.Error)
+        with tempfile.TemporaryDirectory() as prefix, mock.patch("sys.prefix", prefix):
+            snapshot._open_duckdb(fake, None)
+        config = fake.connect.call_args.kwargs["config"]
+        self.assertEqual(config["extension_directory"],
+                         os.path.join(prefix, "duckdb", "extensions"))
+        self.assertFalse(os.path.isdir(config["extension_directory"]))   # control
+
+    def test_a_placeholder_mismatch_is_a_value_error(self):
+        with self.connect() as conn:
+            cur = conn.cursor()
+            with self.assertRaises(ValueError):
+                cur.execute("SELECT shot FROM shots WHERE run = %(run)s", ("run1",))
+            with self.assertRaises(ValueError):
+                cur.execute("SELECT shot FROM shots WHERE shot = %s", {"shot": 3})
 
     def test_a_query_naming_two_tables_binds_both(self):
         with self.connect() as conn:
@@ -292,11 +311,20 @@ class TestSecretRedaction(unittest.TestCase):
         fake = mock.Mock(Error=duckdb.Error)
         fake.connect.return_value = Con()
         with self.assertRaises(snapshot.SnapshotError) as cm:
-            snapshot._open_duckdb(fake, self.TOKEN)
+            snapshot._open_duckdb(fake, self.TOKEN, "https://h/b")
         self.assertNotIn(self.TOKEN, str(cm.exception))
         self.assertIn("<redacted>", str(cm.exception))
         self.assertIsNone(cm.exception.__cause__)    # nor in the chained one
         self.assertTrue(cm.exception.__suppress_context__)
+
+
+class TestPublicSurface(unittest.TestCase):
+    def test_lazy_exports_are_visible(self):
+        import pydoc
+        self.assertIn("connect", dir(snapshot))
+        self.assertIn("SnapshotConnection", dir(snapshot))
+        self.assertIn("connect", snapshot.__all__)
+        self.assertIn("connect(locator, snapshot=None)", pydoc.render_doc(snapshot, renderer=pydoc.plaintext))
 
 
 class TestMissingDependencies(unittest.TestCase):

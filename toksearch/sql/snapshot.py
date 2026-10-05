@@ -47,6 +47,13 @@ STAMP_RE = re.compile(r"\d{8}T\d{6}Z\Z")
 
 CONDA_PACKAGES = "python-duckdb duckdb-extension-httpfs sqlglot"
 
+__all__ = [
+    "connect", "connect_tokamak", "locator_for", "resolve", "resolve_base",
+    "list_ids", "fetch_manifest", "catalog_pairing", "SnapshotConnection",
+    "SnapshotCursor", "SnapshotError", "SnapshotConflict", "SnapshotNotice",
+    "env_var", "SCHEMA",
+]
+
 
 class SnapshotError(Exception):
     """Anything about locating, reading or querying a snapshot."""
@@ -180,9 +187,11 @@ def list_ids(base, id_pattern, token):
     """Snapshot ids under `base` matching `id_pattern`, oldest first.
 
     An id ends in a UTC stamp `YYYYMMDDTHHMMSSZ`, and the order is by that
-    stamp, whatever precedes it, so the last id is the latest. Anything else beside the snapshots -- a file, a
-    scratch directory, a half-uploaded directory under another name -- is
-    ignored, so it can never be chosen as the newest.
+    stamp, whatever precedes it, so the last id is the latest (ties broken
+    by the whole id, so the order is deterministic). Anything else beside
+    the snapshots -- a file, a scratch directory, a half-uploaded directory
+    under another name -- is ignored, so it can never be chosen as the
+    newest.
     """
     if is_local(base):
         names = [n for n in os.listdir(base)
@@ -206,7 +215,17 @@ def list_ids(base, id_pattern, token):
                 names.append(name)
     return sorted((n for n in set(names)
                    if fnmatch.fnmatchcase(n, id_pattern) and STAMP_RE.search(n)),
-                  key=lambda n: STAMP_RE.search(n).group())
+                  key=lambda n: (STAMP_RE.search(n).group(), n))
+
+
+def _client_version():
+    """toksearch's version for error messages; imported lazily because this
+    module may be imported while the toksearch package is initialising."""
+    try:
+        import toksearch
+        return "version " + str(toksearch.__version__)
+    except (ImportError, AttributeError):
+        return "version unknown"
 
 
 def fetch_manifest(base, snapshot_id, token):
@@ -239,13 +258,13 @@ def fetch_manifest(base, snapshot_id, token):
                 _scrub(url), exc)) from exc
     if doc.get("schema") != SCHEMA:
         raise SnapshotError(
-            "snapshot {} declares schema {!r}; this toksearch reads {!r}".format(
-                snapshot_id, doc.get("schema"), SCHEMA))
+            "snapshot {} declares schema {!r}; this toksearch ({}) reads {!r}".format(
+                snapshot_id, doc.get("schema"), _client_version(), SCHEMA))
     collation = doc.get("transforms", {}).get("collation", "binary")
     if collation not in COLLATIONS:
         raise SnapshotError(
-            "snapshot {} declares collation {!r}; this toksearch knows {}".format(
-                snapshot_id, collation, sorted(COLLATIONS)))
+            "snapshot {} declares collation {!r}; this toksearch ({}) knows {}".format(
+                snapshot_id, collation, _client_version(), sorted(COLLATIONS)))
     return doc
 
 
@@ -392,6 +411,10 @@ def connect_tokamak(tokamak, name, snapshot=None):
 
 _DB_EXPORTS = ("connect", "SnapshotConnection", "SnapshotCursor",
                "_import_duckdb", "_open_duckdb", "_noticed")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_DB_EXPORTS))
 
 
 def __getattr__(name):

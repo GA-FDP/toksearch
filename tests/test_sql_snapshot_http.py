@@ -70,7 +70,9 @@ class TestOverHttp(unittest.TestCase):
         snapshot._pinned.clear()
         snapshot._noticed.clear()
         self.server.reset()
-        self._env = env(FDP_SQL_SNAPSHOT_HTTPDB=None, FDP_STORE_ROOT=None,
+        self._env = env(FDP_SQL_SNAPSHOT_HTTPDB=None, FDP_SQL_SNAPSHOT_PUBDB=None,
+                        FDP_SQL_SNAPSHOT_SCOPED=None, FDP_SQL_SNAPSHOT_PELDB=None,
+                        FDP_STORE_ROOT=None,
                         FDP_STORE_CATALOG=None, FIXTURE_BEARER=TOKEN)
         self._env.__enter__()
         warnings.simplefilter("ignore", snapshot.SnapshotNotice)
@@ -102,6 +104,45 @@ class TestOverHttp(unittest.TestCase):
                 snapshot.connect(self.loc)
         self.assertIn("FIXTURE_BEARER", str(cm.exception))
         self.assertEqual(self.server.stats["requests"], 0)
+
+    def test_no_token_for_a_pelican_base_fails_before_the_well_known_lookup(self):
+        loc = SqlSnapshotLocator(
+            name="peldb", base_url="pelican://fed.example/fdp-d3d/metadata/d3drdb",
+            id_pattern="d3drdb_*", auth=AuthHint(kind="bearer_token", env="FIXTURE_BEARER"))
+        snapshot._director_endpoint.cache_clear()
+        with env(FIXTURE_BEARER=None), \
+             mock.patch.object(snapshot, "_request") as req:
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.connect(loc)
+        self.assertIn("FIXTURE_BEARER", str(cm.exception))
+        req.assert_not_called()
+
+    def test_the_token_goes_only_to_urls_under_the_base(self):
+        # The base is <server>/inner. A query naming <server>/inner_outside.parquet
+        # -- a string prefix of the base, but not under it -- must not get the
+        # token; the in-scope read in the same session must (the control).
+        with tempfile.TemporaryDirectory() as root:
+            sql_fixture.build(os.path.join(root, "inner"), "d3drdb_20261005T120000Z")
+            src = os.path.join(root, "inner", "d3drdb_20261005T120000Z", "RUNS.parquet")
+            with open(src, "rb") as a, open(os.path.join(root, "inner_outside.parquet"), "wb") as b:
+                b.write(a.read())
+            with sql_fixture.Server(root, TOKEN, require_auth=False) as srv:
+                loc = SqlSnapshotLocator(
+                    name="scoped", base_url=srv.url + "/inner", id_pattern="d3drdb_*",
+                    auth=AuthHint(kind="bearer_token", env="FIXTURE_BEARER"))
+                with snapshot.connect(loc) as conn:
+                    cur = conn.cursor()
+                    srv.reset()
+                    cur.execute("SELECT count(*) FROM runs")
+                    self.assertEqual(cur.fetchone()[0], 2)
+                    inside = list(zip(srv.stats["paths"], srv.stats["bearer"]))
+                    srv.reset()
+                    cur.execute("SELECT count(*) FROM '{}/inner_outside.parquet'".format(srv.url))
+                    self.assertEqual(cur.fetchone()[0], 2)
+                    outside = list(zip(srv.stats["paths"], srv.stats["bearer"]))
+        self.assertTrue(inside and all(b for _, b in inside), inside)
+        self.assertTrue(outside, "the out-of-scope file was never requested")
+        self.assertFalse(any(b for _, b in outside), outside)
 
     def test_control_wrong_token_is_refused(self):
         with env(FIXTURE_BEARER="wrong"):
@@ -136,7 +177,7 @@ class TestOverHttp(unittest.TestCase):
         with self.assertRaises(snapshot.SnapshotError) as cm:
             snapshot.connect(self.loc, snapshot="d3drdb_19990101T000000Z")
         self.assertIn("d3drdb_19990101T000000Z", str(cm.exception))
-        self.assertNotIn("FDP_SQL_SNAPSHOT_HTTPDB", os.environ)
+        self.assertIsNone(os.environ.get("FDP_SQL_SNAPSHOT_HTTPDB"))
 
     def test_connecting_fetches_no_parquet_and_a_query_only_its_tables(self):
         # d3drdb has ~60 tables: binding them all at connect time would be

@@ -73,13 +73,14 @@ def build(root, sid, collation="nocase"):
 
 class Server:
     """`with Server(root, token) as s: s.url ...`. Thread-safe counters in
-    `s.stats` = {"requests", "bytes", "methods", "paths"}."""
+    `s.stats` = {"requests", "bytes", "methods", "paths", "bearer"}; "bearer"
+    lists, per request, whether it carried an Authorization header."""
 
     def __init__(self, root, token, require_auth=True):
         self.root = root
         self.token = token
         self.require_auth = require_auth
-        self.stats = {"requests": 0, "bytes": 0, "methods": [], "paths": []}
+        self.stats = {"requests": 0, "bytes": 0, "methods": [], "paths": [], "bearer": []}
         lock = threading.Lock()
         outer = self
 
@@ -95,6 +96,7 @@ class Server:
                     outer.stats["bytes"] += nbytes
                     outer.stats["methods"].append(self.command)
                     outer.stats["paths"].append(self.path.split("?")[0])
+                    outer.stats["bearer"].append(bool(self.headers.get("Authorization")))
 
             def _authorized(self):
                 # An origin takes the bearer header only. A token in the URL
@@ -204,4 +206,4 @@ class Server:
         self._srv.server_close()
 
     def reset(self):
-        self.stats.update(requests=0, bytes=0, methods=[], paths=[])
+        self.stats.update(requests=0, bytes=0, methods=[], paths=[], bearer=[])
