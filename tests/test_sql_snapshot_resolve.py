@@ -117,6 +117,13 @@ class TestListing(unittest.TestCase):
                               "d3drdb_20260901T000000Z",
                               "d3drdb_20261005T120000Z"])
 
+    def test_equal_stamps_are_ordered_by_the_whole_id(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("d3drdb_b_20261005T120000Z", "d3drdb_a_20261005T120000Z"):
+                os.makedirs(os.path.join(d, name))
+            self.assertEqual(snapshot.list_ids(d, "d3drdb_*", token=None),
+                             ["d3drdb_a_20261005T120000Z", "d3drdb_b_20261005T120000Z"])
+
 class TestManifest(unittest.TestCase):
     def test_fetched_and_validated(self):
         with mock.patch.object(snapshot, "_request",
@@ -138,6 +145,8 @@ class TestManifest(unittest.TestCase):
             with self.assertRaises(snapshot.SnapshotError) as cm:
                 snapshot.fetch_manifest("https://h/x", "d3drdb_x", token="t")
         self.assertIn("fdp-d3drdb-snapshot/0", str(cm.exception))
+        import toksearch
+        self.assertIn(str(toksearch.__version__), str(cm.exception))
 
     def test_unknown_collation_is_refused(self):
         bad = dict(MANIFEST, transforms={"collation": "latin1_ci"})
@@ -160,6 +169,9 @@ class TestResolve(unittest.TestCase):
 
     def setUp(self):
         snapshot._pinned.clear()
+        self._env = env(FDP_SQL_SNAPSHOT_D3DRDB=None)
+        self._env.__enter__()
+        self.addCleanup(self._env.__exit__, None, None, None)
 
     def test_code_wins_and_is_exported(self):
         with env(FDP_SQL_SNAPSHOT_D3DRDB=None):
@@ -206,12 +218,15 @@ class TestResolve(unittest.TestCase):
             with self.assertRaises(snapshot.SnapshotError) as cm:
                 snapshot.resolve(LOC, token="t")
         self.assertIn(LOC.base_url, str(cm.exception))
-        self.assertNotIn("FDP_SQL_SNAPSHOT_D3DRDB", os.environ)
+        self.assertIsNone(os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB"))
 
 
 class TestCatalogPairing(unittest.TestCase):
     def setUp(self):
         snapshot._pinned.clear()
+        self._env = env(FDP_SQL_SNAPSHOT_D3DRDB=None)
+        self._env.__enter__()
+        self.addCleanup(self._env.__exit__, None, None, None)
 
     def test_the_catalog_pairing_outranks_newest(self):
         meta = json.dumps({"sql_snapshots": {"d3drdb": "d3drdb_PAIRED"}}).encode()
@@ -434,6 +449,9 @@ class TestRequest(unittest.TestCase):
 class TestLocalCatalogPairing(unittest.TestCase):
     def setUp(self):
         snapshot._pinned.clear()
+        self._env = env(FDP_SQL_SNAPSHOT_D3DRDB=None)
+        self._env.__enter__()
+        self.addCleanup(self._env.__exit__, None, None, None)
 
     def _root(self, d, doc=None):
         if doc is not None:

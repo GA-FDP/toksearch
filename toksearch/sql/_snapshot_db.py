@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import threading
+import urllib.parse
 import warnings
 
 from .snapshot import (
@@ -59,11 +60,13 @@ def _import_duckdb():
     return duckdb
 
 
-def _token_for(locator, base):
+def _token_for(locator):
     """The bearer token the locator's AuthHint names, or None for a local
     base or an `AuthHint(kind="none")` (a public server). Missing for a
-    remote base is an error before any HTTP."""
-    if is_local(base):
+    remote base is an error before any HTTP: locality is read from the
+    base_url's scheme (`file://` is local), not from `resolve_base`, which
+    for `pelican://` already makes a request."""
+    if urllib.parse.urlsplit(locator.base_url).scheme == "file":
         return None
     auth = locator.auth
     if auth is not None and auth.kind == "none":
@@ -79,7 +82,7 @@ def _token_for(locator, base):
     return token
 
 
-def _open_duckdb(duckdb, token):
+def _open_duckdb(duckdb, token, base=None):
     """An in-memory DuckDB with httpfs loaded from the conda prefix.
 
     Extensions are never fetched from DuckDB's own server: an FDP
@@ -87,16 +90,18 @@ def _open_duckdb(duckdb, token):
     the extension under <prefix>/duckdb/extensions and does not sign it,
     so both the directory and allow_unsigned_extensions are needed. The
     trust is conda-forge's build, the same trust every other package in
-    the environment has.
+    the environment has. The directory is set even when it does not
+    exist, so unsigned loading never reaches ~/.duckdb instead.
+
+    `token`, when given, is installed as an http secret scoped to `base`.
     """
     ext_dir = os.path.join(sys.prefix, "duckdb", "extensions")
     config = {
         "autoinstall_known_extensions": False,
         "autoload_known_extensions": False,
         "allow_unsigned_extensions": True,
+        "extension_directory": ext_dir,
     }
-    if os.path.isdir(ext_dir):
-        config["extension_directory"] = ext_dir
     con = duckdb.connect(config=config)
     try:
         con.execute("LOAD httpfs")
@@ -107,18 +112,30 @@ def _open_duckdb(duckdb, token):
             "from the network at first use.".format(
                 str(exc).splitlines()[0])) from exc
     if token:
-        _set_secret(duckdb, con, token)
+        _set_secret(duckdb, con, token, base)
     con.execute("SET enable_object_cache = true")
     return con
 
 
-def _create_secret(token):
+def _sql_literal(text):
+    return "'" + text.replace("'", "''") + "'"
+
+
+def _create_secret(token, base):
     # CREATE SECRET does not take bound parameters (DuckDB 1.5), so the
     # token is quoted as a SQL literal.
     # OR REPLACE: a rotation swaps the secret in one statement, so no other
     # cursor ever runs between a DROP and a CREATE with no secret at all.
-    return "CREATE OR REPLACE SECRET fdp_snapshot (TYPE http, BEARER_TOKEN '{}')".format(
-        token.replace("'", "''"))
+    # SCOPE: the token goes only to URLs under the snapshot base, not to any
+    # https URL a query names. SCOPE is a plain string prefix, hence the
+    # trailing slash (".../d3drdb" would also cover ".../d3drdb_other").
+    # Probed 2026-10-05 against the real director: a secret scoped to
+    # https://osdf-director.osg-htc.org/fdp-d3d/metadata/d3drdb/ survives the
+    # director's redirect to a cache (count(*) of _spike/SHOTS_TYPE.parquet =
+    # 167631), and one scoped elsewhere gets 403 -- the scope is matched on
+    # the requested URL, not the redirect target.
+    return ("CREATE OR REPLACE SECRET fdp_snapshot (TYPE http, BEARER_TOKEN {}, "
+            "SCOPE {})".format(_sql_literal(token), _sql_literal(base.rstrip("/") + "/")))
 
 
 def _redact(text, token):
@@ -129,12 +146,12 @@ def _redact(text, token):
     return text
 
 
-def _set_secret(duckdb, con, token):
-    """Install the bearer token as DuckDB's http secret. A failure may echo
-    the statement, token and all, so the error is redacted and raised
-    without its cause."""
+def _set_secret(duckdb, con, token, base):
+    """Install the bearer token as DuckDB's http secret, scoped to `base`.
+    A failure may echo the statement, token and all, so the error is
+    redacted and raised without its cause."""
     try:
-        con.execute(_create_secret(token))
+        con.execute(_create_secret(token, base))
     except duckdb.Error as exc:
         raise SnapshotError("cannot install the bearer token in DuckDB: {}".format(
             _redact(str(exc), token))) from None
@@ -184,8 +201,8 @@ def connect(locator, snapshot=None):
     does that.
     """
     duckdb = _import_duckdb()
+    token = _token_for(locator)          # before resolve_base: no HTTP without it
     base = resolve_base(locator.base_url)
-    token = _token_for(locator, base)
     pinned_before = locator.name in _pinned
     exported_before = os.environ.get(env_var(locator.name))
     sid = resolve(locator, snapshot=snapshot, token=token)
@@ -200,7 +217,7 @@ def connect(locator, snapshot=None):
         if exported_before is None:
             os.environ.pop(env_var(locator.name), None)
         raise
-    con = _open_duckdb(duckdb, token)
+    con = _open_duckdb(duckdb, token, base)
     _define_views(con, base, sid, manifest)
     _notice_once(locator.name, sid, locator.base_url)
     return SnapshotConnection(con, sid, manifest, locator, base, token)
@@ -222,7 +239,7 @@ class SnapshotConnection:
         self._token_seen = token             # the token in DuckDB's secret, if any
         self._tables = {t["name"].lower(): t for t in manifest["tables"]}
         self._views = set()                  # lower-cased names created so far
-        self._views_lock = threading.Lock()
+        self._lock = threading.Lock()    # guards the views and the token
 
     @property
     def duckdb(self):
@@ -264,14 +281,14 @@ class SnapshotConnection:
         if (is_local(self._base) or auth is None or auth.kind != "bearer_token"
                 or not auth.env):
             return False
-        with self._views_lock:
+        with self._lock:
             if self._token_seen != started_with:
                 return True
             new = os.environ.get(auth.env, "")
             if not new or new == self._token_seen:
                 return False
             import duckdb
-            _set_secret(duckdb, self._con, new)
+            _set_secret(duckdb, self._con, new, self._base)
             self._token_seen = new
             return True
 
@@ -285,7 +302,7 @@ class SnapshotConnection:
     def _bind(self, name):
         """Create manifest table `name`'s view unless it exists. Its errors
         are the caller's to handle, like any statement's."""
-        with self._views_lock:
+        with self._lock:
             if name not in self._views:
                 self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
                 self._views.add(name)
@@ -311,7 +328,7 @@ class SnapshotConnection:
         for tree in trees:
             ctes = {c.alias.lower() for c in tree.find_all(exp.CTE)}
             names |= {t.name.lower() for t in tree.find_all(exp.Table)} - ctes
-        with self._views_lock:
+        with self._lock:
             for name in sorted(names & set(self._tables) - self._views):
                 self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
                 self._views.add(name)
@@ -344,9 +361,9 @@ class SnapshotCursor:
         import duckdb
         rewritten, style, note = _tsql.rewrite(sql, nocase=self._conn._nocase)
         if style == "named" and not isinstance(params, dict):
-            raise SnapshotError("%(name)s placeholders need a mapping of parameters")
+            raise ValueError("%(name)s placeholders need a mapping of parameters")
         if style == "qmark" and params is not None and isinstance(params, dict):
-            raise SnapshotError("%s placeholders need a sequence of parameters")
+            raise ValueError("%s placeholders need a sequence of parameters")
         conn = self._conn
         started_with = conn._token_seen
         reauthorized = False
