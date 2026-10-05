@@ -41,7 +41,7 @@ gradio = ">=4"
 mcp = ">=1.23,<2"
 plotly = "*"
 python-kaleido = "*"
-fdp-schema = ">=0.1.1"
+fdp-schema = ">=0.3.0"
 
 [tasks]
 build = "pip install -e . --no-deps"
