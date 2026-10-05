@@ -44,6 +44,9 @@ ENV_PREFIX = "FDP_SQL_SNAPSHOT_"
 #: manifest `transforms.collation` -> DuckDB default_collation (None = leave)
 COLLATIONS = {"nocase": "NOCASE", "binary": None}
 
+#: a snapshot id ends in the UTC stamp it was taken at
+STAMP_RE = re.compile(r"\d{8}T\d{6}Z$")
+
 CONDA_PACKAGES = "python-duckdb duckdb-extension-httpfs sqlglot"
 
 
@@ -80,10 +83,14 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
     """One HTTP request: `(status, headers, body)`.
 
     Follows redirects itself, same method each hop, because urllib refuses
-    to redirect a PROPFIND. The Authorization header is sent to the first
-    host only -- a Pelican director puts the token in the redirect URL as
-    `authz=`, and a bearer token should not be sprayed across hosts.
-    4xx/5xx are returned, not raised; callers decide what a 404 means.
+    to redirect a PROPFIND. Only http(s) redirects are followed, and an
+    https -> http downgrade is refused. The Authorization header is sent to
+    the first host only -- a Pelican director puts the token in the redirect
+    URL as `authz=`, and a bearer token should not be sprayed across hosts.
+    Once dropped on a cross-host hop it stays dropped for the rest of the
+    chain, deliberately: a later hop back to the first host does not get it
+    back. 4xx/5xx are returned, not raised; callers decide what a 404
+    means. Network and read failures are SnapshotError.
     """
     hdrs = dict(headers or {})
     if token:
@@ -96,14 +103,29 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
                 return resp.status, dict(resp.headers), resp.read()
         except urllib.error.HTTPError as exc:
             if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
-                url = urllib.parse.urljoin(url, exc.headers["Location"])
+                new = urllib.parse.urljoin(url, exc.headers["Location"])
+                old_scheme = urllib.parse.urlsplit(url).scheme
+                new_scheme = urllib.parse.urlsplit(new).scheme
+                if new_scheme not in ("http", "https") or (
+                        old_scheme == "https" and new_scheme == "http"):
+                    raise SnapshotError("refusing redirect from {} to {}".format(
+                        _scrub(url), _scrub(new))) from exc
+                url = new
                 if urllib.parse.urlsplit(url).netloc != first_host:
                     hdrs.pop("Authorization", None)
                 continue
-            return exc.code, dict(exc.headers), exc.read()
+            try:
+                err_body = exc.read()
+            except OSError as exc2:
+                raise SnapshotError("cannot read {}: {}".format(
+                    _scrub(url), exc2)) from exc2
+            return exc.code, dict(exc.headers), err_body
         except urllib.error.URLError as exc:
             raise SnapshotError("cannot reach {}: {}".format(
                 _scrub(url), exc.reason)) from exc
+        except OSError as exc:
+            raise SnapshotError("cannot read {}: {}".format(
+                _scrub(url), exc)) from exc
     raise SnapshotError("too many redirects from {}".format(_scrub(url)))
 
 
@@ -122,7 +144,12 @@ def _director_endpoint(host):
         raise SnapshotError(
             "pelican federation {} did not answer its well-known document "
             "(HTTP {})".format(host, status))
-    return json.loads(body)["director_endpoint"].rstrip("/")
+    try:
+        return json.loads(body)["director_endpoint"].rstrip("/")
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise SnapshotError(
+            "pelican federation {} returned a well-known document without a "
+            "usable director_endpoint".format(host)) from exc
 
 
 def resolve_base(base_url):
@@ -139,7 +166,7 @@ def resolve_base(base_url):
     if u.scheme == "file":
         return u.path.rstrip("/") or "/"
     if u.scheme == "pelican":
-        return _director_endpoint(u.hostname) + u.path.rstrip("/")
+        return _director_endpoint(u.netloc) + u.path.rstrip("/")
     raise SnapshotError(
         "sql_snapshot base_url must be pelican://, https:// or file://, "
         "not {!r}".format(base_url))
@@ -150,7 +177,13 @@ def is_local(base):
 
 
 def list_ids(base, id_pattern, token):
-    """Snapshot ids under `base` matching `id_pattern`, oldest first."""
+    """Snapshot ids under `base` matching `id_pattern`, oldest first.
+
+    An id ends in a UTC stamp `YYYYMMDDTHHMMSSZ`, so the oldest-first order
+    is chronological. Anything else beside the snapshots -- a file, a
+    scratch directory, a half-uploaded directory under another name -- is
+    ignored, so it can never be chosen as the newest.
+    """
     if is_local(base):
         names = [n for n in os.listdir(base)
                  if os.path.isdir(os.path.join(base, n))]
@@ -159,12 +192,20 @@ def list_ids(base, id_pattern, token):
                                    method="PROPFIND", headers={"Depth": "1"})
         if status != 207:
             raise SnapshotError("cannot list {} (HTTP {})".format(base, status))
+        try:
+            hrefs = list(ET.fromstring(body).iter("{DAV:}href"))
+        except ET.ParseError as exc:
+            raise SnapshotError(
+                "cannot parse the listing of {}: {}".format(base, exc)) from exc
         names = []
-        for href in ET.fromstring(body).iter("{DAV:}href"):
-            name = posixpath.basename(href.text.rstrip("/"))
+        for href in hrefs:
+            if not href.text:
+                continue
+            name = posixpath.basename(urllib.parse.unquote(href.text).rstrip("/"))
             if name:
                 names.append(name)
-    return sorted(n for n in set(names) if fnmatch.fnmatchcase(n, id_pattern))
+    return sorted(n for n in set(names)
+                  if fnmatch.fnmatchcase(n, id_pattern) and STAMP_RE.search(n))
 
 
 def fetch_manifest(base, snapshot_id, token):
@@ -178,6 +219,8 @@ def fetch_manifest(base, snapshot_id, token):
         except OSError as exc:
             raise SnapshotError("no snapshot {} under {} ({})".format(
                 snapshot_id, base, exc)) from exc
+        except ValueError as exc:
+            raise SnapshotError("{} is not valid JSON: {}".format(path, exc)) from exc
     else:
         url = "{}/{}/manifest.json".format(base, snapshot_id)
         status, _, body = _request(url, token=token)
@@ -188,7 +231,11 @@ def fetch_manifest(base, snapshot_id, token):
                                 "bearer token valid?".format(_scrub(url), status))
         if status != 200:
             raise SnapshotError("cannot read {} (HTTP {})".format(_scrub(url), status))
-        doc = json.loads(body)
+        try:
+            doc = json.loads(body)
+        except ValueError as exc:
+            raise SnapshotError("{} is not valid JSON: {}".format(
+                _scrub(url), exc)) from exc
     if doc.get("schema") != SCHEMA:
         raise SnapshotError(
             "snapshot {} declares schema {!r}; this toksearch reads {!r}".format(
@@ -221,14 +268,39 @@ def catalog_pairing(name, token):
     catalog = os.environ.get("FDP_STORE_CATALOG", "")
     if not root or not catalog:
         return None
-    url = "{}/catalog/{}/meta.json".format(resolve_base(root), catalog)
-    status, _, body = _request(url, token=token)
-    if status == 404:
+    base = resolve_base(root)
+    if is_local(base):
+        path = os.path.join(base, "catalog", catalog, "meta.json")
+        try:
+            with open(path) as fh:
+                raw = fh.read()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise SnapshotError("cannot read catalog metadata {}: {}".format(
+                path, exc)) from exc
+        where = path
+    else:
+        where = "{}/catalog/{}/meta.json".format(base, catalog)
+        status, _, raw = _request(where, token=token)
+        if status == 404:
+            return None
+        if status != 200:
+            raise SnapshotError("cannot read catalog metadata {} (HTTP {})".format(
+                _scrub(where), status))
+    try:
+        pairings = json.loads(raw).get("sql_snapshots", {})
+        value = pairings.get(name)
+    except (ValueError, AttributeError) as exc:
+        raise SnapshotError("catalog metadata {} is malformed: {}".format(
+            _scrub(where), exc)) from exc
+    if value is None:
         return None
-    if status != 200:
-        raise SnapshotError("cannot read catalog metadata {} (HTTP {})".format(
-            _scrub(url), status))
-    return json.loads(body).get("sql_snapshots", {}).get(name)
+    if not isinstance(value, str) or not value:
+        raise SnapshotError(
+            "catalog {} pairs {} with {!r}, which is not a snapshot id".format(
+                catalog, name, value))
+    return value
 
 
 def resolve(locator, snapshot=None, token=None):

@@ -5,9 +5,14 @@ that touches the network, so these run in the conda package's test phase.
 """
 
 import contextlib
+import email.message
+import io
 import json
 import os
+import socket
+import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 from fdp_schema import SqlSnapshotLocator
@@ -71,7 +76,7 @@ class TestBaseUrl(unittest.TestCase):
             base = snapshot.resolve_base("pelican://osg-htc.org:443/fdp-d3d/metadata/d3drdb")
         self.assertEqual(base, "https://director.example/fdp-d3d/metadata/d3drdb")
         req.assert_called_once_with(
-            "https://osg-htc.org/.well-known/pelican-configuration", token=None)
+            "https://osg-htc.org:443/.well-known/pelican-configuration", token=None)
 
     def test_other_schemes_are_refused(self):
         with self.assertRaises(snapshot.SnapshotError):
@@ -90,10 +95,13 @@ class TestListing(unittest.TestCase):
     def test_local_directory(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
-            for name in ("d3drdb_a", "_spike", "d3drdb_b", "notes.txt"):
+            for name in ("d3drdb_20261005T120000Z", "_spike", "d3drdb_20260901T000000Z",
+                         "d3drdb_staging", "d3drdb_a+b", "notes.txt"):
                 os.makedirs(os.path.join(d, name), exist_ok=True)
+            with open(os.path.join(d, "d3drdb_20270101T000000Z.txt"), "w"):
+                pass
             self.assertEqual(snapshot.list_ids(d, "d3drdb_*", token=None),
-                             ["d3drdb_a", "d3drdb_b"])
+                             ["d3drdb_20260901T000000Z", "d3drdb_20261005T120000Z"])
 
 class TestManifest(unittest.TestCase):
     def test_fetched_and_validated(self):
@@ -223,6 +231,222 @@ class TestCatalogPairing(unittest.TestCase):
              mock.patch.object(snapshot, "list_ids", return_value=["d3drdb_1"]):
             snapshot.resolve(LOC, token="t")
         req.assert_not_called()
+
+
+LISTING_BODY = b"""<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+ <D:response><D:href>/b/d3drdb/</D:href></D:response>
+ <D:response><D:href>/b/d3drdb/d3drdb_staging</D:href></D:response>
+ <D:response><D:href>/b/d3drdb/manifest.json</D:href></D:response>
+ <D:response><D:href>/b/d3drdb/d3drdb_a%2Bb</D:href></D:response>
+ <D:response><D:href>/b/d3drdb/_spike</D:href></D:response>
+ <D:response><D:href/></D:response>
+ <D:response><D:href>/b/d3drdb/d3drdb_20261005T120000Z/</D:href></D:response>
+ <D:response><D:href>/b/d3drdb/d3drdb_20260901T000000Z</D:href></D:response>
+</D:multistatus>"""
+
+
+class TestListingStrictness(unittest.TestCase):
+    def test_only_stamped_ids_are_listed(self):
+        with mock.patch.object(snapshot, "_request", return_value=(207, {}, LISTING_BODY)):
+            ids = snapshot.list_ids("https://h/b/d3drdb", "d3drdb_*", token="t")
+        self.assertEqual(ids, ["d3drdb_20260901T000000Z", "d3drdb_20261005T120000Z"])
+
+    def test_percent_escapes_are_decoded_before_matching(self):
+        body = (b'<D:multistatus xmlns:D="DAV:"><D:response><D:href>'
+                b'/b/d3drdb_20261005T120000Z%2F</D:href></D:response></D:multistatus>')
+        with mock.patch.object(snapshot, "_request", return_value=(207, {}, body)):
+            self.assertEqual(snapshot.list_ids("https://h/b", "d3drdb_*", token="t"),
+                             ["d3drdb_20261005T120000Z"])
+
+    def test_malformed_xml_is_a_snapshot_error(self):
+        with mock.patch.object(snapshot, "_request", return_value=(207, {}, b"<D:multi")):
+            with self.assertRaises(snapshot.SnapshotError):
+                snapshot.list_ids("https://h/b", "d3drdb_*", token="t")
+
+
+class TestRobustness(unittest.TestCase):
+    def test_manifest_that_is_not_json(self):
+        with mock.patch.object(snapshot, "_request", return_value=(200, {}, b"<html>")):
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.fetch_manifest("https://h/x", "d3drdb_x", token="t")
+        self.assertIn("https://h/x/d3drdb_x/manifest.json", str(cm.exception))
+
+    def test_local_manifest_that_is_not_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "d3drdb_x"))
+            with open(os.path.join(d, "d3drdb_x", "manifest.json"), "w") as fh:
+                fh.write("{")
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.fetch_manifest(d, "d3drdb_x", token=None)
+        self.assertIn("manifest.json", str(cm.exception))
+
+    def test_well_known_without_director_endpoint(self):
+        with mock.patch.object(snapshot, "_request",
+                               return_value=(200, {}, b'{"other": 1}')):
+            snapshot._director_endpoint.cache_clear()
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.resolve_base("pelican://fed.example/ns/x")
+        self.assertIn("fed.example", str(cm.exception))
+
+    def test_well_known_that_is_not_json(self):
+        with mock.patch.object(snapshot, "_request", return_value=(200, {}, b"nope")):
+            snapshot._director_endpoint.cache_clear()
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.resolve_base("pelican://fed2.example/ns/x")
+        self.assertIn("fed2.example", str(cm.exception))
+
+    def test_pelican_port_is_kept_for_the_well_known_fetch(self):
+        doc = json.dumps({"director_endpoint": "https://d.example/"}).encode()
+        with mock.patch.object(snapshot, "_request", return_value=(200, {}, doc)) as req:
+            snapshot._director_endpoint.cache_clear()
+            snapshot.resolve_base("pelican://fed3.example:8444/ns")
+        req.assert_called_once_with(
+            "https://fed3.example:8444/.well-known/pelican-configuration", token=None)
+
+
+class _Resp:
+    def __init__(self, status=200, headers=None, body=b"ok", read_exc=None):
+        self.status, self.headers, self._body, self._exc = status, headers or {}, body, read_exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        if self._exc:
+            raise self._exc
+        return self._body
+
+
+def _redirect(url, location, code=307):
+    h = email.message.Message()
+    if location is not None:
+        h["Location"] = location
+    return urllib.error.HTTPError(url, code, "r", h, io.BytesIO(b""))
+
+
+class _Opener:
+    """Scripted: each call pops the next item, returning or raising it."""
+
+    def __init__(self, *script):
+        self.script, self.seen = list(script), []
+
+    def open(self, req, timeout=None):
+        self.seen.append((req.full_url, req.get_method(),
+                          req.get_header("Authorization"), req.get_header("Depth")))
+        item = self.script.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+
+class TestRequest(unittest.TestCase):
+    def run_with(self, opener, url="https://a.example/dir/x", **kw):
+        with mock.patch.object(snapshot, "_opener", opener):
+            return snapshot._request(url, **kw)
+
+    def test_relative_location_resolves_against_the_current_url(self):
+        op = _Opener(_redirect("u", "../y"), _Resp())
+        self.run_with(op)
+        self.assertEqual(op.seen[1][0], "https://a.example/y")
+
+    def test_auth_kept_same_host_dropped_cross_host_depth_survives(self):
+        op = _Opener(_redirect("u", "/same"),
+                     _redirect("u", "https://b.example/other"), _Resp())
+        status, _, body = self.run_with(op, token="t", method="PROPFIND",
+                                        headers={"Depth": "1"})
+        self.assertEqual((status, body), (200, b"ok"))
+        self.assertEqual([s[2] for s in op.seen], ["Bearer t", "Bearer t", None])
+        self.assertEqual([s[3] for s in op.seen], ["1", "1", "1"])
+        self.assertEqual({s[1] for s in op.seen}, {"PROPFIND"})
+
+    def test_auth_stays_dropped_after_a_cross_host_hop(self):
+        op = _Opener(_redirect("u", "https://b.example/1"),
+                     _redirect("u", "https://a.example/2"), _Resp())
+        self.run_with(op, token="t")
+        self.assertEqual([s[2] for s in op.seen], ["Bearer t", None, None])
+
+    def test_out_of_hops(self):
+        op = _Opener(*[_redirect("u", "/again") for _ in range(3)])
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op, hops=3)
+        self.assertIn("redirect", str(cm.exception))
+
+    def test_3xx_without_location_is_returned(self):
+        op = _Opener(_redirect("u", None, code=304))
+        self.assertEqual(self.run_with(op)[0], 304)
+
+    def test_redirect_to_file_is_refused(self):
+        op = _Opener(_redirect("u", "file:///x"))
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op)
+        self.assertIn("refusing redirect", str(cm.exception))
+        self.assertEqual(len(op.seen), 1)
+
+    def test_https_to_http_downgrade_is_refused_and_scrubbed(self):
+        op = _Opener(_redirect("u", "http://a.example/x?authz=SECRET"))
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op, token="t")
+        self.assertIn("refusing redirect", str(cm.exception))
+        self.assertNotIn("SECRET", str(cm.exception))
+
+    def test_4xx_is_returned_not_raised(self):
+        h = email.message.Message()
+        op = _Opener(urllib.error.HTTPError("u", 404, "nf", h, io.BytesIO(b"gone")))
+        self.assertEqual(self.run_with(op)[0::2], (404, b"gone"))
+
+    def test_scrub_redacts_authz(self):
+        self.assertEqual(snapshot._scrub("GET https://h/x?a=1&authz=abc.def&b=2 failed"),
+                         "GET https://h/x?a=1&authz=<redacted>&b=2 failed")
+
+    def test_read_timeout_becomes_snapshot_error(self):
+        op = _Opener(_Resp(read_exc=socket.timeout("timed out")))
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op)
+        self.assertIn("cannot read https://a.example/dir/x", str(cm.exception))
+
+    def test_error_body_read_failure_becomes_snapshot_error(self):
+        class Bad(io.BytesIO):
+            def read(self, *a):
+                raise ConnectionResetError("reset")
+        op = _Opener(urllib.error.HTTPError("u", 500, "e", email.message.Message(), Bad()))
+        with self.assertRaises(snapshot.SnapshotError):
+            self.run_with(op)
+
+
+class TestLocalCatalogPairing(unittest.TestCase):
+    def setUp(self):
+        snapshot._pinned.clear()
+
+    def _root(self, d, doc=None):
+        if doc is not None:
+            os.makedirs(os.path.join(d, "catalog", "catalog_X"))
+            with open(os.path.join(d, "catalog", "catalog_X", "meta.json"), "w") as fh:
+                json.dump(doc, fh)
+        return env(FDP_STORE_ROOT="file://" + d, FDP_STORE_CATALOG="catalog_X")
+
+    def test_local_root_reads_the_file(self):
+        with tempfile.TemporaryDirectory() as d, \
+             self._root(d, {"sql_snapshots": {"d3drdb": "d3drdb_P"}}), \
+             mock.patch.object(snapshot, "_request") as req:
+            self.assertEqual(snapshot.catalog_pairing("d3drdb", token=None), "d3drdb_P")
+        req.assert_not_called()
+
+    def test_local_root_missing_file_is_none(self):
+        with tempfile.TemporaryDirectory() as d, self._root(d):
+            self.assertIsNone(snapshot.catalog_pairing("d3drdb", token=None))
+
+    def test_a_pairing_that_is_not_a_string_is_an_error(self):
+        for bad in (7, "", ["x"]):
+            with tempfile.TemporaryDirectory() as d, \
+                 self._root(d, {"sql_snapshots": {"d3drdb": bad}}):
+                with self.assertRaises(snapshot.SnapshotError) as cm:
+                    snapshot.catalog_pairing("d3drdb", token=None)
+                self.assertIn("catalog_X", str(cm.exception))
+                self.assertIn(repr(bad), str(cm.exception))
 
 
 if __name__ == "__main__":
