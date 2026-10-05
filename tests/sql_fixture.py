@@ -73,12 +73,12 @@ def build(root, sid, collation="nocase"):
 
 class Server:
     """`with Server(root, token) as s: s.url ...`. Thread-safe counters in
-    `s.stats` = {"requests", "bytes", "methods"}."""
+    `s.stats` = {"requests", "bytes", "methods", "paths"}."""
 
-    def __init__(self, root, token, redirect_to=None):
+    def __init__(self, root, token):
         self.root = root
         self.token = token
-        self.stats = {"requests": 0, "bytes": 0, "methods": []}
+        self.stats = {"requests": 0, "bytes": 0, "methods": [], "paths": []}
         lock = threading.Lock()
         outer = self
 
@@ -93,6 +93,7 @@ class Server:
                     outer.stats["requests"] += 1
                     outer.stats["bytes"] += nbytes
                     outer.stats["methods"].append(self.command)
+                    outer.stats["paths"].append(self.path.split("?")[0])
 
             def _authorized(self):
                 auth = self.headers.get("Authorization", "")
@@ -181,4 +182,4 @@ class Server:
         self._srv.server_close()
 
     def reset(self):
-        self.stats.update(requests=0, bytes=0, methods=[])
+        self.stats.update(requests=0, bytes=0, methods=[], paths=[])

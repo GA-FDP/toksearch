@@ -187,11 +187,84 @@ class TestConnection(unittest.TestCase):
                     snapshot._open_duckdb(duckdb, None)
         self.assertIn("duckdb-extension-httpfs", str(cm.exception))
 
+    def test_a_query_naming_two_tables_binds_both(self):
+        with self.connect() as conn:
+            self.assertEqual(conn._views, set())
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM dbo.shots s JOIN [SHOTS_TYPE] t ON s.shot = t.shot")
+            self.assertEqual(cur.fetchone()[0], 3)
+            self.assertEqual(conn._views, {"shots", "shots_type"})
+
+    def test_a_second_cursor_sees_views_the_first_created(self):
+        with self.connect() as conn:
+            first, second = conn.cursor(), conn.cursor()
+            first.execute("SELECT count(*) FROM runs")
+            self.assertEqual(first.fetchone()[0], 2)
+            # bypass the binding step: the view must already be visible
+            self.assertEqual(second._cur.execute("SELECT count(*) FROM runs").fetchone()[0], 2)
+
+    def test_a_pass_through_statement_still_binds_its_table(self):
+        # T-SQL cannot parse a list comprehension, so it passes through
+        # untranslated; the DuckDB dialect can, and finds `shots`.
+        sql = "SELECT [x FOR x IN [shot]] FROM shots ORDER BY shot"
+        import sqlglot
+        with self.assertRaises(sqlglot.errors.SqlglotError):
+            sqlglot.parse(sql, read="tsql")                # control
+        sqlglot.parse(sql, read="duckdb")                  # and this one can
+        with self.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(sql)
+            self.assertEqual([r[0] for r in cur.fetchall()], [[1], [2], [3]])
+            self.assertEqual(conn._views, {"shots"})
+
+    def test_sql_no_parser_can_read_binds_every_table(self):
+        # No natural statement found that both sqlglot dialects reject and
+        # DuckDB accepts, so the DuckDB-dialect parse is made to fail.
+        import sqlglot
+        real = sqlglot.parse
+
+        def parse(sql, read=None, **kw):
+            if read == "duckdb":
+                raise sqlglot.errors.ParseError("forced")
+            return real(sql, read=read, **kw)
+
+        with self.connect() as conn:
+            cur = conn.cursor()
+            with mock.patch.object(sqlglot, "parse", parse):
+                cur.execute("SELECT count(*) FROM runs")
+            self.assertEqual(cur.fetchone()[0], 2)
+            self.assertEqual(conn._views, {"shots", "shots_type", "runs"})
+
     def test_commit_and_rollback_are_harmless(self):
         with self.connect() as conn:
             conn.commit()
             conn.rollback()
             self.assertIsNotNone(conn.duckdb)
+
+
+@unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (conda-forge: python-duckdb duckdb-extension-httpfs sqlglot)")
+class TestSecretRedaction(unittest.TestCase):
+    TOKEN = "s3cret-token-value-0123"
+
+    def test_a_failed_create_secret_does_not_echo_the_token(self):
+        real = duckdb.connect(config={"autoinstall_known_extensions": False})
+
+        class Con:
+            def execute(self, sql):
+                if sql.startswith("CREATE SECRET"):
+                    raise duckdb.ParserException("syntax error at or near: " + sql)
+                if sql == "LOAD httpfs":
+                    return None
+                return real.execute(sql)
+
+        fake = mock.Mock(Error=duckdb.Error)
+        fake.connect.return_value = Con()
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            snapshot._open_duckdb(fake, self.TOKEN)
+        self.assertNotIn(self.TOKEN, str(cm.exception))
+        self.assertIn("<redacted>", str(cm.exception))
+        self.assertIsNone(cm.exception.__cause__)    # nor in the chained one
+        self.assertTrue(cm.exception.__suppress_context__)
 
 
 class TestMissingDependencies(unittest.TestCase):
