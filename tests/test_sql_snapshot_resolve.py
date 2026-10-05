@@ -82,6 +82,16 @@ class TestBaseUrl(unittest.TestCase):
         with self.assertRaises(snapshot.SnapshotError):
             snapshot.resolve_base("ftp://h/x")
 
+    def test_plain_http_to_loopback_is_verbatim_and_remote(self):
+        # the test server's scheme; it is read over HTTP, not as a path
+        base = snapshot.resolve_base("http://127.0.0.1:1234/x/")
+        self.assertEqual(base, "http://127.0.0.1:1234/x")
+        self.assertFalse(snapshot.is_local(base))
+
+    def test_plain_http_to_any_other_host_is_refused(self):
+        with self.assertRaises(snapshot.SnapshotError):
+            snapshot.resolve_base("http://example.com/x")
+
 class TestListing(unittest.TestCase):
     def test_propfind_filtered_by_pattern_and_sorted(self):
         with mock.patch.object(snapshot, "_request",
