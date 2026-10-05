@@ -11,3 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""SQL access for tokamak shot metadata.
+
+`toksearch.sql.mssql` connects to a live database named by a `sql`
+locator. `toksearch.sql.snapshot` reads a published, immutable snapshot
+named by a `sql_snapshot` locator -- the same T-SQL, wherever the process
+runs. Device packages wrap one or both: `toksearch_d3d.sql.connect_d3drdb`.
+"""

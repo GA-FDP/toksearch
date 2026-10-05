@@ -360,6 +360,32 @@ def resolve(locator, snapshot=None, token=None):
     return sid
 
 
+# -- by tokamak and name ---------------------------------------------------------
+
+def locator_for(tokamak, name):
+    """The `sql_snapshot` locator called `name` on `tokamak`, from the
+    catalogs registered via the fdp_schema.catalogs entry-point group."""
+    from .mssql import _discover_catalogs
+    catalogs = _discover_catalogs()
+    if tokamak not in catalogs:
+        raise KeyError("No tokamak named {!r}. Available: {}".format(
+            tokamak, sorted(catalogs)))
+    locs = [l for l in catalogs[tokamak].locators
+            if l.kind == "sql_snapshot" and l.name == name]
+    if not locs:
+        avail = sorted(l.name for l in catalogs[tokamak].locators
+                       if l.kind == "sql_snapshot")
+        raise KeyError("No sql_snapshot locator named {!r} on tokamak {!r}. "
+                       "Available: {}".format(name, tokamak, avail))
+    return locs[0]
+
+
+def connect_tokamak(tokamak, name, snapshot=None):
+    """`connect` for the locator `locator_for(tokamak, name)` finds."""
+    from ._snapshot_db import connect as _connect   # lazy: import cycle
+    return _connect(locator_for(tokamak, name), snapshot=snapshot)
+
+
 # -- the connection, re-exported lazily ------------------------------------
 # _snapshot_db imports from this module at import time, so this module must
 # not import it eagerly (PEP 562 module __getattr__ instead).
