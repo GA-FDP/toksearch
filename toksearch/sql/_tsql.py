@@ -84,3 +84,35 @@ def convert_placeholders(sql):
             out.append(ch)
             i += 1
     return "".join(out), style
+
+
+def transpile(sql, nocase=False):
+    """T-SQL in, DuckDB out: `(sql, note)`.
+
+    On a parse failure the input is returned unchanged and `note` carries
+    the parser's message: nothing was altered silently, and if DuckDB
+    rejects it too the user sees both opinions. Under `nocase` every LIKE
+    becomes ILIKE -- T-SQL's LIKE is case-insensitive and DuckDB's is not,
+    whatever the collation.
+    """
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        trees = [t for t in sqlglot.parse(sql, read="tsql") if t is not None]
+    except sqlglot.errors.ParseError as exc:
+        return sql, "sqlglot ParseError: " + str(exc).splitlines()[0]
+    if nocase:
+        for tree in trees:
+            for like in list(tree.find_all(exp.Like)):
+                # Carry every arg: `NOT LIKE` is Like(negate=True) in sqlglot, and
+                # ESCAPE rides along too.
+                like.replace(exp.ILike(**like.args))
+    return "; ".join(t.sql(dialect="duckdb") for t in trees), None
+
+
+def rewrite(sql, nocase=False):
+    """Both passes: `(sql, placeholder_style, note)`."""
+    sql, style = convert_placeholders(sql)
+    sql, note = transpile(sql, nocase=nocase)
+    return sql, style, note
