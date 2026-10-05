@@ -275,18 +275,20 @@ class SnapshotConnection:
             self._token_seen = new
             return True
 
-    def _bind_missing(self, text):
-        """DuckDB said a table does not exist: create its view if it is a
-        manifest table, and say whether a retry is worth it."""
+    def _missing_table(self, text):
+        """The manifest table a DuckDB table-not-found error names, or None."""
         m = re.search(r"Table with name (\w+) does not exist", text)
         if not m or m.group(1).lower() not in self._tables:
-            return False
-        name = m.group(1).lower()
+            return None
+        return m.group(1).lower()
+
+    def _bind(self, name):
+        """Create manifest table `name`'s view unless it exists. Its errors
+        are the caller's to handle, like any statement's."""
         with self._views_lock:
             if name not in self._views:
                 self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
                 self._views.add(name)
-        return True
 
     def _ensure_tables(self, sql):
         """Create the views `sql` names that do not exist yet.
@@ -297,7 +299,7 @@ class SnapshotConnection:
         tables are left alone, so DuckDB reports them (with the
         excluded-table hint). This is the fast path only: if sqlglot cannot
         parse the statement nothing is created here, and `execute` binds
-        each table DuckDB reports missing (`_bind_missing`) and retries.
+        each table DuckDB reports missing (`_missing_table`, `_bind`) and retries.
         """
         import sqlglot
         from sqlglot import exp
@@ -349,8 +351,12 @@ class SnapshotCursor:
         started_with = conn._token_seen
         reauthorized = False
         bound = 0
+        pending_bind = None    # a table DuckDB reported missing, bound in the try
         while True:
             try:
+                if pending_bind is not None:
+                    conn._bind(pending_bind)
+                    pending_bind = None
                 conn._ensure_tables(rewritten)
                 if params is None:
                     self._cur.execute(rewritten)
@@ -363,8 +369,11 @@ class SnapshotCursor:
                 if auth_failure and not reauthorized and conn._refresh_token(started_with):
                     reauthorized = True        # one re-read of the token, one retry
                     continue
-                if (not auth_failure and isinstance(exc, duckdb.CatalogException)
-                        and bound < len(conn._tables) and conn._bind_missing(text)):
+                missing = (None if auth_failure
+                           or not isinstance(exc, duckdb.CatalogException)
+                           else conn._missing_table(text))
+                if missing is not None and bound < len(conn._tables):
+                    pending_bind = missing
                     bound += 1
                     continue
                 if auth_failure:

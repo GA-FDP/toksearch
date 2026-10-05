@@ -228,6 +228,34 @@ class TestOverHttp(unittest.TestCase):
             finally:
                 os.environ.pop("FDP_SQL_SNAPSHOT_PUBDB", None)
 
+    def test_a_view_bound_on_duckdbs_error_gets_the_same_auth_handling(self):
+        # sqlglot is made unable to parse, so nothing is bound up front and
+        # RUNS is bound from DuckDB's table-not-found error. That bind reads
+        # the footer, which the server now refuses; the refusal must come
+        # out as the usual SnapshotError naming fdp login, not raw DuckDB.
+        import sqlglot
+        real = sqlglot.parse
+
+        def parse(sql, read=None, **kw):
+            if read == "duckdb":
+                raise sqlglot.errors.ParseError("forced")
+            return real(sql, read=read, **kw)
+
+        with snapshot.connect(self.loc) as conn:
+            cur = conn.cursor()
+            self.server.token = "rotated-token"       # environment NOT updated
+            with mock.patch.object(sqlglot, "parse", parse):
+                try:
+                    cur.execute("SELECT count(*) FROM runs")
+                except Exception as exc:              # examined below
+                    err = exc
+                else:
+                    self.fail("the query succeeded against a rotated token")
+            self.assertIsInstance(err, snapshot.SnapshotError)
+            self.assertNotIsInstance(err, duckdb.Error)
+            self.assertIn("fdp login", str(err))
+            self.assertNotIn("runs", conn._views)
+
     def test_environment_pin_is_honoured_over_http(self):
         with env(FDP_SQL_SNAPSHOT_HTTPDB="d3drdb_20260901T000000Z"):
             with snapshot.connect(self.loc) as conn:
