@@ -199,3 +199,89 @@ def fetch_manifest(base, snapshot_id, token):
             "snapshot {} declares collation {!r}; this toksearch knows {}".format(
                 snapshot_id, collation, sorted(COLLATIONS)))
     return doc
+
+
+# -- which snapshot this process reads ----------------------------------------
+
+# Locator names pinned by THIS process, so a second pin can be told apart
+# from one the user exported. Same device as store_catalog._PINNED_THIS_PROCESS.
+_pinned = set()
+
+
+def catalog_pairing(name, token):
+    """The snapshot the process's catalog was built against, or None.
+
+    Reads `<FDP_STORE_ROOT>/catalog/<FDP_STORE_CATALOG>/meta.json`, key
+    `sql_snapshots.<name>`. D3 writes that file; until it exists this
+    returns None and the caller moves on. A file that exists but cannot
+    be read is an error: the catalog said something and we could not hear
+    it, which is not the same as it saying nothing.
+    """
+    root = os.environ.get("FDP_STORE_ROOT", "")
+    catalog = os.environ.get("FDP_STORE_CATALOG", "")
+    if not root or not catalog:
+        return None
+    url = "{}/catalog/{}/meta.json".format(resolve_base(root), catalog)
+    status, _, body = _request(url, token=token)
+    if status == 404:
+        return None
+    if status != 200:
+        raise SnapshotError("cannot read catalog metadata {} (HTTP {})".format(
+            _scrub(url), status))
+    return json.loads(body).get("sql_snapshots", {}).get(name)
+
+
+def resolve(locator, snapshot=None, token=None):
+    """Settle the snapshot id for `locator` in this process and export it.
+
+    Precedence, most specific first:
+
+    1. `snapshot` -- named in code
+    2. `FDP_SQL_SNAPSHOT_<NAME>` -- named for the process by `fdp run`, a
+       saved-snapshot replay, or the user's own export
+    3. the pairing the process's catalog records (`catalog_pairing`)
+    4. the newest published under the locator's base_url
+
+    Code outranks the environment, but a disagreement raises
+    SnapshotConflict rather than picking one. One snapshot per process:
+    workers keep the environment they were started with, so a second,
+    different pin would not reach them (store_catalog.pin_run says why).
+    (3) and (4) are errors when they name nothing readable -- never a
+    fallback to another tier.
+    """
+    var = env_var(locator.name)
+    existing = os.environ.get(var, "")
+
+    if snapshot:
+        if existing and existing != snapshot:
+            if locator.name in _pinned:
+                raise SnapshotConflict(
+                    "an earlier connection in this process is already pinned "
+                    "to {!r}, and this one asks for {!r}. A process reads one "
+                    "snapshot per database: its worker processes keep the "
+                    "environment they were started with, so a second pin would "
+                    "not reach them. Run one snapshot per process.".format(
+                        existing, snapshot))
+            raise SnapshotConflict(
+                "this process is pinned to {!r} by {} and asks for {!r} in "
+                "code; they cannot both be honoured. Unset {} or drop the "
+                "snapshot= argument.".format(existing, var, snapshot, var))
+        os.environ[var] = snapshot
+        _pinned.add(locator.name)
+        return snapshot
+
+    if existing:
+        return existing
+
+    base = resolve_base(locator.base_url)
+    sid = catalog_pairing(locator.name, token)
+    if sid is None:
+        ids = list_ids(base, locator.id_pattern, token)
+        if not ids:
+            raise SnapshotError(
+                "no snapshot matching {!r} is published under {}".format(
+                    locator.id_pattern, locator.base_url))
+        sid = ids[-1]
+    os.environ[var] = sid
+    _pinned.add(locator.name)
+    return sid
