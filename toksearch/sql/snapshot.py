@@ -32,6 +32,7 @@ import os
 import posixpath
 import re
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -425,7 +426,7 @@ def _open_duckdb(duckdb, token):
             "from the network at first use.".format(
                 str(exc).splitlines()[0])) from exc
     if token:
-        con.execute(_create_secret(token))
+        _set_secret(duckdb, con, token)
     con.execute("SET enable_object_cache = true")
     return con
 
@@ -437,16 +438,43 @@ def _create_secret(token):
         token.replace("'", "''"))
 
 
+def _redact(text, token):
+    """`_scrub`, and the raw token too when there is one."""
+    text = _scrub(text)
+    if token:
+        text = text.replace(token, "<redacted>")
+    return text
+
+
+def _set_secret(duckdb, con, token):
+    """Install the bearer token as DuckDB's http secret. A failure may echo
+    the statement, token and all, so the error is redacted and raised
+    without its cause."""
+    try:
+        con.execute("DROP SECRET IF EXISTS fdp_snapshot")
+        con.execute(_create_secret(token))
+    except duckdb.Error as exc:
+        raise SnapshotError("cannot install the bearer token in DuckDB: {}".format(
+            _redact(str(exc), token))) from None
+
+
+def _view_sql(base, sid, table):
+    """CREATE VIEW for one manifest table over its Parquet files."""
+    if is_local(base):
+        urls = [os.path.join(base, sid, f["path"]) for f in table["files"]]
+    else:
+        urls = ["{}/{}/{}".format(base, sid, f["path"]) for f in table["files"]]
+    literal = "[" + ", ".join("'" + u.replace("'", "''") + "'" for u in urls) + "]"
+    return 'CREATE VIEW dbo."{}" AS SELECT * FROM read_parquet({})'.format(
+        table["name"].replace('"', '""'), literal)
+
+
 def _define_views(con, base, sid, manifest):
+    """The schema and settings only. Each table's view is created when a
+    statement first names it (SnapshotConnection._ensure_tables): creating
+    a view binds it, which reads the Parquet footer, so doing all of them
+    here would cost two requests per table before the first query."""
     con.execute("CREATE SCHEMA dbo")
-    for table in manifest["tables"]:
-        if is_local(base):
-            urls = [os.path.join(base, sid, f["path"]) for f in table["files"]]
-        else:
-            urls = ["{}/{}/{}".format(base, sid, f["path"]) for f in table["files"]]
-        literal = "[" + ", ".join("'" + u.replace("'", "''") + "'" for u in urls) + "]"
-        con.execute('CREATE VIEW dbo."{}" AS SELECT * FROM read_parquet({})'.format(
-            table["name"].replace('"', '""'), literal))
     con.execute("SET search_path = 'dbo'")
     collation = COLLATIONS[manifest.get("transforms", {}).get("collation", "binary")]
     if collation:
@@ -498,6 +526,7 @@ class SnapshotConnection:
 
     def __init__(self, con, sid, manifest, locator, base):
         self._con = con
+        self._sid = sid
         self.snapshot = sid
         self.manifest = manifest
         self._locator = locator
@@ -507,6 +536,9 @@ class SnapshotConnection:
                           for e in manifest.get("excluded", [])}
         auth = locator.auth
         self._token_seen = os.environ.get(auth.env, "") if auth and auth.env else None
+        self._tables = {t["name"].lower(): t for t in manifest["tables"]}
+        self._views = set()                  # lower-cased names created so far
+        self._views_lock = threading.Lock()
 
     @property
     def duckdb(self):
@@ -547,13 +579,36 @@ class SnapshotConnection:
         if not new or new == self._token_seen:
             return False
         self._token_seen = new
-        self._con.execute("DROP SECRET IF EXISTS fdp_snapshot")
-        self._con.execute(_create_secret(new))
+        import duckdb
+        _set_secret(duckdb, self._con, new)
         return True
+
+    def _ensure_tables(self, sql):
+        """Create the views `sql` names that do not exist yet.
+
+        Table names come from parsing the already-rewritten statement in
+        the DuckDB dialect; the schema part is ignored and case does not
+        matter. Names that are not manifest tables are left alone, so
+        DuckDB reports them (with the excluded-table hint). If sqlglot
+        cannot parse the statement, every remaining table is created, so
+        a statement sqlglot does not understand still finds its tables.
+        """
+        import sqlglot
+        from sqlglot import exp
+        try:
+            trees = sqlglot.parse(sql, read="duckdb")
+            names = {t.name.lower() for tree in trees if tree is not None
+                     for t in tree.find_all(exp.Table)}
+        except sqlglot.errors.SqlglotError:
+            names = set(self._tables)
+        with self._views_lock:
+            for name in sorted(names & set(self._tables) - self._views):
+                self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
+                self._views.add(name)
 
     def _explain(self, exc, note):
         """A DuckDB error as a SnapshotError a user can act on."""
-        msg = _scrub(str(exc)).strip()
+        msg = _redact(str(exc), self._token_seen).strip()
         m = re.search(r"Table with name (\w+) does not exist", msg)
         if m and m.group(1).lower() in self._excluded:
             msg += ("\n{} is excluded from snapshots of this database "
@@ -579,6 +634,7 @@ class SnapshotCursor:
             raise SnapshotError("%s placeholders need a sequence of parameters")
         for attempt in (1, 2):
             try:
+                self._conn._ensure_tables(rewritten)
                 if params is None:
                     self._cur.execute(rewritten)
                 else:
@@ -592,8 +648,9 @@ class SnapshotCursor:
                     raise SnapshotError(
                         "[snapshot {}] not authorized (HTTP 401/403) and the bearer "
                         "token has not changed; run `fdp login`. {}".format(
-                            self._conn.snapshot, _scrub(text).splitlines()[0])) from exc
-                raise self._conn._explain(exc, note) from exc
+                            self._conn.snapshot,
+                            _redact(text, self._conn._token_seen).splitlines()[0])) from None
+                raise self._conn._explain(exc, note) from None
 
     def fetchone(self):
         return self._cur.fetchone()

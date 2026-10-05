@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 try:
     import duckdb  # noqa: F401
@@ -132,6 +133,41 @@ class TestOverHttp(unittest.TestCase):
             snapshot.connect(self.loc, snapshot="d3drdb_19990101T000000Z")
         self.assertIn("d3drdb_19990101T000000Z", str(cm.exception))
         self.assertNotIn("FDP_SQL_SNAPSHOT_HTTPDB", os.environ)
+
+    def test_connecting_fetches_no_parquet_and_a_query_only_its_tables(self):
+        # d3drdb has ~60 tables: binding them all at connect time would be
+        # ~120 requests before the first query. Views are made on first use.
+        with snapshot.connect(self.loc) as conn:
+            self.assertEqual(
+                [p for p in self.server.stats["paths"] if p.endswith(".parquet")], [],
+                "connect() read Parquet before any query")
+            self.server.reset()
+            self.assertEqual(self.server.stats["requests"], 0)
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM shots")
+            self.assertEqual(cur.fetchone()[0], 3)
+        sid = "d3drdb_20261005T120000Z"
+        paths = self.server.stats["paths"]
+        self.assertIn("/{}/SHOTS.parquet".format(sid), paths)
+        self.assertNotIn("/{}/SHOTS_TYPE.parquet".format(sid), paths)
+        self.assertNotIn("/{}/RUNS.parquet".format(sid), paths)
+
+    def test_the_token_is_redacted_from_query_errors(self):
+        with snapshot.connect(self.loc) as conn:
+            self.assertIn(TOKEN, str(duckdb.Error("x " + TOKEN)))   # control
+            err = conn._explain(duckdb.Error("boom, sent " + TOKEN), None)
+            self.assertNotIn(TOKEN, str(err))
+            self.assertIn("<redacted>", str(err))
+            # the 401/403 path, with the token unchanged so there is no retry
+            cur = conn.cursor()
+            failing = mock.Mock()
+            failing.execute.side_effect = duckdb.HTTPException(
+                "HTTP 403 Forbidden for Bearer " + TOKEN)
+            cur._cur = failing
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                cur.execute("SELECT 1")
+            self.assertIn("fdp login", str(cm.exception))
+            self.assertNotIn(TOKEN, str(cm.exception))
 
     def test_environment_pin_is_honoured_over_http(self):
         with env(FDP_SQL_SNAPSHOT_HTTPDB="d3drdb_20260901T000000Z"):
