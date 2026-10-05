@@ -11,6 +11,13 @@ mdsplus-xrdcl = ">=1,<2"
 mdsip-fdp = ">=0.1.0"
 numpy = ">=1.20, <2"
 pymssql = "*"
+# toksearch.sql.snapshot imports these lazily and the conda package does
+# NOT declare them (recipe/recipe.yaml): a device package that ships a
+# sql_snapshot locator declares them. The dev env needs them to run the
+# snapshot tests, which skip when they are absent.
+python-duckdb = ">=1.5,<2"
+duckdb-extension-httpfs = ">=1.5,<2"
+sqlglot = ">=30"
 ray-core = "*"
 pyspark = ">=4"
 openjdk = ">=17"
