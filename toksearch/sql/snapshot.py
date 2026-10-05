@@ -360,15 +360,16 @@ def resolve(locator, snapshot=None, token=None):
     return sid
 
 
-# -- the connection, re-exported -------------------------------------------
-# It lives in _snapshot_db; this import is last so that module can import
-# what it needs from here.
+# -- the connection, re-exported lazily ------------------------------------
+# _snapshot_db imports from this module at import time, so this module must
+# not import it eagerly (PEP 562 module __getattr__ instead).
 
-from ._snapshot_db import (  # noqa: E402,F401
-    SnapshotConnection,
-    SnapshotCursor,
-    _import_duckdb,
-    _noticed,
-    _open_duckdb,
-    connect,
-)
+_DB_EXPORTS = ("connect", "SnapshotConnection", "SnapshotCursor",
+               "_import_duckdb", "_open_duckdb", "_noticed")
+
+
+def __getattr__(name):
+    if name in _DB_EXPORTS:
+        from . import _snapshot_db
+        return getattr(_snapshot_db, name)
+    raise AttributeError("module {!r} has no attribute {!r}".format(__name__, name))
