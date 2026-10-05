@@ -133,5 +133,97 @@ class TestManifest(unittest.TestCase):
             self.assertEqual(snapshot.fetch_manifest(d, "d3drdb_x", token=None)["id"],
                              MANIFEST["id"])
 
+class TestResolve(unittest.TestCase):
+    """Mirrors tests/test_store_catalog.py: code, environment, newest."""
+
+    def setUp(self):
+        snapshot._pinned.clear()
+
+    def test_code_wins_and_is_exported(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None):
+            sid = snapshot.resolve(LOC, snapshot="d3drdb_X", token="t")
+            self.assertEqual(sid, "d3drdb_X")
+            self.assertEqual(os.environ["FDP_SQL_SNAPSHOT_D3DRDB"], "d3drdb_X")
+
+    def test_environment_is_honoured_without_a_lookup(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB="d3drdb_USER"), \
+             mock.patch.object(snapshot, "list_ids") as listing:
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_USER")
+            listing.assert_not_called()
+
+    def test_conflict_names_both(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB="d3drdb_USER"):
+            with self.assertRaises(snapshot.SnapshotConflict) as cm:
+                snapshot.resolve(LOC, snapshot="d3drdb_CODE", token="t")
+        msg = str(cm.exception)
+        self.assertIn("d3drdb_USER", msg)
+        self.assertIn("d3drdb_CODE", msg)
+        self.assertIn("FDP_SQL_SNAPSHOT_D3DRDB", msg)
+
+    def test_a_second_pin_in_one_process_says_so(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None):
+            snapshot.resolve(LOC, snapshot="d3drdb_A", token="t")
+            with self.assertRaises(snapshot.SnapshotConflict) as cm:
+                snapshot.resolve(LOC, snapshot="d3drdb_B", token="t")
+        self.assertIn("earlier", str(cm.exception))
+        self.assertIn("worker processes", str(cm.exception))
+
+    def test_the_same_value_from_both_is_not_a_conflict(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB="d3drdb_A"):
+            self.assertEqual(snapshot.resolve(LOC, snapshot="d3drdb_A", token="t"), "d3drdb_A")
+
+    def test_newest_is_resolved_and_exported(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None), \
+             mock.patch.object(snapshot, "list_ids", return_value=["d3drdb_1", "d3drdb_2"]):
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_2")
+            self.assertEqual(os.environ["FDP_SQL_SNAPSHOT_D3DRDB"], "d3drdb_2")
+
+    def test_nothing_published_is_an_error_not_a_fallback(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None), \
+             mock.patch.object(snapshot, "list_ids", return_value=[]):
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.resolve(LOC, token="t")
+        self.assertIn(LOC.base_url, str(cm.exception))
+        self.assertNotIn("FDP_SQL_SNAPSHOT_D3DRDB", os.environ)
+
+
+class TestCatalogPairing(unittest.TestCase):
+    def setUp(self):
+        snapshot._pinned.clear()
+
+    def test_the_catalog_pairing_outranks_newest(self):
+        meta = json.dumps({"sql_snapshots": {"d3drdb": "d3drdb_PAIRED"}}).encode()
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
+                 FDP_STORE_CATALOG="catalog_X"), \
+             mock.patch.object(snapshot, "_request", return_value=(200, {}, meta)) as req, \
+             mock.patch.object(snapshot, "list_ids") as listing:
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_PAIRED")
+        req.assert_called_once_with("https://h/fdp-d3d/catalog/catalog_X/meta.json", token="t")
+        listing.assert_not_called()
+
+    def test_no_meta_file_means_newest(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
+                 FDP_STORE_CATALOG="catalog_X"), \
+             mock.patch.object(snapshot, "_request", return_value=(404, {}, b"")), \
+             mock.patch.object(snapshot, "list_ids", return_value=["d3drdb_1"]):
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_1")
+
+    def test_meta_without_this_locator_means_newest(self):
+        meta = json.dumps({"sql_snapshots": {"other": "x"}}).encode()
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
+                 FDP_STORE_CATALOG="catalog_X"), \
+             mock.patch.object(snapshot, "_request", return_value=(200, {}, meta)), \
+             mock.patch.object(snapshot, "list_ids", return_value=["d3drdb_1"]):
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_1")
+
+    def test_no_catalog_pinned_skips_the_step(self):
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
+                 FDP_STORE_CATALOG=None), \
+             mock.patch.object(snapshot, "_request") as req, \
+             mock.patch.object(snapshot, "list_ids", return_value=["d3drdb_1"]):
+            snapshot.resolve(LOC, token="t")
+        req.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
