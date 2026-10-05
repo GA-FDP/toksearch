@@ -383,10 +383,13 @@ def _import_duckdb():
 
 def _token_for(locator, base):
     """The bearer token the locator's AuthHint names, or None for a local
-    base. Missing for a remote base is an error before any HTTP."""
+    base or an `AuthHint(kind="none")` (a public server). Missing for a
+    remote base is an error before any HTTP."""
     if is_local(base):
         return None
     auth = locator.auth
+    if auth is not None and auth.kind == "none":
+        return None
     if auth is None or auth.kind != "bearer_token" or not auth.env:
         raise SnapshotError(
             "sql_snapshot locator {!r} names no bearer_token env var; nothing "
@@ -434,7 +437,9 @@ def _open_duckdb(duckdb, token):
 def _create_secret(token):
     # CREATE SECRET does not take bound parameters (DuckDB 1.5), so the
     # token is quoted as a SQL literal.
-    return "CREATE SECRET fdp_snapshot (TYPE http, BEARER_TOKEN '{}')".format(
+    # OR REPLACE: a rotation swaps the secret in one statement, so no other
+    # cursor ever runs between a DROP and a CREATE with no secret at all.
+    return "CREATE OR REPLACE SECRET fdp_snapshot (TYPE http, BEARER_TOKEN '{}')".format(
         token.replace("'", "''"))
 
 
@@ -451,7 +456,6 @@ def _set_secret(duckdb, con, token):
     the statement, token and all, so the error is redacted and raised
     without its cause."""
     try:
-        con.execute("DROP SECRET IF EXISTS fdp_snapshot")
         con.execute(_create_secret(token))
     except duckdb.Error as exc:
         raise SnapshotError("cannot install the bearer token in DuckDB: {}".format(
@@ -505,26 +509,29 @@ def connect(locator, snapshot=None):
     base = resolve_base(locator.base_url)
     token = _token_for(locator, base)
     pinned_before = locator.name in _pinned
+    exported_before = os.environ.get(env_var(locator.name))
     sid = resolve(locator, snapshot=snapshot, token=token)
     try:
         manifest = fetch_manifest(base, sid, token)
     except SnapshotError:
         # A pin this call made for a snapshot that turned out not to exist
-        # must not survive it; one the user exported is theirs to keep.
-        if not pinned_before and locator.name in _pinned:
+        # must not survive it; a value already in the environment -- the
+        # user's export, even one naming the same id -- is theirs to keep.
+        if not pinned_before:
             _pinned.discard(locator.name)
+        if exported_before is None:
             os.environ.pop(env_var(locator.name), None)
         raise
     con = _open_duckdb(duckdb, token)
     _define_views(con, base, sid, manifest)
     _notice_once(locator.name, sid, locator.base_url)
-    return SnapshotConnection(con, sid, manifest, locator, base)
+    return SnapshotConnection(con, sid, manifest, locator, base, token)
 
 
 class SnapshotConnection:
     """What `connect` returns. The shape pd.read_sql and `with` expect."""
 
-    def __init__(self, con, sid, manifest, locator, base):
+    def __init__(self, con, sid, manifest, locator, base, token=None):
         self._con = con
         self._sid = sid
         self.snapshot = sid
@@ -534,8 +541,7 @@ class SnapshotConnection:
         self._nocase = manifest.get("transforms", {}).get("collation") == "nocase"
         self._excluded = {e["table"].lower(): e.get("reason", "")
                           for e in manifest.get("excluded", [])}
-        auth = locator.auth
-        self._token_seen = os.environ.get(auth.env, "") if auth and auth.env else None
+        self._token_seen = token             # the token in DuckDB's secret, if any
         self._tables = {t["name"].lower(): t for t in manifest["tables"]}
         self._views = set()                  # lower-cased names created so far
         self._views_lock = threading.Lock()
@@ -570,17 +576,38 @@ class SnapshotConnection:
 
     # -- used by the cursor --
 
-    def _refresh_token(self):
-        """Re-read the token once; True if it changed and the secret was replaced."""
+    def _refresh_token(self, started_with):
+        """After a 401/403 on a statement begun with token `started_with`:
+        True if a retry may succeed, because another cursor has already
+        replaced the token since, or because the environment now holds a
+        different one, which this call installs. False if nothing changed.
+        """
         auth = self._locator.auth
-        if is_local(self._base) or auth is None or not auth.env:
+        if (is_local(self._base) or auth is None or auth.kind != "bearer_token"
+                or not auth.env):
             return False
-        new = os.environ.get(auth.env, "")
-        if not new or new == self._token_seen:
+        with self._views_lock:
+            if self._token_seen != started_with:
+                return True
+            new = os.environ.get(auth.env, "")
+            if not new or new == self._token_seen:
+                return False
+            import duckdb
+            _set_secret(duckdb, self._con, new)
+            self._token_seen = new
+            return True
+
+    def _bind_missing(self, text):
+        """DuckDB said a table does not exist: create its view if it is a
+        manifest table, and say whether a retry is worth it."""
+        m = re.search(r"Table with name (\w+) does not exist", text)
+        if not m or m.group(1).lower() not in self._tables:
             return False
-        self._token_seen = new
-        import duckdb
-        _set_secret(duckdb, self._con, new)
+        name = m.group(1).lower()
+        with self._views_lock:
+            if name not in self._views:
+                self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
+                self._views.add(name)
         return True
 
     def _ensure_tables(self, sql):
@@ -588,19 +615,22 @@ class SnapshotConnection:
 
         Table names come from parsing the already-rewritten statement in
         the DuckDB dialect; the schema part is ignored and case does not
-        matter. Names that are not manifest tables are left alone, so
-        DuckDB reports them (with the excluded-table hint). If sqlglot
-        cannot parse the statement, every remaining table is created, so
-        a statement sqlglot does not understand still finds its tables.
+        matter, and CTE names are not tables. Names that are not manifest
+        tables are left alone, so DuckDB reports them (with the
+        excluded-table hint). This is the fast path only: if sqlglot cannot
+        parse the statement nothing is created here, and `execute` binds
+        each table DuckDB reports missing (`_bind_missing`) and retries.
         """
         import sqlglot
         from sqlglot import exp
         try:
-            trees = sqlglot.parse(sql, read="duckdb")
-            names = {t.name.lower() for tree in trees if tree is not None
-                     for t in tree.find_all(exp.Table)}
+            trees = [t for t in sqlglot.parse(sql, read="duckdb") if t is not None]
         except sqlglot.errors.SqlglotError:
-            names = set(self._tables)
+            return
+        names = set()
+        for tree in trees:
+            ctes = {c.alias.lower() for c in tree.find_all(exp.CTE)}
+            names |= {t.name.lower() for t in tree.find_all(exp.Table)} - ctes
         with self._views_lock:
             for name in sorted(names & set(self._tables) - self._views):
                 self._con.execute(_view_sql(self._base, self._sid, self._tables[name]))
@@ -616,7 +646,12 @@ class SnapshotConnection:
                         m.group(1).upper(), self._excluded[m.group(1).lower()]))
         if note:
             msg += "\n" + note
-        return SnapshotError("[snapshot {}] {}".format(self.snapshot, msg))
+        return SnapshotError("[snapshot {}] DuckDB {}: {}".format(
+            self.snapshot, type(exc).__name__, msg))
+
+
+#: an HTTP auth refusal in a DuckDB error, as httpfs words it
+_AUTH_FAILURE = re.compile(r"HTTP (401|403)\b")
 
 
 class SnapshotCursor:
@@ -632,9 +667,13 @@ class SnapshotCursor:
             raise SnapshotError("%(name)s placeholders need a mapping of parameters")
         if style == "qmark" and params is not None and isinstance(params, dict):
             raise SnapshotError("%s placeholders need a sequence of parameters")
-        for attempt in (1, 2):
+        conn = self._conn
+        started_with = conn._token_seen
+        reauthorized = False
+        bound = 0
+        while True:
             try:
-                self._conn._ensure_tables(rewritten)
+                conn._ensure_tables(rewritten)
                 if params is None:
                     self._cur.execute(rewritten)
                 else:
@@ -642,14 +681,22 @@ class SnapshotCursor:
                 return self
             except duckdb.Error as exc:
                 text = str(exc)
-                if attempt == 1 and ("401" in text or "403" in text) and self._conn._refresh_token():
+                auth_failure = _AUTH_FAILURE.search(text)
+                if auth_failure and not reauthorized and conn._refresh_token(started_with):
+                    reauthorized = True        # one re-read of the token, one retry
                     continue
-                if "401" in text or "403" in text:
+                if (not auth_failure and isinstance(exc, duckdb.CatalogException)
+                        and bound < len(conn._tables) and conn._bind_missing(text)):
+                    bound += 1
+                    continue
+                if auth_failure:
+                    why = ("even with the token re-read from the environment"
+                           if reauthorized else "and the bearer token has not changed")
                     raise SnapshotError(
-                        "[snapshot {}] not authorized (HTTP 401/403) and the bearer "
-                        "token has not changed; run `fdp login`. {}".format(
-                            self._conn.snapshot,
-                            _redact(text, self._conn._token_seen).splitlines()[0])) from None
+                        "[snapshot {}] not authorized (HTTP 401/403) {}; run "
+                        "`fdp login`. {}".format(
+                            conn.snapshot, why,
+                            _redact(text, conn._token_seen).splitlines()[0])) from None
                 raise self._conn._explain(exc, note) from None
 
     def fetchone(self):

@@ -75,9 +75,10 @@ class Server:
     """`with Server(root, token) as s: s.url ...`. Thread-safe counters in
     `s.stats` = {"requests", "bytes", "methods", "paths"}."""
 
-    def __init__(self, root, token):
+    def __init__(self, root, token, require_auth=True):
         self.root = root
         self.token = token
+        self.require_auth = require_auth
         self.stats = {"requests": 0, "bytes": 0, "methods": [], "paths": []}
         lock = threading.Lock()
         outer = self
@@ -96,14 +97,25 @@ class Server:
                     outer.stats["paths"].append(self.path.split("?")[0])
 
             def _authorized(self):
-                auth = self.headers.get("Authorization", "")
-                if auth == "Bearer " + outer.token or "authz=" + outer.token in self.path:
+                # An origin takes the bearer header only. A token in the URL
+                # (`authz=`) is a director's convention, and this is not one.
+                if not outer.require_auth:
+                    return True
+                if self.headers.get("Authorization", "") == "Bearer " + outer.token:
                     return True
                 self._count()
                 self.send_response(403)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return False
+
+            def _empty(self, status, headers=None):
+                self._count()
+                self.send_response(status)
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def _local(self):
                 rel = self.path.split("?")[0].lstrip("/")
@@ -130,9 +142,16 @@ class Server:
                 n = os.path.getsize(p)
                 rng = self.headers.get("Range")
                 if rng:
-                    m = re.match(r"bytes=(\d+)-(\d*)", rng)
-                    a = int(m.group(1))
-                    e = min(int(m.group(2)) if m.group(2) else n - 1, n - 1)
+                    m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng.strip())
+                    if not m or not (m.group(1) or m.group(2)):
+                        return self._empty(400)
+                    if not m.group(1):                      # suffix: the last N bytes
+                        a, e = max(n - int(m.group(2)), 0), n - 1
+                    else:
+                        a = int(m.group(1))
+                        e = min(int(m.group(2)) if m.group(2) else n - 1, n - 1)
+                    if a >= n or a > e:
+                        return self._empty(416, {"Content-Range": "bytes */{}".format(n)})
                 else:
                     a, e = 0, n - 1
                 length = e - a + 1
@@ -156,10 +175,13 @@ class Server:
                 if not self._authorized():
                     return
                 p = self._local()
-                if not os.path.isdir(p):
-                    self._count(); self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
                 base = self.path.split("?")[0].rstrip("/")
-                hrefs = [base + "/"] + [base + "/" + n for n in sorted(os.listdir(p))]
+                if os.path.isfile(p):
+                    hrefs = [base]
+                elif os.path.isdir(p):
+                    hrefs = [base + "/"] + [base + "/" + n for n in sorted(os.listdir(p))]
+                else:
+                    return self._empty(404)
                 body = ('<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">'
                         + "".join("<D:response><D:href>{}</D:href></D:response>".format(h) for h in hrefs)
                         + "</D:multistatus>").encode()
