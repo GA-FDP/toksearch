@@ -149,6 +149,16 @@ class TestConnection(unittest.TestCase):
         # and the failed pin did not stick
         self.assertNotIn("FDP_SQL_SNAPSHOT_D3DRDB", os.environ)
 
+    def test_a_failed_snapshot_leaves_an_exported_pin_alone(self):
+        # The user exported the id and the code names the same one; the
+        # manifest is missing. The export is theirs: it stays.
+        sid = "d3drdb_20250101T000000Z"
+        with env(FDP_SQL_SNAPSHOT_D3DRDB=sid):
+            with self.assertRaises(snapshot.SnapshotError):
+                self.connect(snapshot=sid)
+            self.assertEqual(os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB"), sid)
+        self.assertNotIn("d3drdb", snapshot._pinned)
+
     def test_excluded_table_is_explained(self):
         with self.connect() as conn:
             cur = conn.cursor()
@@ -158,6 +168,7 @@ class TestConnection(unittest.TestCase):
             self.assertIn("PERSONNEL", msg)
             self.assertIn("excluded", msg)
             self.assertIn("people", msg)
+            self.assertIn("DuckDB CatalogException", msg)
 
     def test_a_parse_failure_reports_both_opinions(self):
         with self.connect() as conn:
@@ -217,9 +228,11 @@ class TestConnection(unittest.TestCase):
             self.assertEqual([r[0] for r in cur.fetchall()], [[1], [2], [3]])
             self.assertEqual(conn._views, {"shots"})
 
-    def test_sql_no_parser_can_read_binds_every_table(self):
+    def test_sql_no_parser_can_read_binds_only_what_it_names(self):
         # No natural statement found that both sqlglot dialects reject and
-        # DuckDB accepts, so the DuckDB-dialect parse is made to fail.
+        # DuckDB accepts, so the DuckDB-dialect parse is made to fail. The
+        # views then come from DuckDB's own table-not-found errors, one at
+        # a time, and SHOTS_TYPE -- not named -- is never bound.
         import sqlglot
         real = sqlglot.parse
 
@@ -231,9 +244,28 @@ class TestConnection(unittest.TestCase):
         with self.connect() as conn:
             cur = conn.cursor()
             with mock.patch.object(sqlglot, "parse", parse):
-                cur.execute("SELECT count(*) FROM runs")
-            self.assertEqual(cur.fetchone()[0], 2)
-            self.assertEqual(conn._views, {"shots", "shots_type", "runs"})
+                cur.execute("SELECT count(*) FROM runs r JOIN shots s ON s.run = r.run")
+            self.assertEqual(cur.fetchone()[0], 3)
+            self.assertEqual(conn._views, {"runs", "shots"})
+
+    def test_a_cte_named_like_a_table_binds_nothing(self):
+        with self.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("WITH runs AS (SELECT 1 AS x) SELECT x FROM runs")
+            self.assertEqual(cur.fetchall(), [(1,)])
+            self.assertEqual(conn._views, set())
+
+    def test_an_error_mentioning_403_is_not_an_auth_failure(self):
+        with self.connect() as conn:
+            cur = conn.cursor()
+            failing = mock.Mock()
+            failing.execute.side_effect = duckdb.InvalidInputException(
+                "value 4031 is out of range; 403 rows")
+            cur._cur = failing
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                cur.execute("SELECT 1")
+            self.assertNotIn("fdp login", str(cm.exception))
+            self.assertIn("DuckDB InvalidInputException", str(cm.exception))
 
     def test_commit_and_rollback_are_harmless(self):
         with self.connect() as conn:
@@ -251,7 +283,7 @@ class TestSecretRedaction(unittest.TestCase):
 
         class Con:
             def execute(self, sql):
-                if sql.startswith("CREATE SECRET"):
+                if "SECRET" in sql:
                     raise duckdb.ParserException("syntax error at or near: " + sql)
                 if sql == "LOAD httpfs":
                     return None

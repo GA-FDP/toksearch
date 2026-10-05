@@ -7,8 +7,12 @@ that passes means the test is checking nothing.
 import contextlib
 import os
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 import warnings
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 try:
@@ -169,11 +173,117 @@ class TestOverHttp(unittest.TestCase):
             self.assertIn("fdp login", str(cm.exception))
             self.assertNotIn(TOKEN, str(cm.exception))
 
+    def test_concurrent_403s_after_one_rotation_both_succeed(self):
+        # Both cursors get a 403 before either re-reads the token (the
+        # barrier holds the first refresher until the second has failed
+        # too). The second must retry with the token the first installed,
+        # not report "token has not changed".
+        with snapshot.connect(self.loc) as conn:
+            curs = [conn.cursor(), conn.cursor()]
+            curs[0].execute("SELECT count(*) FROM shots JOIN runs ON shots.run = runs.run")
+            curs[0].fetchall()
+            real = conn._refresh_token
+            barrier = threading.Barrier(2, timeout=10)
+
+            def refresh(*a):
+                barrier.wait()
+                return real(*a)
+
+            conn._refresh_token = refresh
+            self.server.token = "rotated-token"
+            results, errors = {}, {}
+
+            def run(i, table):
+                try:
+                    curs[i].execute("SELECT count(*) FROM " + table)
+                    results[i] = curs[i].fetchone()[0]
+                except Exception as exc:          # reported below
+                    errors[i] = exc
+
+            with env(FIXTURE_BEARER="rotated-token"):
+                self.server.reset()
+                threads = [threading.Thread(target=run, args=(0, "shots")),
+                           threading.Thread(target=run, args=(1, "runs"))]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(30)
+            self.assertEqual(errors, {})
+            self.assertEqual(results, {0: 3, 1: 2})
+            self.assertEqual(conn._token_seen, "rotated-token")
+
+    def test_a_locator_without_auth_reads_a_public_server(self):
+        with sql_fixture.Server(self.tmp.name, TOKEN, require_auth=False) as pub:
+            loc = SqlSnapshotLocator(name="pubdb", base_url=pub.url, id_pattern="d3drdb_*",
+                                     auth=AuthHint(kind="none", env="FIXTURE_BEARER"))
+            try:
+                with env(FIXTURE_BEARER="must-not-be-used"):
+                    with snapshot.connect(loc) as conn:
+                        self.assertIsNone(conn._token_seen)
+                        self.assertEqual(conn.duckdb.execute(
+                            "SELECT count(*) FROM duckdb_secrets()").fetchone()[0], 0)
+                        cur = conn.cursor()
+                        cur.execute("SELECT count(*) FROM shots")
+                        self.assertEqual(cur.fetchone()[0], 3)
+            finally:
+                os.environ.pop("FDP_SQL_SNAPSHOT_PUBDB", None)
+
     def test_environment_pin_is_honoured_over_http(self):
         with env(FDP_SQL_SNAPSHOT_HTTPDB="d3drdb_20260901T000000Z"):
             with snapshot.connect(self.loc) as conn:
                 self.assertEqual(conn.snapshot, "d3drdb_20260901T000000Z")
         self.assertNotIn("PROPFIND", self.server.stats["methods"])
+
+
+@unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (conda-forge: python-duckdb duckdb-extension-httpfs sqlglot)")
+class TestFixtureServer(unittest.TestCase):
+    """The fixture behaves like the origin where the client could tell."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        sql_fixture.build(cls.tmp.name, "d3drdb_20261005T120000Z")
+        cls.path = "/d3drdb_20261005T120000Z/RUNS.parquet"
+        with open(os.path.join(cls.tmp.name, cls.path.lstrip("/")), "rb") as fh:
+            cls.data = fh.read()
+        cls.server = sql_fixture.Server(cls.tmp.name, TOKEN).__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.__exit__(None, None, None)
+        cls.tmp.cleanup()
+
+    def req(self, path, **headers):
+        headers.setdefault("Authorization", "Bearer " + TOKEN)
+        method = headers.pop("method", "GET")
+        r = urllib.request.Request(self.server.url + path, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(r) as resp:
+                return resp.status, dict(resp.headers), resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, dict(exc.headers), exc.read()
+
+    def test_suffix_range(self):
+        status, hdrs, body = self.req(self.path, Range="bytes=-8")
+        self.assertEqual(status, 206)
+        self.assertEqual(body, self.data[-8:])
+        n = len(self.data)
+        self.assertEqual(hdrs["Content-Range"], "bytes {}-{}/{}".format(n - 8, n - 1, n))
+
+    def test_range_past_eof_is_416(self):
+        status, hdrs, _ = self.req(self.path, Range="bytes={}-".format(len(self.data)))
+        self.assertEqual(status, 416)
+        self.assertEqual(hdrs["Content-Range"], "bytes */{}".format(len(self.data)))
+
+    def test_propfind_on_a_file_lists_just_it(self):
+        status, _, body = self.req(self.path, method="PROPFIND", Depth="1")
+        self.assertEqual(status, 207)
+        hrefs = [h.text for h in ET.fromstring(body).iter("{DAV:}href")]
+        self.assertEqual(hrefs, [self.path])
+
+    def test_the_token_in_a_url_is_not_accepted(self):
+        status, _, _ = self.req(self.path + "?authz=" + TOKEN, Authorization="")
+        self.assertEqual(status, 403)
 
 
 if __name__ == "__main__":
