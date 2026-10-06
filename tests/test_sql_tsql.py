@@ -95,7 +95,7 @@ except ImportError:
 class TestTranspile(unittest.TestCase):
     def test_top_becomes_limit(self):
         sql, note = _tsql.transpile("SELECT TOP 50 shot FROM shots ORDER BY shot DESC")
-        self.assertEqual(sql, "SELECT shot FROM shots ORDER BY shot DESC LIMIT 50")
+        self.assertEqual(sql, "SELECT shot AS shot FROM shots ORDER BY shot DESC LIMIT 50")
         self.assertIsNone(note)
 
     def test_isnull_getdate_datediff(self):
@@ -107,11 +107,12 @@ class TestTranspile(unittest.TestCase):
 
     def test_brackets_and_dbo(self):
         sql, _ = _tsql.transpile("SELECT [shot], [time] FROM dbo.disruption_warning")
-        self.assertEqual(sql, 'SELECT "shot", "time" FROM dbo.disruption_warning')
+        self.assertEqual(
+            sql, 'SELECT "shot" AS "shot", "time" AS "time" FROM dbo.disruption_warning')
 
     def test_placeholders_survive(self):
         sql, _ = _tsql.transpile("SELECT shot FROM shots WHERE shot = ? AND run = $run")
-        self.assertEqual(sql, "SELECT shot FROM shots WHERE shot = ? AND run = $run")
+        self.assertEqual(sql, "SELECT shot AS shot FROM shots WHERE shot = ? AND run = $run")
 
     def test_like_is_case_insensitive_only_under_nocase(self):
         src = "SELECT shot FROM shots WHERE brief LIKE 'ELM%'"
@@ -146,7 +147,56 @@ class TestTranspile(unittest.TestCase):
 
     def test_two_statements(self):
         sql, _ = _tsql.transpile("SELECT TOP 1 a FROM t; SELECT TOP 2 b FROM u")
-        self.assertEqual(sql, "SELECT a FROM t LIMIT 1; SELECT b FROM u LIMIT 2")
+        self.assertEqual(sql, "SELECT a AS a FROM t LIMIT 1; SELECT b AS b FROM u LIMIT 2")
+
+
+@unittest.skipUnless(HAVE_SQLGLOT, "sqlglot not installed (conda-forge: sqlglot)")
+class TestResultColumnSpelling(unittest.TestCase):
+    """SQL Server names a result column by the query's spelling; DuckDB by
+    the stored one. A bare column projection is aliased to its written
+    spelling so `df["shot"]` works on both."""
+
+    def t(self, src):
+        sql, note = _tsql.transpile(src)
+        self.assertIsNone(note)
+        return sql
+
+    def test_bare_column(self):
+        self.assertEqual(self.t("SELECT shot FROM shots"), "SELECT shot AS shot FROM shots")
+
+    def test_qualified_columns(self):
+        self.assertEqual(self.t("SELECT s.shot, s.entered FROM shots s"),
+                         "SELECT s.shot AS shot, s.entered AS entered FROM shots AS s")
+
+    def test_written_case_is_kept(self):
+        self.assertEqual(self.t("SELECT Shot FROM shots"), "SELECT Shot AS Shot FROM shots")
+
+    def test_star_unchanged(self):
+        self.assertEqual(self.t("SELECT * FROM shots"), "SELECT * FROM shots")
+        self.assertEqual(self.t("SELECT s.* FROM shots s"), "SELECT s.* FROM shots AS s")
+
+    def test_aliasing_survives_top(self):
+        self.assertEqual(self.t("SELECT TOP 5 shot FROM shots"),
+                         "SELECT shot AS shot FROM shots LIMIT 5")
+
+    def test_existing_alias_unchanged(self):
+        self.assertEqual(self.t("SELECT shot AS s FROM shots"), "SELECT shot AS s FROM shots")
+
+    def test_expression_unchanged(self):
+        self.assertEqual(self.t("SELECT count(*) FROM shots"), "SELECT COUNT(*) FROM shots")
+        self.assertEqual(self.t("SELECT shot + 1 FROM shots"), "SELECT shot + 1 FROM shots")
+
+    def test_outer_select_of_a_cte(self):
+        sql = self.t("WITH c AS (SELECT shot FROM shots) SELECT shot FROM c")
+        self.assertTrue(sql.endswith("SELECT shot AS shot FROM c"), sql)
+
+    def test_subquery_body_unchanged(self):
+        sql = self.t("SELECT shot FROM (SELECT shot FROM shots) AS x")
+        self.assertEqual(sql, "SELECT shot AS shot FROM (SELECT shot FROM shots) AS x")
+
+    def test_union_branches(self):
+        sql = self.t("SELECT shot FROM a UNION SELECT shot FROM b")
+        self.assertEqual(sql, "SELECT shot AS shot FROM a UNION SELECT shot AS shot FROM b")
 
 
 class TestRewrite(unittest.TestCase):
@@ -154,7 +204,7 @@ class TestRewrite(unittest.TestCase):
     def test_both_passes_in_order(self):
         sql, style, note = _tsql.rewrite(
             "SELECT TOP 5 shot FROM shots WHERE run LIKE %s", nocase=True)
-        self.assertEqual(sql, "SELECT shot FROM shots WHERE run ILIKE ? LIMIT 5")
+        self.assertEqual(sql, "SELECT shot AS shot FROM shots WHERE run ILIKE ? LIMIT 5")
         self.assertEqual(style, "qmark")
         self.assertIsNone(note)
 

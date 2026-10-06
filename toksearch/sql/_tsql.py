@@ -98,6 +98,36 @@ def convert_placeholders(sql):
     return "".join(out), style
 
 
+def _alias_bare_columns(tree):
+    """Alias each bare column the statement returns to its written spelling.
+
+    SQL Server names a result column by the query's spelling (`SELECT shot`
+    returns `shot`); DuckDB names it by the stored one (`SHOT`). Only the
+    projections the user sees are touched -- the statement's own SELECT,
+    and each branch of a top-level UNION/INTERSECT/EXCEPT -- not subquery
+    or CTE bodies. `*`, `t.*`, aliased columns and expressions are left as
+    they are.
+    """
+    from sqlglot import exp
+
+    # SetOperation is sqlglot >= 25; Union was the base class before it.
+    if isinstance(tree, getattr(exp, "SetOperation", exp.Union)):
+        _alias_bare_columns(tree.this)
+        _alias_bare_columns(tree.expression)
+        return
+    if isinstance(tree, exp.Subquery):
+        _alias_bare_columns(tree.this)
+        return
+    if not isinstance(tree, exp.Select):
+        return
+    for proj in list(tree.expressions):
+        if not isinstance(proj, exp.Column) or isinstance(proj.this, exp.Star):
+            continue
+        ident = proj.this
+        alias = exp.to_identifier(ident.name, quoted=ident.args.get("quoted"))
+        proj.replace(exp.Alias(this=proj.copy(), alias=alias))
+
+
 def transpile(sql, nocase=False):
     """T-SQL in, DuckDB out: `(sql, note)`.
 
@@ -112,6 +142,10 @@ def transpile(sql, nocase=False):
     equivalent and are refused with ValueError rather than silently
     returning wrong rows; a pattern supplied as a parameter cannot be
     inspected and is left alone.
+
+    Each bare column the statement returns is aliased to its spelling in
+    the query (`SELECT shot` -> `SELECT shot AS shot`), so result columns
+    are named as SQL Server names them, not by the stored case.
     """
     import sqlglot
     from sqlglot import exp
@@ -133,6 +167,8 @@ def transpile(sql, nocase=False):
                     # Carry every arg: `NOT LIKE` is Like(negate=True) in
                     # sqlglot, and ESCAPE rides along too.
                     like.replace(exp.ILike(**like.args))
+        for tree in trees:
+            _alias_bare_columns(tree)
         return "; ".join(t.sql(dialect="duckdb") for t in trees), None
     except sqlglot.errors.SqlglotError as exc:
         return sql, f"sqlglot {type(exc).__name__}: " + str(exc).splitlines()[0]

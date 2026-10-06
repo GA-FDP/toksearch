@@ -25,6 +25,11 @@ code, then that variable, then the pairing the process's catalog
 records, then the newest published. Code and environment naming
 different snapshots is an error, not a choice.
 
+Result column names follow the query's spelling, as SQL Server's do:
+`SELECT shot FROM shots` returns a column `shot`, though the table
+stores it as `SHOT`, so `df["shot"]` works on both. `SELECT *` returns
+the stored names.
+
 Views are created on first use, so connecting is cheap and the first
 query on each table pays its Parquet footer read.
 

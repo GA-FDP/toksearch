@@ -127,7 +127,9 @@ class TestConnection(unittest.TestCase):
         with self.connect() as conn:
             cur = conn.cursor()
             cur.execute("SELECT shot, run FROM shots ORDER BY shot")
-            self.assertEqual([d[0] for d in cur.description], ["SHOT", "RUN"])
+            # SQL Server names a column by the query's spelling, not the
+            # stored one (the fixture's Parquet columns are upper case).
+            self.assertEqual([d[0] for d in cur.description], ["shot", "run"])
             rows = list(cur)
             self.assertEqual(len(rows), 3)
 
@@ -137,7 +139,30 @@ class TestConnection(unittest.TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")   # pandas' DBAPI2 warning
                 df = pd.read_sql("SELECT TOP 10 shot, entered FROM shots ORDER BY shot", conn)
-        self.assertEqual(list(df["SHOT"]), [1, 2, 3])
+        self.assertEqual(list(df["shot"]), [1, 2, 3])
+        self.assertEqual(list(df.columns), ["shot", "entered"])
+
+    def test_result_columns_take_the_querys_spelling(self):
+        import pandas as pd
+        with self.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT shot, run FROM shots")
+            self.assertEqual([d[0] for d in cur.description], ["shot", "run"])
+            cur.execute("SELECT s.Shot FROM shots s")
+            self.assertEqual([d[0] for d in cur.description], ["Shot"])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")   # pandas' DBAPI2 warning
+                df = pd.read_sql("SELECT TOP 2 shot FROM shots ORDER BY shot", conn)
+            self.assertEqual(list(df["shot"]), [1, 2])
+
+    def test_star_keeps_the_stored_names(self):
+        # SQL Server too: `*` has no written spelling to follow.
+        with self.connect() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM shots")
+            names = [d[0] for d in cur.description]
+            self.assertIn("SHOT", names)
+            self.assertIn("RUN", names)
 
     def test_explicit_snapshot(self):
         with self.connect(snapshot="d3drdb_20260901T000000Z") as conn:
