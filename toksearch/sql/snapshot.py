@@ -286,8 +286,8 @@ def catalog_pairing(name, token):
     """The snapshot the process's catalog was built against, or None.
 
     Reads `<FDP_STORE_ROOT>/catalog/<FDP_STORE_CATALOG>/meta.json`, key
-    `sql_snapshots.<name>`. D3 writes that file; until it exists this
-    returns None and the caller moves on. A file that exists but cannot
+    `sql_snapshots.<name>`; None when the file does not exist. A record of
+    what the catalog was built beside: `resolve` does not consult it. A file that exists but cannot
     be read is an error: the catalog said something and we could not hear
     it, which is not the same as it saying nothing.
     """
@@ -338,15 +338,21 @@ def resolve(locator, snapshot=None, token=None):
     1. `snapshot` -- named in code
     2. `FDP_SQL_SNAPSHOT_<NAME>` -- named for the process by `fdp run`, a
        saved-snapshot replay, or the user's own export
-    3. the pairing the process's catalog records (`catalog_pairing`)
-    4. the newest published under the locator's base_url
+    3. the newest published under the locator's base_url
 
     Code outranks the environment, but a disagreement raises
     SnapshotConflict rather than picking one. One snapshot per process:
     workers keep the environment they were started with, so a second,
     different pin would not reach them (store_catalog.pin_run says why).
-    (3) and (4) are errors when they name nothing readable -- never a
-    fallback to another tier.
+    (3) is an error when nothing readable is published -- never a fallback
+    to another source.
+
+    The pairing a published catalog records (`catalog_pairing`) is not
+    consulted. Catalogs are republished rarely, so making it the default
+    would hold every unpinned user on an old snapshot until the next
+    catalog, and it buys no reproducibility: that comes from the run
+    recording the id it read, in its saved snapshot and its provenance. The
+    pairing stays a record of what a catalog was built beside, not a lookup.
     """
     var = env_var(locator.name)
     existing = os.environ.get(var, "")
@@ -373,14 +379,12 @@ def resolve(locator, snapshot=None, token=None):
         return existing
 
     base = resolve_base(locator.base_url)
-    sid = catalog_pairing(locator.name, token)
-    if sid is None:
-        ids = list_ids(base, locator.id_pattern, token)
-        if not ids:
-            raise SnapshotError(
-                "no snapshot matching {!r} is published under {}".format(
-                    locator.id_pattern, locator.base_url))
-        sid = ids[-1]
+    ids = list_ids(base, locator.id_pattern, token)
+    if not ids:
+        raise SnapshotError(
+            "no snapshot matching {!r} is published under {}".format(
+                locator.id_pattern, locator.base_url))
+    sid = ids[-1]
     os.environ[var] = sid
     _pinned.add(locator.name)
     return sid
