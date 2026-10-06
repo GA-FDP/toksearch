@@ -21,9 +21,8 @@ print(conn.snapshot)          # e.g. d3drdb_20261005T120000Z
 Which snapshot a process reads is settled once and exported as
 `FDP_SQL_SNAPSHOT_<NAME>` (here `FDP_SQL_SNAPSHOT_D3DRDB`), so every
 worker a pipeline starts reads the same one. Precedence: `snapshot=` in
-code, then that variable, then the pairing the process's catalog
-records, then the newest published. Code and environment naming
-different snapshots is an error, not a choice.
+code, then that variable, then the newest published. Code and
+environment naming different snapshots is an error, not a choice.
 
 Result column names follow the query's spelling, as SQL Server's do:
 `SELECT shot FROM shots` returns a column `shot`, though the table

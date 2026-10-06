@@ -228,15 +228,19 @@ class TestCatalogPairing(unittest.TestCase):
         self._env.__enter__()
         self.addCleanup(self._env.__exit__, None, None, None)
 
-    def test_the_catalog_pairing_outranks_newest(self):
+    def test_the_catalog_pairing_is_not_consulted(self):
+        # The catalog's pairing is a record, not a lookup (D3 spec 2.1):
+        # newest is the default even when meta.json names another id.
         meta = json.dumps({"sql_snapshots": {"d3drdb": "d3drdb_PAIRED"}}).encode()
         with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
                  FDP_STORE_CATALOG="catalog_X"), \
              mock.patch.object(snapshot, "_request", return_value=(200, {}, meta)) as req, \
-             mock.patch.object(snapshot, "list_ids") as listing:
-            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_PAIRED")
-        req.assert_called_once_with("https://h/fdp-d3d/catalog/catalog_X/meta.json", token="t")
-        listing.assert_not_called()
+             mock.patch.object(snapshot, "list_ids",
+                               return_value=["d3drdb_OLD", "d3drdb_NEW"]) as listing:
+            self.assertEqual(snapshot.resolve(LOC, token="t"), "d3drdb_NEW")
+            self.assertEqual(os.environ["FDP_SQL_SNAPSHOT_D3DRDB"], "d3drdb_NEW")
+        listing.assert_called_once()
+        self.assertFalse(any("meta.json" in str(c) for c in req.call_args_list))
 
     def test_no_meta_file_means_newest(self):
         with env(FDP_SQL_SNAPSHOT_D3DRDB=None, FDP_STORE_ROOT="https://h/fdp-d3d",
