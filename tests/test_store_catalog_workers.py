@@ -195,7 +195,7 @@ class TestPinningIsNotContingentOnProvenance(unittest.TestCase):
 
 def report_sql_snapshot(rec):
     """The d3drdb snapshot this worker process would read."""
-    rec["snap"] = os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB")
+    rec["snap"] = (os.getpid(), os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB"))
     return rec
 
 
@@ -224,7 +224,9 @@ class TestEveryWorkerReadsTheSameSqlSnapshot(unittest.TestCase):
             got = [rec["snap"] for rec in
                    pipe.compute_multiprocessing(num_workers=4, batch_size=1)]
         self.assertEqual(len(got), 8)
-        self.assertEqual(set(got), {"d3drdb_20260101T000000Z"})
+        # Read in workers, not the parent: the parent has the variable too.
+        self.assertNotIn(os.getpid(), {pid for pid, _ in got})
+        self.assertEqual({val for _, val in got}, {"d3drdb_20260101T000000Z"})
 
 
 if __name__ == "__main__":

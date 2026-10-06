@@ -424,6 +424,39 @@ class TestVerifyFiles(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(first, second)
 
+    def test_a_sample_below_one_is_refused(self):
+        for bad in (0, -1):
+            with self.assertRaises(ValueError):
+                snapshot.verify_files(self.loc, self.INTACT, sample=bad)
+
+    def test_a_read_error_on_one_file_is_a_failure_and_the_rest_are_checked(self):
+        real = snapshot._stream
+
+        def flaky(url, **kw):
+            if url.endswith("/SHOTS.parquet"):
+                raise snapshot.SnapshotError("cannot read {} (HTTP 500)".format(url))
+            return real(url, **kw)
+        with mock.patch.object(snapshot, "_stream", side_effect=flaky):
+            got = snapshot.verify_files(self.loc, self.TAMPERED)
+        self.assertEqual(got.checked, 3)
+        self.assertEqual(sorted(f[0] for f in got.failures),
+                         ["RUNS.parquet", "SHOTS.parquet"])
+        shots = [f for f in got.failures if f[0] == "SHOTS.parquet"][0]
+        self.assertTrue(shots[2].startswith("<error: "), shots[2])
+        self.assertIn("HTTP 500", shots[2])
+
+    def test_verifying_keeps_the_long_timeout(self):
+        seen = []
+        real = snapshot._open
+
+        def spy(url, **kw):
+            seen.append(kw.get("timeout"))
+            return real(url, **kw)
+        with mock.patch.object(snapshot, "_open", side_effect=spy):
+            snapshot.verify_files(self.loc, self.INTACT)
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {60})
+
     def test_no_token_fails_before_any_http(self):
         with env(FIXTURE_BEARER=None):
             with self.assertRaises(snapshot.SnapshotError):

@@ -28,7 +28,6 @@ package that ships a `sql_snapshot` locator declares them, and a
 import collections
 import contextlib
 import fnmatch
-import functools
 import hashlib
 import json
 import os
@@ -55,7 +54,7 @@ __all__ = [
     "connect", "connect_tokamak", "locator_for", "resolve", "resolve_base",
     "list_ids", "fetch_manifest", "catalog_pairing", "SnapshotConnection",
     "SnapshotCursor", "SnapshotError", "SnapshotConflict", "SnapshotNotice",
-    "env_var", "verify_files", "VerifyResult", "SCHEMA",
+    "env_var", "token_for", "verify_files", "VerifyResult", "SCHEMA",
 ]
 
 
@@ -78,6 +77,28 @@ def env_var(name):
     return ENV_PREFIX + name.upper()
 
 
+def token_for(locator):
+    """The bearer token the locator's AuthHint names, or None for a local
+    base or an `AuthHint(kind="none")` (a public server). Missing for a
+    remote base is an error before any HTTP: locality is read from the
+    base_url's scheme (`file://` is local), not from `resolve_base`, which
+    for `pelican://` already makes a request."""
+    if urllib.parse.urlsplit(locator.base_url).scheme == "file":
+        return None
+    auth = locator.auth
+    if auth is not None and auth.kind == "none":
+        return None
+    if auth is None or auth.kind != "bearer_token" or not auth.env:
+        raise SnapshotError(
+            "sql_snapshot locator {!r} names no bearer_token env var; nothing "
+            "to authenticate with".format(locator.name))
+    token = os.environ.get(auth.env, "")
+    if not token:
+        raise SnapshotError(
+            "{} is not set; run under `fdp run`, or `fdp login`".format(auth.env))
+    return token
+
+
 # -- HTTP ------------------------------------------------------------------
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -89,7 +110,8 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 
 @contextlib.contextmanager
-def _open(url, token=None, method="GET", headers=None, body=None, hops=5):
+def _open(url, token=None, method="GET", headers=None, body=None, hops=5,
+          timeout=60):
     """One HTTP request, following redirects: `(status, headers, response,
     url)` with the response open for reading (an HTTPError for 4xx/5xx).
 
@@ -118,7 +140,7 @@ def _open(url, token=None, method="GET", headers=None, body=None, hops=5):
     for _ in range(hops):
         req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
         try:
-            resp = _opener.open(req, timeout=60)
+            resp = _opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as exc:
             if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
                 new = urllib.parse.urljoin(url, exc.headers["Location"])
@@ -132,7 +154,8 @@ def _open(url, token=None, method="GET", headers=None, body=None, hops=5):
                 if urllib.parse.urlsplit(url).netloc != first_host:
                     hdrs.pop("Authorization", None)
                 continue
-            yield exc.code, dict(exc.headers), exc, url
+            with exc:           # an error response holds a socket too
+                yield exc.code, dict(exc.headers), exc, url
             return
         except urllib.error.URLError as exc:
             raise SnapshotError("cannot reach {}: {}".format(
@@ -146,11 +169,13 @@ def _open(url, token=None, method="GET", headers=None, body=None, hops=5):
     raise SnapshotError("too many redirects from {}".format(_scrub(url)))
 
 
-def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
+def _request(url, token=None, method="GET", headers=None, body=None, hops=5,
+             timeout=60):
     """One HTTP request: `(status, headers, body)`. Redirects, auth and
-    errors as `_open`; a failure reading the body is SnapshotError."""
+    errors as `_open`; a failure reading the body is SnapshotError.
+    `timeout` is per socket operation, each hop."""
     with _open(url, token=token, method=method, headers=headers, body=body,
-               hops=hops) as (status, hdrs, resp, final):
+               hops=hops, timeout=timeout) as (status, hdrs, resp, final):
         try:
             data = resp.read()
         except OSError as exc:
@@ -167,12 +192,12 @@ class _HttpStatus(SnapshotError):
         self.status = status
 
 
-def _stream(url, token=None, chunk=1 << 20):
+def _stream(url, token=None, chunk=1 << 20, timeout=60):
     """GET `url` and yield its body in `chunk`-byte pieces, so a 1 GB file
     is hashed without being held. Redirects and auth as `_request`. Any
     status but 200 is `_HttpStatus` (a SnapshotError carrying `.status`);
     a failure mid-body is SnapshotError."""
-    with _open(url, token=token) as (status, _, resp, final):
+    with _open(url, token=token, timeout=timeout) as (status, _, resp, final):
         if status != 200:
             if status in (401, 403):
                 msg = "not authorized to read {} (HTTP {}); is the bearer token valid?"
@@ -197,23 +222,36 @@ def _scrub(text):
 
 # -- where snapshots live ----------------------------------------------------
 
-@functools.lru_cache(maxsize=None)
-def _director_endpoint(host):
+_DIRECTORS = {}
+
+
+def _director_endpoint(host, timeout=60):
+    """The federation's director URL, once per process per host. Cached by
+    host alone: how long one lookup was willing to wait does not change
+    the answer."""
+    if host in _DIRECTORS:
+        return _DIRECTORS[host]
     status, _, body = _request(
-        "https://{}/.well-known/pelican-configuration".format(host), token=None)
+        "https://{}/.well-known/pelican-configuration".format(host), token=None,
+        timeout=timeout)
     if status != 200:
         raise SnapshotError(
             "pelican federation {} did not answer its well-known document "
             "(HTTP {})".format(host, status))
     try:
-        return json.loads(body)["director_endpoint"].rstrip("/")
+        endpoint = json.loads(body)["director_endpoint"].rstrip("/")
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise SnapshotError(
             "pelican federation {} returned a well-known document without a "
             "usable director_endpoint".format(host)) from exc
+    _DIRECTORS[host] = endpoint
+    return endpoint
 
 
-def resolve_base(base_url):
+_director_endpoint.cache_clear = _DIRECTORS.clear
+
+
+def resolve_base(base_url, timeout=60):
     """A locator's base_url as something DuckDB and urllib can open.
 
     `https://` is used verbatim. `pelican://host[:port]/path` becomes the
@@ -229,7 +267,7 @@ def resolve_base(base_url):
     if u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost"):
         return base_url.rstrip("/")      # the test server only; never a real origin
     if u.scheme == "pelican":
-        return _director_endpoint(u.netloc) + u.path.rstrip("/")
+        return _director_endpoint(u.netloc, timeout=timeout) + u.path.rstrip("/")
     raise SnapshotError(
         "sql_snapshot base_url must be pelican://, https:// or file://, "
         "not {!r}".format(base_url))
@@ -239,7 +277,7 @@ def is_local(base):
     return not base.startswith(("https://", "http://"))
 
 
-def list_ids(base, id_pattern, token):
+def list_ids(base, id_pattern, token, timeout=60):
     """Snapshot ids under `base` matching `id_pattern`, oldest first.
 
     An id ends in a UTC stamp `YYYYMMDDTHHMMSSZ`, and the order is by that
@@ -254,7 +292,8 @@ def list_ids(base, id_pattern, token):
                  if os.path.isdir(os.path.join(base, n))]
     else:
         status, _, body = _request(base + "/", token=token,
-                                   method="PROPFIND", headers={"Depth": "1"})
+                                   method="PROPFIND", headers={"Depth": "1"},
+                                   timeout=timeout)
         if status != 207:
             raise SnapshotError("cannot list {} (HTTP {})".format(base, status))
         try:
@@ -284,7 +323,7 @@ def _client_version():
         return "version unknown"
 
 
-def fetch_manifest(base, snapshot_id, token):
+def fetch_manifest(base, snapshot_id, token, timeout=60):
     """The snapshot's manifest, validated. A missing snapshot is an error
     naming the id and the base: it is never replaced by another."""
     if is_local(base):
@@ -299,7 +338,7 @@ def fetch_manifest(base, snapshot_id, token):
             raise SnapshotError("{} is not valid JSON: {}".format(path, exc)) from exc
     else:
         url = "{}/{}/manifest.json".format(base, snapshot_id)
-        status, _, body = _request(url, token=token)
+        status, _, body = _request(url, token=token, timeout=timeout)
         if status == 404:
             raise SnapshotError("no snapshot {} under {}".format(snapshot_id, base))
         if status in (401, 403):
@@ -379,7 +418,23 @@ def catalog_pairing(name, token):
     return value
 
 
-def resolve(locator, snapshot=None, token=None):
+def settled_conflict(name, existing, wanted):
+    """The message for asking a process for a second snapshot of `name`
+    once it has settled one -- by a connect, or by Pipeline.compute()
+    settling the newest. Shared with store_catalog.pin_sql_snapshots."""
+    var = env_var(name)
+    return (
+        "{name} is already settled to {existing!r} in this process (by an "
+        "earlier connect or Pipeline.compute(), which settles the newest when "
+        "nothing is pinned); workers started since keep it, so {wanted!r} "
+        "cannot be honoured here. To read {wanted!r}: start a fresh process "
+        "and either pass snapshot={wanted!r} before the first "
+        "connect/compute(), export {var}={wanted!r}, or replay with "
+        "Pipeline.from_snapshot(...).".format(
+            name=name, existing=existing, wanted=wanted, var=var))
+
+
+def resolve(locator, snapshot=None, token=None, timeout=60):
     """Settle the snapshot id for `locator` in this process and export it.
 
     Precedence, most specific first:
@@ -409,13 +464,7 @@ def resolve(locator, snapshot=None, token=None):
     if snapshot:
         if existing and existing != snapshot:
             if locator.name in _pinned:
-                raise SnapshotConflict(
-                    "an earlier connection in this process is already pinned "
-                    "to {!r}, and this one asks for {!r}. A process reads one "
-                    "snapshot per database: its worker processes keep the "
-                    "environment they were started with, so a second pin would "
-                    "not reach them. Run one snapshot per process.".format(
-                        existing, snapshot))
+                raise SnapshotConflict(settled_conflict(locator.name, existing, snapshot))
             raise SnapshotConflict(
                 "this process is pinned to {!r} by {} and asks for {!r} in "
                 "code; they cannot both be honoured. Unset {} or drop the "
@@ -427,8 +476,10 @@ def resolve(locator, snapshot=None, token=None):
     if existing:
         return existing
 
-    base = resolve_base(locator.base_url)
-    ids = list_ids(base, locator.id_pattern, token)
+    if token is None:
+        token = token_for(locator)      # before resolve_base: no HTTP without it
+    base = resolve_base(locator.base_url, timeout=timeout)
+    ids = list_ids(base, locator.id_pattern, token, timeout=timeout)
     if not ids:
         raise SnapshotError(
             "no snapshot matching {!r} is published under {}".format(
@@ -456,22 +507,26 @@ def verify_files(locator, snapshot_id, sample=None):
     compared with the manifest's `bytes` and `sha256`. A `file://` base
     hashes the local files.
 
-    `sample=N` checks the files of N tables, chosen deterministically from
-    the snapshot id, so a repeated sampled check reads the same tables.
+    `sample=N` (N >= 1) checks the files of N tables, chosen
+    deterministically from the snapshot id, so a repeated sampled check
+    reads the same tables.
 
     Returns VerifyResult(checked, total, failures), counting files. A
-    mismatch is reported, not raised; a snapshot that cannot be found or
-    read at all is SnapshotError, never a pass.
+    mismatch is reported, not raised. So is a file that cannot be read --
+    missing (actual None) or failing mid-stream (actual "<error: ...>") --
+    so that one bad file does not lose the failures already collected. A
+    manifest that cannot be found or read is SnapshotError, never a pass.
     """
-    from ._snapshot_db import _token_for   # lazy: import cycle
-    token = _token_for(locator)            # before resolve_base: no HTTP without it
+    if sample is not None and sample < 1:
+        raise ValueError("sample must be None or >= 1, not {!r}".format(sample))
+    token = token_for(locator)            # before resolve_base: no HTTP without it
     base = resolve_base(locator.base_url)
     manifest = fetch_manifest(base, snapshot_id, token)
 
     tables = sorted(manifest.get("tables", []), key=lambda t: t["name"])
     total = sum(len(t.get("files", [])) for t in tables)
     if sample is not None and sample < len(tables):
-        tables = random.Random(snapshot_id).sample(tables, max(sample, 0))
+        tables = random.Random(snapshot_id).sample(tables, sample)
 
     checked, failures = 0, []
     for table in tables:
@@ -485,6 +540,8 @@ def verify_files(locator, snapshot_id, sample=None):
                 actual = digest.hexdigest()
             except (FileNotFoundError, _Missing):
                 actual = None
+            except (SnapshotError, OSError) as exc:
+                actual = "<error: {}>".format(_scrub(exc))
             checked += 1
             if actual is None or actual != entry.get("sha256") or (
                     "bytes" in entry and size != entry["bytes"]):
@@ -497,6 +554,10 @@ class _Missing(Exception):
 
 
 def _file_chunks(base, snapshot_id, path, token, chunk=1 << 20):
+    rel = posixpath.normpath(path)
+    if rel.startswith(("/", "..")) or rel == ".":
+        raise SnapshotError(
+            "manifest path {!r} is outside snapshot {}".format(path, snapshot_id))
     if is_local(base):
         with open(os.path.join(base, snapshot_id, path), "rb") as fh:
             while True:

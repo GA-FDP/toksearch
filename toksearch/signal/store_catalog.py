@@ -250,7 +250,12 @@ def pin_sql_snapshots(mapping):
     CatalogConflict: a run cannot honour two pins, and once this process
     has pinned one, its workers would not see a second.
     """
-    from ..sql.snapshot import SnapshotConflict, _pinned, env_var
+    from ..sql.snapshot import (
+        SnapshotConflict,
+        _pinned,
+        env_var,
+        settled_conflict,
+    )
 
     mapping = dict(mapping or {})
     for name, sid in mapping.items():
@@ -258,13 +263,7 @@ def pin_sql_snapshots(mapping):
         existing = os.environ.get(var, "")
         if existing and existing != sid:
             if name in _pinned:
-                raise SnapshotConflict(
-                    "an earlier run or connection in this process is already "
-                    "pinned to {!r}, and this one asks for {!r}. A process "
-                    "reads one snapshot per database: its worker processes "
-                    "keep the environment they were started with, so a "
-                    "second pin would not reach them. Replay each saved "
-                    "snapshot in its own process.".format(existing, sid))
+                raise SnapshotConflict(settled_conflict(name, existing, sid))
             raise SnapshotConflict(
                 "this run is pinned to {!r} by {} and to {!r} by its saved "
                 "snapshot; they cannot both be honoured. Unset {} to replay "
@@ -273,6 +272,19 @@ def pin_sql_snapshots(mapping):
         os.environ[env_var(name)] = sid
         _pinned.add(name)
     return mapping
+
+
+#: How long settling waits on the origin, per socket operation. A connect
+#: or verify waits 60 s; settling happens on every unpinned compute(), for
+#: a run that may never read the database, so it gives up sooner.
+SETTLE_TIMEOUT = 10
+
+# Set when settling a locator failed in this process, so later compute()
+# calls skip the attempt rather than paying the timeout again. Cleared by
+# nothing: the origin that was down at the first run is the one a sweep of
+# runs in this process would keep waiting on, and the first connect still
+# raises with the real error.
+_SQL_SETTLE_FAILED = False
 
 
 def _have_duckdb():
@@ -297,13 +309,16 @@ def settle_sql_snapshots():
     token, an unreachable origin, a malformed catalog, a device without
     such a locator -- each settles nothing for that locator, and the first
     ``connect`` raises with real context. Nothing was asked for, so nothing
-    is refused.
+    is refused. It waits ``SETTLE_TIMEOUT`` seconds per socket operation,
+    not 60, and after one failure in a process it stops trying (an id
+    already in the environment is still reported).
     """
+    global _SQL_SETTLE_FAILED
+
     if not _have_duckdb():
         return {}               # nothing in this process could read one
     try:
         from ..sql import snapshot
-        from ..sql._snapshot_db import _token_for
         from ..sql.mssql import _discover_catalogs
 
         locators = [l for tk in _discover_catalogs().values()
@@ -315,11 +330,18 @@ def settle_sql_snapshots():
 
     settled = {}
     for loc in locators:
+        if _SQL_SETTLE_FAILED:
+            # Already failed once here: report an exported pin (no HTTP),
+            # resolve nothing.
+            existing = os.environ.get(snapshot.env_var(loc.name), "")
+            if existing:
+                settled[loc.name] = existing
+            continue
         try:
-            token = _token_for(loc)     # before any HTTP, as connect does
-            settled[loc.name] = snapshot.resolve(loc, token=token)
+            settled[loc.name] = snapshot.resolve(loc, timeout=SETTLE_TIMEOUT)
         except Exception:
             # The cannot-fail contract, per locator: one unreachable
             # database must not keep another from being settled.
+            _SQL_SETTLE_FAILED = True
             continue
     return settled
