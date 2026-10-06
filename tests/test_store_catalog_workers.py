@@ -193,5 +193,39 @@ class TestPinningIsNotContingentOnProvenance(unittest.TestCase):
         self.assertNotIn("", got)
 
 
+def report_sql_snapshot(rec):
+    """The d3drdb snapshot this worker process would read."""
+    rec["snap"] = os.environ.get("FDP_SQL_SNAPSHOT_D3DRDB")
+    return rec
+
+
+class TestEveryWorkerReadsTheSameSqlSnapshot(unittest.TestCase):
+    def setUp(self):
+        from toksearch.sql import snapshot
+        self._snapshot = snapshot
+        self._pinned_before = set(snapshot._pinned)
+        snapshot._pinned.clear()
+        os.environ.pop("FDP_SQL_SNAPSHOT_D3DRDB", None)
+        fresh_workers()
+
+    def tearDown(self):
+        os.environ.pop("FDP_SQL_SNAPSHOT_D3DRDB", None)
+        self._snapshot._pinned.clear()
+        self._snapshot._pinned.update(self._pinned_before)
+        # The workers now hold the pin; do not lend them to the next test.
+        fresh_workers()
+
+    def test_a_carried_pin_reaches_every_worker(self):
+        pipe = Pipeline(list(range(1, 9)))
+        pipe._sql_snapshots = {"d3drdb": "d3drdb_20260101T000000Z"}
+        pipe.map(report_sql_snapshot)
+        pipe.keep(["snap"])
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None):
+            got = [rec["snap"] for rec in
+                   pipe.compute_multiprocessing(num_workers=4, batch_size=1)]
+        self.assertEqual(len(got), 8)
+        self.assertEqual(set(got), {"d3drdb_20260101T000000Z"})
+
+
 if __name__ == "__main__":
     unittest.main()

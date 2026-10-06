@@ -41,6 +41,9 @@ OLD_VAR = "FDP_STORE_SNAPSHOT"
 SHARDS_VAR = "FDP_STORE_SHARDS"
 
 SCHEMA = "fdp-snapshot/1"
+#: Every saved-snapshot schema this toksearch replays. /2 is /1 plus
+#: ``sql_snapshots``, the SQL database snapshots the run read.
+SCHEMAS = ("fdp-snapshot/1", "fdp-snapshot/2")
 
 # Set once this process has pinned a run, so a second run can tell "the user
 # told us" from "we decided this earlier". The two need different advice: the
@@ -200,10 +203,10 @@ def load_snapshot(path):
             "{} is not valid JSON: {}".format(path, exc)) from exc
 
     schema = doc.get("schema")
-    if schema != SCHEMA:
+    if schema not in SCHEMAS:
         raise SnapshotFileError(
-            "{} declares schema {!r}; this toksearch reads {!r}.".format(
-                path, schema, SCHEMA))
+            "{} declares schema {!r}; this toksearch reads {}.".format(
+                path, schema, " or ".join(repr(s) for s in SCHEMAS)))
     if not doc.get("shots"):
         raise SnapshotFileError(
             "{} names no shots, so there is nothing to replay.".format(path))
@@ -232,3 +235,91 @@ def pinned_shards():
         return {str(k): int(v) for k, v in got.items()}
     except (ValueError, AttributeError, TypeError):
         return {}
+
+
+def pin_sql_snapshots(mapping):
+    """Export the SQL snapshots a saved snapshot names. Returns the mapping.
+
+    ``{locator name: snapshot id}``, each exported as
+    ``FDP_SQL_SNAPSHOT_<NAME>`` -- the variable
+    ``toksearch.sql.snapshot.resolve`` honours, so a worker that connects
+    reads the pinned snapshot rather than resolving its own.
+
+    Raises ``toksearch.sql.snapshot.SnapshotConflict`` when the environment
+    already names a different id, for the reasons ``pin_run`` raises
+    CatalogConflict: a run cannot honour two pins, and once this process
+    has pinned one, its workers would not see a second.
+    """
+    from ..sql.snapshot import SnapshotConflict, _pinned, env_var
+
+    mapping = dict(mapping or {})
+    for name, sid in mapping.items():
+        var = env_var(name)
+        existing = os.environ.get(var, "")
+        if existing and existing != sid:
+            if name in _pinned:
+                raise SnapshotConflict(
+                    "an earlier run or connection in this process is already "
+                    "pinned to {!r}, and this one asks for {!r}. A process "
+                    "reads one snapshot per database: its worker processes "
+                    "keep the environment they were started with, so a "
+                    "second pin would not reach them. Replay each saved "
+                    "snapshot in its own process.".format(existing, sid))
+            raise SnapshotConflict(
+                "this run is pinned to {!r} by {} and to {!r} by its saved "
+                "snapshot; they cannot both be honoured. Unset {} to replay "
+                "the saved snapshot.".format(existing, var, sid, var))
+    for name, sid in mapping.items():
+        os.environ[env_var(name)] = sid
+        _pinned.add(name)
+    return mapping
+
+
+def _have_duckdb():
+    """Whether this process could read a SQL snapshot at all. Split out so
+    tests run the same in an environment without DuckDB."""
+    import importlib.util
+
+    return importlib.util.find_spec("duckdb") is not None
+
+
+def settle_sql_snapshots():
+    """Settle every registered SQL snapshot locator for this run. Returns
+    ``{locator name: snapshot id}`` of what is in force.
+
+    For each ``sql_snapshot`` locator in every catalog registered through
+    the ``fdp_schema.catalogs`` entry points, ``resolve`` it with no code
+    pin -- the environment's id if there is one, otherwise the newest,
+    exported -- so that workers which connect agree with each other and
+    with the provenance record, even when the driver never connected.
+
+    The same contract as ``pin_run``: this cannot fail. No DuckDB, no
+    token, an unreachable origin, a malformed catalog, a device without
+    such a locator -- each settles nothing for that locator, and the first
+    ``connect`` raises with real context. Nothing was asked for, so nothing
+    is refused.
+    """
+    if not _have_duckdb():
+        return {}               # nothing in this process could read one
+    try:
+        from ..sql import snapshot
+        from ..sql._snapshot_db import _token_for
+        from ..sql.mssql import _discover_catalogs
+
+        locators = [l for tk in _discover_catalogs().values()
+                    for l in tk.locators if l.kind == "sql_snapshot"]
+    except Exception:
+        # Deliberately broad, as in pin_run: no toksearch.sql dependencies,
+        # an unreadable catalog -- either way there is nothing to settle.
+        return {}
+
+    settled = {}
+    for loc in locators:
+        try:
+            token = _token_for(loc)     # before any HTTP, as connect does
+            settled[loc.name] = snapshot.resolve(loc, token=token)
+        except Exception:
+            # The cannot-fail contract, per locator: one unreachable
+            # database must not keep another from being settled.
+            continue
+    return settled

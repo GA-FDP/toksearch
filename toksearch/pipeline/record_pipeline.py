@@ -87,7 +87,13 @@ from ..provenance.base import safe_call
 from ..provenance.code import capture_code
 from ..provenance.context import RunContext, SourceSpec, BackendSpec
 from ..provenance.hashing import sha256_of
-from ..signal.store_catalog import load_snapshot, pin_run, pin_shards
+from ..signal.store_catalog import (
+    load_snapshot,
+    pin_run,
+    pin_shards,
+    pin_sql_snapshots,
+    settle_sql_snapshots,
+)
 
 
 class MissingColumnName(Exception):
@@ -169,6 +175,9 @@ class Pipeline:
         # Held on the pipeline and exported at compute time, beside the
         # catalog: a shard is resolved in the worker.
         pipe._shards = doc.get("shared", [])
+        # fdp-snapshot/2: the SQL snapshots the run read, pinned at compute
+        # time in place of settling the newest.
+        pipe._sql_snapshots = dict(doc.get("sql_snapshots") or {})
         return pipe
 
     @classmethod
@@ -346,6 +355,11 @@ class Pipeline:
             getattr(parent, "_shards", None)
             if isinstance(parent, Pipeline)
             else None
+        )
+        self._sql_snapshots = dict(
+            getattr(parent, "_sql_snapshots", None) or {}
+            if isinstance(parent, Pipeline)
+            else {}
         )
 
     def fetch(self, name: str, signal: "Signal"):
@@ -606,11 +620,17 @@ class Pipeline:
         # worker disagreement can only be fixed before any worker exists.
         catalog = pin_run(self._catalog)
         pin_shards(self._shards)
+        # A replay pins the SQL snapshots its file names; any other run
+        # settles what is in force now, so workers that connect agree and
+        # the provenance record names it even if the driver never connected.
+        sql = (pin_sql_snapshots(self._sql_snapshots) if self._sql_snapshots
+               else settle_sql_snapshots())
         self._warn_uncovered_trees()
 
         ctx = None
         if provenance is not None:
-            ctx = self._run_context(recordset_cls, config, catalog)
+            ctx = self._run_context(recordset_cls, config, catalog,
+                                    sql_snapshots=sql)
             safe_call(provenance, "on_compute_start", ctx)
 
         if isinstance(self.parent, RecordSet):
@@ -828,7 +848,9 @@ class Pipeline:
         except (AttributeError, TypeError):
             return None
 
-    def _run_context(self, recordset_cls, config, catalog=None) -> RunContext:
+    def _run_context(
+        self, recordset_cls, config, catalog=None, sql_snapshots=None
+    ) -> RunContext:
         """Derive the full description of the run about to happen."""
         op_specs = tuple(
             op.spec() for op in self._operations if hasattr(op, "spec")
@@ -848,6 +870,10 @@ class Pipeline:
                 k: v for k, v in vars(config).items() if not k.startswith("_")
             }
 
+        store = {"catalog": catalog} if catalog else None
+        if sql_snapshots:
+            store = dict(store or {}, sql_snapshots=dict(sql_snapshots))
+
         return RunContext(
             source=self._source_spec(),
             ops=op_specs,
@@ -856,7 +882,7 @@ class Pipeline:
             code=capture_code(),
             device=self._device_hint(signals),
             parent_run=getattr(self.parent, "run_id", None),
-            store={"catalog": catalog} if catalog else None,
+            store=store,
             shots=self._shots(),
         )
 
