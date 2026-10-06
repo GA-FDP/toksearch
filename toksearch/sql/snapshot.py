@@ -25,11 +25,15 @@ package that ships a `sql_snapshot` locator declares them, and a
 `toksearch` install that never calls this carries none of them.
 """
 
+import collections
+import contextlib
 import fnmatch
 import functools
+import hashlib
 import json
 import os
 import posixpath
+import random
 import re
 import urllib.error
 import urllib.parse
@@ -51,7 +55,7 @@ __all__ = [
     "connect", "connect_tokamak", "locator_for", "resolve", "resolve_base",
     "list_ids", "fetch_manifest", "catalog_pairing", "SnapshotConnection",
     "SnapshotCursor", "SnapshotError", "SnapshotConflict", "SnapshotNotice",
-    "env_var", "SCHEMA",
+    "env_var", "verify_files", "VerifyResult", "SCHEMA",
 ]
 
 
@@ -84,8 +88,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirect)
 
 
-def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
-    """One HTTP request: `(status, headers, body)`.
+@contextlib.contextmanager
+def _open(url, token=None, method="GET", headers=None, body=None, hops=5):
+    """One HTTP request, following redirects: `(status, headers, response,
+    url)` with the response open for reading (an HTTPError for 4xx/5xx).
 
     Follows redirects itself, same method each hop, because urllib refuses
     to redirect a PROPFIND. Only http(s) redirects are followed, and an
@@ -95,7 +101,8 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
     Once dropped on a cross-host hop it stays dropped for the rest of the
     chain, deliberately: a later hop back to the first host does not get it
     back. 4xx/5xx are returned, not raised; callers decide what a 404
-    means. Network and read failures are SnapshotError.
+    means. Network failures are SnapshotError; read failures are the
+    caller's to turn into one (`_request` and `_stream` do).
     """
     hdrs = dict(headers or {})
     # osg-htc.org rejects urllib's default User-Agent with 403.
@@ -111,8 +118,7 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
     for _ in range(hops):
         req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
         try:
-            with _opener.open(req, timeout=60) as resp:
-                return resp.status, dict(resp.headers), resp.read()
+            resp = _opener.open(req, timeout=60)
         except urllib.error.HTTPError as exc:
             if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
                 new = urllib.parse.urljoin(url, exc.headers["Location"])
@@ -126,19 +132,62 @@ def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
                 if urllib.parse.urlsplit(url).netloc != first_host:
                     hdrs.pop("Authorization", None)
                 continue
-            try:
-                err_body = exc.read()
-            except OSError as exc2:
-                raise SnapshotError("cannot read {}: {}".format(
-                    _scrub(url), exc2)) from exc2
-            return exc.code, dict(exc.headers), err_body
+            yield exc.code, dict(exc.headers), exc, url
+            return
         except urllib.error.URLError as exc:
             raise SnapshotError("cannot reach {}: {}".format(
                 _scrub(url), exc.reason)) from exc
         except OSError as exc:
             raise SnapshotError("cannot read {}: {}".format(
                 _scrub(url), exc)) from exc
+        with resp:
+            yield resp.status, dict(resp.headers), resp, url
+        return
     raise SnapshotError("too many redirects from {}".format(_scrub(url)))
+
+
+def _request(url, token=None, method="GET", headers=None, body=None, hops=5):
+    """One HTTP request: `(status, headers, body)`. Redirects, auth and
+    errors as `_open`; a failure reading the body is SnapshotError."""
+    with _open(url, token=token, method=method, headers=headers, body=body,
+               hops=hops) as (status, hdrs, resp, final):
+        try:
+            data = resp.read()
+        except OSError as exc:
+            raise SnapshotError("cannot read {}: {}".format(
+                _scrub(final), exc)) from exc
+    return status, hdrs, data
+
+
+class _HttpStatus(SnapshotError):
+    """A GET that `_stream` was asked to read answered something else."""
+
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
+
+
+def _stream(url, token=None, chunk=1 << 20):
+    """GET `url` and yield its body in `chunk`-byte pieces, so a 1 GB file
+    is hashed without being held. Redirects and auth as `_request`. Any
+    status but 200 is `_HttpStatus` (a SnapshotError carrying `.status`);
+    a failure mid-body is SnapshotError."""
+    with _open(url, token=token) as (status, _, resp, final):
+        if status != 200:
+            if status in (401, 403):
+                msg = "not authorized to read {} (HTTP {}); is the bearer token valid?"
+            else:
+                msg = "cannot read {} (HTTP {})"
+            raise _HttpStatus(msg.format(_scrub(final), status), status)
+        while True:
+            try:
+                piece = resp.read(chunk)
+            except OSError as exc:
+                raise SnapshotError("cannot read {}: {}".format(
+                    _scrub(final), exc)) from exc
+            if not piece:
+                return
+            yield piece
 
 
 def _scrub(text):
@@ -388,6 +437,81 @@ def resolve(locator, snapshot=None, token=None):
     os.environ[var] = sid
     _pinned.add(locator.name)
     return sid
+
+
+# -- checking the bytes ------------------------------------------------------
+
+#: `verify_files`' answer. `failures` lists `(path, expected_sha256,
+#: actual_sha256)`, path as the manifest names it, actual None when the
+#: file is missing. `checked < total` means a sample: the rest is unchecked.
+VerifyResult = collections.namedtuple("VerifyResult", "checked total failures")
+
+
+def verify_files(locator, snapshot_id, sample=None):
+    """Hash every Parquet file of a published snapshot against its manifest.
+
+    The byte check a range read cannot make: each file the manifest lists
+    is streamed in full, over the same path the client reads (the same
+    base, token and redirects), through SHA-256, and its size and digest
+    compared with the manifest's `bytes` and `sha256`. A `file://` base
+    hashes the local files.
+
+    `sample=N` checks the files of N tables, chosen deterministically from
+    the snapshot id, so a repeated sampled check reads the same tables.
+
+    Returns VerifyResult(checked, total, failures), counting files. A
+    mismatch is reported, not raised; a snapshot that cannot be found or
+    read at all is SnapshotError, never a pass.
+    """
+    from ._snapshot_db import _token_for   # lazy: import cycle
+    token = _token_for(locator)            # before resolve_base: no HTTP without it
+    base = resolve_base(locator.base_url)
+    manifest = fetch_manifest(base, snapshot_id, token)
+
+    tables = sorted(manifest.get("tables", []), key=lambda t: t["name"])
+    total = sum(len(t.get("files", [])) for t in tables)
+    if sample is not None and sample < len(tables):
+        tables = random.Random(snapshot_id).sample(tables, max(sample, 0))
+
+    checked, failures = 0, []
+    for table in tables:
+        for entry in table.get("files", []):
+            path = entry["path"]
+            digest, size = hashlib.sha256(), 0
+            try:
+                for piece in _file_chunks(base, snapshot_id, path, token):
+                    digest.update(piece)
+                    size += len(piece)
+                actual = digest.hexdigest()
+            except (FileNotFoundError, _Missing):
+                actual = None
+            checked += 1
+            if actual is None or actual != entry.get("sha256") or (
+                    "bytes" in entry and size != entry["bytes"]):
+                failures.append((path, entry.get("sha256"), actual))
+    return VerifyResult(checked, total, failures)
+
+
+class _Missing(Exception):
+    pass
+
+
+def _file_chunks(base, snapshot_id, path, token, chunk=1 << 20):
+    if is_local(base):
+        with open(os.path.join(base, snapshot_id, path), "rb") as fh:
+            while True:
+                piece = fh.read(chunk)
+                if not piece:
+                    return
+                yield piece
+    else:
+        try:
+            yield from _stream("{}/{}/{}".format(base, snapshot_id, path),
+                               token=token, chunk=chunk)
+        except _HttpStatus as exc:
+            if exc.status == 404:
+                raise _Missing(path) from exc
+            raise
 
 
 # -- by tokamak and name ---------------------------------------------------------

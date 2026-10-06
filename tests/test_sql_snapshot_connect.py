@@ -361,5 +361,37 @@ class TestMissingDependencies(unittest.TestCase):
         self.assertIn("toksearch_d3d", str(cm.exception))
 
 
+@unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (the fixture is written with duckdb)")
+class TestVerifyLocalFiles(unittest.TestCase):
+    """A file:// base hashes the local files; the appended byte is the control."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.sid = "d3drdb_20261005T120000Z"
+        sql_fixture.build(self._tmp.name, self.sid)
+        self.loc = SqlSnapshotLocator(name="d3drdb", base_url="file://" + self._tmp.name,
+                                      id_pattern="d3drdb_*")
+
+    def test_intact(self):
+        got = snapshot.verify_files(self.loc, self.sid)
+        self.assertEqual((got.checked, got.total, got.failures), (3, 3, []))
+
+    def test_a_byte_appended_is_caught(self):
+        with open(os.path.join(self._tmp.name, self.sid, "SHOTS.parquet"), "ab") as fh:
+            fh.write(b"x")
+        got = snapshot.verify_files(self.loc, self.sid)
+        self.assertEqual([f[0] for f in got.failures], ["SHOTS.parquet"])
+
+    def test_a_missing_file_is_a_failure_not_a_crash(self):
+        os.remove(os.path.join(self._tmp.name, self.sid, "RUNS.parquet"))
+        got = snapshot.verify_files(self.loc, self.sid)
+        self.assertEqual(got.checked, 3)
+        self.assertEqual(len(got.failures), 1)
+        path, expected, actual = got.failures[0]
+        self.assertEqual(path, "RUNS.parquet")
+        self.assertIsNone(actual)
+
+
 if __name__ == "__main__":
     unittest.main()
