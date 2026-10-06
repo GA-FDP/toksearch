@@ -877,6 +877,10 @@ worker a pipeline starts reads the same one. Precedence: <code>snapshot=</code> 
 code, then that variable, then the pairing the process's catalog
 records, then the newest published. Code and environment naming
 different snapshots is an error, not a choice.</p>
+<p>Result column names follow the query's spelling, as SQL Server's do:
+<code>SELECT shot FROM shots</code> returns a column <code>shot</code>, though the table
+stores it as <code>SHOT</code>, so <code>df["shot"]</code> works on both. <code>SELECT *</code> returns
+the stored names.</p>
 <p>Views are created on first use, so connecting is cheap and the first
 query on each table pays its Parquet footer read.</p>
 <p>What is <strong>not</strong> done: bytes are not checked against the manifest's
