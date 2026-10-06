@@ -356,7 +356,10 @@ class TestSafeWrite(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             op = _SafeWrite(d, func=lambda rec: rec["ds"], fmt="netcdf")
-            self.assertNotIn("0x", canonical_json(op.spec().to_dict()))
+            # A repr like "<function <lambda> at 0x7f...>" is what this guards
+            # against; the tempdir's random suffix can itself contain "0x".
+            self.assertNotRegex(canonical_json(op.spec().to_dict()),
+                                r"0x[0-9a-f]{8,}")
 
     def test_spec_keys_match_what_write_directories_reads(self):
         # RunContext.write_directories filters on op == "write" and
