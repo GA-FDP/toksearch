@@ -8,6 +8,7 @@ bearer auth (403 without it), byte ranges (206), and PROPFIND Depth 1
 read a slice, not the file.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -53,10 +54,12 @@ def build(root, sid, collation="nocase"):
                            ("RUNS", RUNS, ["RUN"])):
         path = os.path.join(d, name + ".parquet")
         con.execute("COPY (SELECT * FROM {} ORDER BY 1) TO '{}' (FORMAT parquet, ROW_GROUP_SIZE 2)".format(name, path))
+        with open(path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
         tables.append({"name": name, "rows": len(rows), "primary_key": pk, "sorted_by": pk,
                        "read_at": "2026-10-05T12:00:00Z",
                        "files": [{"path": name + ".parquet", "bytes": os.path.getsize(path),
-                                  "sha256": "0" * 64, "rows": len(rows)}]})
+                                  "sha256": digest, "rows": len(rows)}]})
     manifest = {
         "schema": "fdp-sql-snapshot/1", "id": sid, "created_at": "2026-10-05T12:00:00Z",
         "source": {"server": "fixture", "database": "d3drdb", "shot_ceiling": 3,

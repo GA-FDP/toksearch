@@ -33,11 +33,30 @@ Views are created on first use, so connecting is cheap and the first
 query on each table pays its Parquet footer read.
 
 What is **not** done: bytes are not checked against the manifest's
-hashes (a range read cannot hash a file; `fdp snapshot verify` does), a
+hashes on read (a range read cannot hash a file; `verify_files` below
+does), a
 missing snapshot is never replaced by another, and nothing falls back
 to the live database. The first connection in a process issues a
 `SnapshotNotice` naming the snapshot; silence it with
 `warnings.filterwarnings("ignore", category=snapshot.SnapshotNotice)`.
+
+### Replay and verification
+
+A pipeline's `compute()` settles the snapshot of every registered
+`sql_snapshot` locator before any worker starts — the one already in
+`FDP_SQL_SNAPSHOT_<NAME>`, else the newest — exports it, and records it in
+the run's provenance as `store["sql_snapshots"]`, so workers that connect
+agree with each other and with the record even if the driver never
+connected. When that cannot be done (no DuckDB, no token, origin
+unreachable) nothing is settled and the run proceeds; the first connection
+raises with the real error. A saved snapshot (`fdp-snapshot/2`) carries
+the ids as `sql_snapshots`, and `Pipeline.from_snapshot` pins exactly
+those for the replay; an environment naming a different id is a
+`SnapshotConflict`, not a choice. `snapshot.verify_files(locator, id,
+sample=None)` streams each Parquet file of a published snapshot through
+SHA-256 over the same path the client reads, compares it with the
+manifest, and returns `(checked, total, failures)`; `fdp snapshot verify`
+calls it for each id a saved snapshot names.
 
 Requires `python-duckdb`, `duckdb-extension-httpfs` and `sqlglot`
 (conda-forge). `toksearch` does not declare them; the device package

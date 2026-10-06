@@ -355,5 +355,86 @@ class TestFixtureServer(unittest.TestCase):
         self.assertEqual(status, 403)
 
 
+@unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (the fixture is written with duckdb)")
+class TestVerifyFiles(unittest.TestCase):
+    """verify_files hashes every byte over the same HTTP path the client
+    reads. The tampered snapshot is the control: an intact pass means
+    nothing unless a changed byte is seen to fail."""
+
+    INTACT = "d3drdb_20260901T000000Z"
+    TAMPERED = "d3drdb_20261005T120000Z"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        sql_fixture.build(cls.tmp.name, cls.INTACT)
+        sql_fixture.build(cls.tmp.name, cls.TAMPERED)
+        with open(os.path.join(cls.tmp.name, cls.TAMPERED, "RUNS.parquet"), "ab") as fh:
+            fh.write(b"\0")
+        cls.server = sql_fixture.Server(cls.tmp.name, TOKEN).__enter__()
+        cls.loc = SqlSnapshotLocator(
+            name="verifydb", base_url=cls.server.url, id_pattern="d3drdb_*",
+            auth=AuthHint(kind="bearer_token", env="FIXTURE_BEARER"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.__exit__(None, None, None)
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        self.server.reset()
+        self._env = env(FIXTURE_BEARER=TOKEN)
+        self._env.__enter__()
+        self.addCleanup(self._env.__exit__, None, None, None)
+
+    def test_an_intact_snapshot_has_no_failures(self):
+        got = snapshot.verify_files(self.loc, self.INTACT)
+        self.assertEqual(got.failures, [])
+        self.assertEqual(got.checked, 3)
+        self.assertEqual(got.checked, got.total)
+        # Over HTTP, every file read in full, with the bearer token.
+        for name in ("SHOTS", "SHOTS_TYPE", "RUNS"):
+            self.assertIn("/{}/{}.parquet".format(self.INTACT, name),
+                          self.server.stats["paths"])
+        self.assertTrue(all(self.server.stats["bearer"]))
+
+    def test_a_byte_appended_is_one_failure_naming_the_file(self):
+        got = snapshot.verify_files(self.loc, self.TAMPERED)
+        self.assertEqual(got.checked, got.total)
+        self.assertEqual(len(got.failures), 1)
+        path, expected, actual = got.failures[0]
+        self.assertEqual(path, "RUNS.parquet")
+        self.assertNotEqual(expected, actual)
+        with open(os.path.join(self.tmp.name, self.TAMPERED, "RUNS.parquet"), "rb") as fh:
+            import hashlib
+            self.assertEqual(actual, hashlib.sha256(fh.read()).hexdigest())
+
+    def test_a_sample_checks_fewer_than_all(self):
+        got = snapshot.verify_files(self.loc, self.INTACT, sample=1)
+        self.assertEqual(got.checked, 1)
+        self.assertLess(got.checked, got.total)
+        self.assertEqual(got.failures, [])
+
+    def test_a_sample_is_deterministic(self):
+        snapshot.verify_files(self.loc, self.INTACT, sample=1)
+        first = [p for p in self.server.stats["paths"] if p.endswith(".parquet")]
+        self.server.reset()
+        snapshot.verify_files(self.loc, self.INTACT, sample=1)
+        second = [p for p in self.server.stats["paths"] if p.endswith(".parquet")]
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first, second)
+
+    def test_no_token_fails_before_any_http(self):
+        with env(FIXTURE_BEARER=None):
+            with self.assertRaises(snapshot.SnapshotError):
+                snapshot.verify_files(self.loc, self.INTACT)
+        self.assertEqual(self.server.stats["requests"], 0)
+
+    def test_a_missing_snapshot_is_an_error_not_a_pass(self):
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            snapshot.verify_files(self.loc, "d3drdb_20200101T000000Z")
+        self.assertIn("d3drdb_20200101T000000Z", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -463,6 +463,44 @@ class TestRequest(unittest.TestCase):
             self.run_with(op)
 
 
+class _ChunkedResp(_Resp):
+    def read(self, n=-1):
+        if self._exc:
+            raise self._exc
+        if n is None or n < 0:
+            out, self._body = self._body, b""
+        else:
+            out, self._body = self._body[:n], self._body[n:]
+        return out
+
+
+class TestStream(unittest.TestCase):
+    def run_with(self, opener, url="https://a.example/dir/x", **kw):
+        with mock.patch.object(snapshot, "_opener", opener):
+            return list(snapshot._stream(url, **kw))
+
+    def test_it_yields_chunks_and_follows_redirects_like_request(self):
+        op = _Opener(_redirect("u", "https://b.example/y"),
+                     _ChunkedResp(body=b"abcdefg"))
+        chunks = self.run_with(op, token="t", chunk=3)
+        self.assertEqual(chunks, [b"abc", b"def", b"g"])
+        self.assertEqual([s[2] for s in op.seen], ["Bearer t", None])
+        self.assertEqual(op.seen[1][0], "https://b.example/y")
+
+    def test_a_404_is_missing(self):
+        op = _Opener(urllib.error.HTTPError("u", 404, "nf", email.message.Message(),
+                                            io.BytesIO(b"")))
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op)
+        self.assertEqual(cm.exception.status, 404)
+
+    def test_a_read_failure_is_a_snapshot_error(self):
+        op = _Opener(_ChunkedResp(read_exc=socket.timeout("timed out")))
+        with self.assertRaises(snapshot.SnapshotError) as cm:
+            self.run_with(op)
+        self.assertIn("cannot read https://a.example/dir/x", str(cm.exception))
+
+
 class TestLocalCatalogPairing(unittest.TestCase):
     def setUp(self):
         snapshot._pinned.clear()
