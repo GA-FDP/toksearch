@@ -73,10 +73,14 @@ class RunContext:
     code: CodeSpec
     device: Optional[str] = None
     parent_run: Optional[str] = None
-    # The versioned store this run read from: {"snapshot": "catalog_..."}.
-    # A dict rather than a bare string because a cohort id joins it later,
-    # and a backend that has learned to read ctx["store"]["snapshot"] should
-    # not have to change shape then.
+    # What this run read from, beyond its shots and signals:
+    #   {"catalog": "catalog_...",
+    #    "sql_snapshots": {"d3drdb": "d3drdb_<stamp>"}}
+    # Either key may be absent; None when neither applies. "catalog" is the
+    # versioned store's published catalog; "sql_snapshots" the SQL database
+    # snapshots compute() pinned or settled, by locator name. A dict rather
+    # than a bare string so a source can join it without a backend that
+    # reads ctx["store"]["catalog"] having to change shape.
     store: Optional[dict] = None
     #: The shot numbers this run reads, sorted, or None when the source
     #: cannot name them. SourceSpec records a count and a hash, which a

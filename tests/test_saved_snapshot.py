@@ -353,5 +353,61 @@ class TestABogusCatalogIsRefusedForShardsToo(unittest.TestCase):
         self.assertEqual(version, 7)
 
 
+class TestSqlSnapshotsInTheFile(SnapshotFileTest):
+    """fdp-snapshot/2 is /1 plus the SQL snapshots the run read."""
+
+    VAR = "FDP_SQL_SNAPSHOT_D3DRDB"
+
+    def setUp(self):
+        super().setUp()
+        from toksearch.sql import snapshot
+        self._snapshot = snapshot
+        self._pinned_before = set(snapshot._pinned)
+        snapshot._pinned.clear()
+        self._env = env(**{self.VAR: None})
+        self._env.__enter__()
+
+    def tearDown(self):
+        self._env.__exit__(None, None, None)
+        self._snapshot._pinned.clear()
+        self._snapshot._pinned.update(self._pinned_before)
+        super().tearDown()
+
+    def v2(self):
+        return dict(a_snapshot(), schema="fdp-snapshot/2",
+                    sql_snapshots={"d3drdb": "d3drdb_20261006T135944Z"})
+
+    def test_a_v2_file_carries_its_sql_snapshots(self):
+        pipe = Pipeline.from_snapshot(self.write(self.v2()))
+        self.assertEqual(pipe._sql_snapshots,
+                         {"d3drdb": "d3drdb_20261006T135944Z"})
+
+    def test_a_v1_file_carries_none(self):
+        self.assertEqual(Pipeline.from_snapshot(self.write())._sql_snapshots, {})
+
+    def test_load_snapshot_accepts_both_schemas(self):
+        for doc in (a_snapshot(), self.v2()):
+            got = store_catalog.load_snapshot(self.write(doc))
+            self.assertEqual(got["schema"], doc["schema"])
+
+    def test_load_snapshot_refuses_v3_by_name(self):
+        path = self.write(dict(self.v2(), schema="fdp-snapshot/3"))
+        with self.assertRaises(store_catalog.SnapshotFileError) as cm:
+            store_catalog.load_snapshot(path)
+        self.assertIn("fdp-snapshot/3", str(cm.exception))
+
+    def test_a_replay_exports_the_pin(self):
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None,
+                 FDP_STORE_SHARDS=None):
+            Pipeline.from_snapshot(self.write(self.v2())).compute_serial()
+            self.assertEqual(os.environ[self.VAR], "d3drdb_20261006T135944Z")
+
+    def test_the_pin_survives_extending_the_pipeline(self):
+        pipe = Pipeline.from_snapshot(self.write(self.v2()))
+        pipe2 = Pipeline(pipe)
+        self.assertEqual(pipe2._sql_snapshots,
+                         {"d3drdb": "d3drdb_20261006T135944Z"})
+
+
 if __name__ == "__main__":
     unittest.main()
