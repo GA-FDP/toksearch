@@ -24,7 +24,6 @@ import os
 import re
 import sys
 import threading
-import urllib.parse
 import warnings
 
 from .snapshot import (
@@ -39,6 +38,7 @@ from .snapshot import (
     is_local,
     resolve,
     resolve_base,
+    token_for,
 )
 
 
@@ -60,26 +60,9 @@ def _import_duckdb():
     return duckdb
 
 
-def _token_for(locator):
-    """The bearer token the locator's AuthHint names, or None for a local
-    base or an `AuthHint(kind="none")` (a public server). Missing for a
-    remote base is an error before any HTTP: locality is read from the
-    base_url's scheme (`file://` is local), not from `resolve_base`, which
-    for `pelican://` already makes a request."""
-    if urllib.parse.urlsplit(locator.base_url).scheme == "file":
-        return None
-    auth = locator.auth
-    if auth is not None and auth.kind == "none":
-        return None
-    if auth is None or auth.kind != "bearer_token" or not auth.env:
-        raise SnapshotError(
-            "sql_snapshot locator {!r} names no bearer_token env var; nothing "
-            "to authenticate with".format(locator.name))
-    token = os.environ.get(auth.env, "")
-    if not token:
-        raise SnapshotError(
-            "{} is not set; run under `fdp run`, or `fdp login`".format(auth.env))
-    return token
+# Moved to snapshot.token_for (public: a caller of resolve needs it too);
+# the old name stays for anything that still imports it from here.
+_token_for = token_for
 
 
 def _open_duckdb(duckdb, token, base=None):
@@ -201,7 +184,7 @@ def connect(locator, snapshot=None):
     does that.
     """
     duckdb = _import_duckdb()
-    token = _token_for(locator)          # before resolve_base: no HTTP without it
+    token = token_for(locator)           # before resolve_base: no HTTP without it
     base = resolve_base(locator.base_url)
     pinned_before = locator.name in _pinned
     exported_before = os.environ.get(env_var(locator.name))

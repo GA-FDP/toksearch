@@ -76,7 +76,8 @@ class TestBaseUrl(unittest.TestCase):
             base = snapshot.resolve_base("pelican://osg-htc.org:443/fdp-d3d/metadata/d3drdb")
         self.assertEqual(base, "https://director.example/fdp-d3d/metadata/d3drdb")
         req.assert_called_once_with(
-            "https://osg-htc.org:443/.well-known/pelican-configuration", token=None)
+            "https://osg-htc.org:443/.well-known/pelican-configuration", token=None,
+            timeout=60)
 
     def test_other_schemes_are_refused(self):
         with self.assertRaises(snapshot.SnapshotError):
@@ -100,7 +101,7 @@ class TestListing(unittest.TestCase):
         self.assertEqual(ids, ["d3drdb_20260901T000000Z", "d3drdb_20261005T120000Z"])
         req.assert_called_once_with(
             "https://h/fdp-d3d/metadata/d3drdb/", token="t",
-            method="PROPFIND", headers={"Depth": "1"})
+            method="PROPFIND", headers={"Depth": "1"}, timeout=60)
 
     def test_local_directory(self):
         import tempfile
@@ -130,7 +131,8 @@ class TestManifest(unittest.TestCase):
                                return_value=(200, {}, json.dumps(MANIFEST).encode())) as req:
             m = snapshot.fetch_manifest("https://h/x", "d3drdb_20261005T120000Z", token="t")
         self.assertEqual(m["id"], "d3drdb_20261005T120000Z")
-        req.assert_called_once_with("https://h/x/d3drdb_20261005T120000Z/manifest.json", token="t")
+        req.assert_called_once_with("https://h/x/d3drdb_20261005T120000Z/manifest.json", token="t",
+                                    timeout=60)
 
     def test_missing_snapshot_names_the_id_and_base(self):
         with mock.patch.object(snapshot, "_request", return_value=(404, {}, b"")):
@@ -199,8 +201,12 @@ class TestResolve(unittest.TestCase):
             snapshot.resolve(LOC, snapshot="d3drdb_A", token="t")
             with self.assertRaises(snapshot.SnapshotConflict) as cm:
                 snapshot.resolve(LOC, snapshot="d3drdb_B", token="t")
-        self.assertIn("earlier", str(cm.exception))
-        self.assertIn("worker processes", str(cm.exception))
+        msg = str(cm.exception)
+        self.assertIn("already settled to 'd3drdb_A'", msg)
+        self.assertIn("Pipeline.compute()", msg)
+        self.assertIn("start a fresh process", msg)
+        self.assertIn("FDP_SQL_SNAPSHOT_D3DRDB='d3drdb_B'", msg)
+        self.assertIn("Pipeline.from_snapshot", msg)
 
     def test_the_same_value_from_both_is_not_a_conflict(self):
         with env(FDP_SQL_SNAPSHOT_D3DRDB="d3drdb_A"):
@@ -335,7 +341,8 @@ class TestRobustness(unittest.TestCase):
             snapshot._director_endpoint.cache_clear()
             snapshot.resolve_base("pelican://fed3.example:8444/ns")
         req.assert_called_once_with(
-            "https://fed3.example:8444/.well-known/pelican-configuration", token=None)
+            "https://fed3.example:8444/.well-known/pelican-configuration", token=None,
+            timeout=60)
 
 
 class _Resp:
@@ -444,6 +451,31 @@ class TestRequest(unittest.TestCase):
         op = _Opener(urllib.error.HTTPError("u", 404, "nf", h, io.BytesIO(b"gone")))
         self.assertEqual(self.run_with(op)[0::2], (404, b"gone"))
 
+    def test_an_error_response_is_closed(self):
+        closed = []
+
+        class Fp(io.BytesIO):
+            def close(self):
+                closed.append(True)
+                super().close()
+        op = _Opener(urllib.error.HTTPError("u", 404, "nf", email.message.Message(),
+                                            Fp(b"gone")))
+        self.assertEqual(self.run_with(op)[0], 404)
+        self.assertTrue(closed)
+
+    def test_the_timeout_reaches_the_opener(self):
+        seen = []
+
+        class Op(_Opener):
+            def open(self, req, timeout=None):
+                seen.append(timeout)
+                return super().open(req, timeout)
+        self.run_with(Op(_redirect("u", "/next"), _Resp()), timeout=7)
+        self.assertEqual(seen, [7, 7])
+        seen.clear()
+        self.run_with(Op(_Resp()))
+        self.assertEqual(seen, [60])
+
     def test_scrub_redacts_authz(self):
         self.assertEqual(snapshot._scrub("GET https://h/x?a=1&authz=abc.def&b=2 failed"),
                          "GET https://h/x?a=1&authz=<redacted>&b=2 failed")
@@ -487,6 +519,19 @@ class TestStream(unittest.TestCase):
         self.assertEqual([s[2] for s in op.seen], ["Bearer t", None])
         self.assertEqual(op.seen[1][0], "https://b.example/y")
 
+    def test_an_error_response_is_closed(self):
+        closed = []
+
+        class Fp(io.BytesIO):
+            def close(self):
+                closed.append(True)
+                super().close()
+        op = _Opener(urllib.error.HTTPError("u", 404, "nf", email.message.Message(),
+                                            Fp(b"")))
+        with self.assertRaises(snapshot.SnapshotError):
+            self.run_with(op)
+        self.assertTrue(closed)
+
     def test_a_404_is_missing(self):
         op = _Opener(urllib.error.HTTPError("u", 404, "nf", email.message.Message(),
                                             io.BytesIO(b"")))
@@ -499,6 +544,55 @@ class TestStream(unittest.TestCase):
         with self.assertRaises(snapshot.SnapshotError) as cm:
             self.run_with(op)
         self.assertIn("cannot read https://a.example/dir/x", str(cm.exception))
+
+
+class TestTokenFor(unittest.TestCase):
+    """resolve(locator) finds its own token, so a caller need not."""
+
+    LISTING = (b'<D:multistatus xmlns:D="DAV:"><D:response><D:href>'
+               b'/d3drdb/d3drdb_20261005T120000Z/</D:href></D:response>'
+               b'</D:multistatus>')
+
+    def setUp(self):
+        snapshot._pinned.clear()
+        self._env = env(FDP_SQL_SNAPSHOT_AUTHDB=None, FDP_TEST_AUTH_TOKEN="tok-1")
+        self._env.__enter__()
+        self.addCleanup(self._env.__exit__, None, None, None)
+        self.addCleanup(snapshot._pinned.clear)
+
+    def _loc(self, auth):
+        from fdp_schema import AuthHint
+        return SqlSnapshotLocator(name="authdb", base_url="https://h.example/d3drdb",
+                                  id_pattern="d3drdb_*", auth=AuthHint(**auth))
+
+    def test_it_is_public(self):
+        from toksearch.sql.snapshot import token_for
+        self.assertIn("token_for", snapshot.__all__)
+        from toksearch.sql import _snapshot_db
+        self.assertIs(_snapshot_db._token_for, token_for)
+
+    def test_resolve_without_a_token_sends_the_authhints(self):
+        op = _Opener(_Resp(status=207, body=self.LISTING))
+        loc = self._loc(dict(kind="bearer_token", env="FDP_TEST_AUTH_TOKEN"))
+        with mock.patch.object(snapshot, "_opener", op):
+            self.assertEqual(snapshot.resolve(loc), "d3drdb_20261005T120000Z")
+        self.assertEqual(op.seen[0][2], "Bearer tok-1")
+
+    def test_a_public_locator_sends_none(self):
+        op = _Opener(_Resp(status=207, body=self.LISTING))
+        loc = self._loc(dict(kind="none"))
+        with mock.patch.object(snapshot, "_opener", op):
+            snapshot.resolve(loc)
+        self.assertIsNone(op.seen[0][2])
+
+    def test_a_missing_token_fails_before_any_http(self):
+        op = _Opener()
+        loc = self._loc(dict(kind="bearer_token", env="FDP_TEST_AUTH_TOKEN"))
+        with env(FDP_TEST_AUTH_TOKEN=None), mock.patch.object(snapshot, "_opener", op):
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot.resolve(loc)
+        self.assertIn("FDP_TEST_AUTH_TOKEN", str(cm.exception))
+        self.assertEqual(op.seen, [])
 
 
 class TestLocalCatalogPairing(unittest.TestCase):

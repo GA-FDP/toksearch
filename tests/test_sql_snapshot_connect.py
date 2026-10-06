@@ -383,6 +383,19 @@ class TestVerifyLocalFiles(unittest.TestCase):
         got = snapshot.verify_files(self.loc, self.sid)
         self.assertEqual([f[0] for f in got.failures], ["SHOTS.parquet"])
 
+    def test_a_manifest_path_escaping_the_snapshot_is_refused(self):
+        import json
+        mpath = os.path.join(self._tmp.name, self.sid, "manifest.json")
+        with open(mpath) as fh:
+            doc = json.load(fh)
+        doc["tables"][0]["files"][0]["path"] = "../elsewhere.parquet"
+        with open(mpath, "w") as fh:
+            json.dump(doc, fh)
+        got = snapshot.verify_files(self.loc, self.sid)
+        bad = [f for f in got.failures if f[0] == "../elsewhere.parquet"]
+        self.assertEqual(len(bad), 1)
+        self.assertTrue(bad[0][2].startswith("<error: "), bad[0][2])
+
     def test_a_missing_file_is_a_failure_not_a_crash(self):
         os.remove(os.path.join(self._tmp.name, self.sid, "RUNS.parquet"))
         got = snapshot.verify_files(self.loc, self.sid)

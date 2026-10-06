@@ -623,6 +623,9 @@ class Pipeline:
         # A replay pins the SQL snapshots its file names; any other run
         # settles what is in force now, so workers that connect agree and
         # the provenance record names it even if the driver never connected.
+        # If pin_sql_snapshots raises, FDP_STORE_CATALOG stays exported from
+        # pin_run above; the run fails anyway, and one catalog per process
+        # is the rule regardless.
         sql = (pin_sql_snapshots(self._sql_snapshots) if self._sql_snapshots
                else settle_sql_snapshots())
         self._warn_uncovered_trees()

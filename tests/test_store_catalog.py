@@ -259,6 +259,9 @@ class SqlPinTest(unittest.TestCase):
         duck = mock.patch.object(store_catalog, "_have_duckdb", return_value=True)
         duck.start()
         self.addCleanup(duck.stop)
+        flag = mock.patch.object(store_catalog, "_SQL_SETTLE_FAILED", False)
+        flag.start()
+        self.addCleanup(flag.stop)
         from toksearch.sql import snapshot
         self._snapshot = snapshot
         self._pinned_before = set(snapshot._pinned)
@@ -292,8 +295,10 @@ class TestPinningSqlSnapshots(SqlPinTest):
         store_catalog.pin_sql_snapshots({"d3drdb": "A"})
         with self.assertRaises(self._snapshot.SnapshotConflict) as cm:
             store_catalog.pin_sql_snapshots({"d3drdb": "B"})
-        self.assertIn("one snapshot per", str(cm.exception))
-        self.assertNotIn("Unset", str(cm.exception))
+        msg = str(cm.exception)
+        self.assertIn("already settled to 'A'", msg)
+        self.assertIn("start a fresh process", msg)
+        self.assertIn("FDP_SQL_SNAPSHOT_D3DRDB='B'", msg)
 
     def test_the_same_value_is_not_a_conflict(self):
         os.environ[SQL_VAR] = "A"
@@ -332,6 +337,45 @@ class TestSettlingSqlSnapshots(SqlPinTest):
                                side_effect=self._snapshot.SnapshotError("down")):
             self.assertEqual(store_catalog.settle_sql_snapshots(), {})
         self.assertNotIn(SQL_VAR, os.environ)
+
+    def _remote(self):
+        from fdp_schema import AuthHint, SqlSnapshotLocator
+        return SqlSnapshotLocator(
+            name="d3drdb", base_url="https://origin.example/d3drdb",
+            id_pattern="d3drdb_*",
+            auth=AuthHint(kind="bearer_token", env="FDP_TEST_SETTLE_TOKEN"))
+
+    def test_settling_uses_a_short_timeout(self):
+        listing = (b'<D:multistatus xmlns:D="DAV:"><D:response><D:href>'
+                   b'/d3drdb/d3drdb_20261005T120000Z/</D:href></D:response>'
+                   b'</D:multistatus>')
+        with env(FDP_TEST_SETTLE_TOKEN="t"), self._patch_catalogs(self._remote()), \
+             mock.patch.object(self._snapshot, "_request",
+                               return_value=(207, {}, listing)) as req:
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_20261005T120000Z"})
+        self.assertTrue(req.call_args_list)
+        for call in req.call_args_list:
+            self.assertEqual(call.kwargs.get("timeout"), 10, call)
+
+    def test_a_failed_settle_is_not_paid_for_twice(self):
+        with env(FDP_TEST_SETTLE_TOKEN="t"), self._patch_catalogs(self._remote()), \
+             mock.patch.object(self._snapshot, "_request",
+                               side_effect=self._snapshot.SnapshotError("timed out")) as req:
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+            self.assertEqual(req.call_count, 1)
+            self.assertTrue(store_catalog._SQL_SETTLE_FAILED)
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+            self.assertEqual(req.call_count, 1)
+
+    def test_after_a_failed_settle_an_exported_pin_is_still_reported(self):
+        store_catalog._SQL_SETTLE_FAILED = True
+        os.environ[SQL_VAR] = "d3drdb_E"
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(self._snapshot, "list_ids") as listing:
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_E"})
+        listing.assert_not_called()
 
     def test_no_duckdb_settles_nothing(self):
         with self._patch_catalogs(_sql_locator()), \
