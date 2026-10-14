@@ -1,11 +1,15 @@
 [workspace]
 name = "toksearch"
-channels = ["ga-fdp", "conda-forge"]
+# Staging LAST: pixi's channel priority is strict, so staging-first would hand
+# every member its newest release candidate. Only the sibling below is pinned
+# to it; drop that pin once a bless promotes mdsplus-xrdcl 1.1.0 to main.
+channels = ["ga-fdp", "conda-forge", "ga-fdp/label/staging"]
 platforms = ["linux-64"]
 
 [dependencies]
 python = ">=3.11,<3.13"
-mdsplus-xrdcl = ">=1,<2"
+# 1.1.0 is the first mdsplus-xrdcl that allows numpy 2.
+mdsplus-xrdcl = { version = ">=1.1.0,<2", channel = "ga-fdp/label/staging" }
 # Supplies libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
 # Also a run requirement of the conda package -- see recipe/recipe.yaml.
 mdsip-fdp = ">=0.1.0"
