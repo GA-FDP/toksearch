@@ -9,7 +9,7 @@ mdsplus-xrdcl = ">=1,<2"
 # Supplies libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
 # Also a run requirement of the conda package -- see recipe/recipe.yaml.
 mdsip-fdp = ">=0.1.0"
-numpy = ">=1.20, <2"
+numpy = ">=1.22,<3"
 pymssql = "*"
 # toksearch.sql.snapshot imports these lazily and the conda package does
 # NOT declare them (recipe/recipe.yaml): a device package that ships a
