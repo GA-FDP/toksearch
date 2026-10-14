@@ -20,7 +20,9 @@ requirements:
     - python
     - pip
     - setuptools
-    - numpy >=1.20, <2
+    # Build against numpy 2 headers: the extension then runs on 1.x and 2.x
+    # (the reverse does not hold). numpy's run_export sets the runtime range.
+    - numpy >=2
     - openblas
   # rattler-build 0.39 synthesises a python run-export of
   # `python 3.12.* *_debug_cpython` from a host python whose build string is
@@ -49,7 +51,7 @@ requirements:
     # the matching variant.
     - mdsip-fdp >=0.1.0
     - fdp-schema >=0.1.1
-    - numpy >=1.20, <2
+    - numpy >=1.22,<3
     - pymssql
     - ray-core
     - pyspark >=4
@@ -92,6 +94,12 @@ requirements:
     - ptdata >=2.9.0
 
 tests:
+  # setup.py builds no extension when numpy is missing at build time, and the
+  # package would ship without ell1module. Fail the build instead.
+  - python:
+      imports:
+        - toksearch.library.ell1module
+      pip_check: false
   - script:
       content:
         - cd tests && ./testit
