@@ -80,7 +80,10 @@ class ClaudeSDKBackend(Backend):
         self.session_id = session_id or resume
 
     def close(self) -> None:
-        """Disconnect the CLI; the next send starts a new SDK conversation."""
+        """Disconnect the CLI and stop the event loop.
+
+        The next send starts a new loop and a new SDK conversation.
+        """
         client, self._client = self._client, None
         if client is not None and self._loop is not None:
             try:
@@ -90,6 +93,20 @@ class ClaudeSDKBackend(Backend):
         self._persist = {}
         self._resuming = False
         self.session_id = None
+        self._stop_loop()
+
+    def _stop_loop(self) -> None:
+        """Stop and close the event-loop thread; the next send starts a new one."""
+        loop, thread = self._loop, self._thread
+        self._loop = self._thread = None
+        if loop is None:
+            return
+        if not loop.is_closed():
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(5)
+        if not loop.is_running() and not loop.is_closed():
+            loop.close()
 
     # ------------------------------------------------------------------
     # MCP tool handlers (called by the SDK's internal loop via in-process MCP)

@@ -402,6 +402,28 @@ class TestPersistence(unittest.TestCase):
         self.assertIsNone(backend.session_id)
         backend.close()  # idempotent
 
+    def test_close_stops_and_closes_the_event_loop(self):
+        import warnings
+        backend = ClaudeSDKBackend()
+        self._send(backend, self._client([_result_msg()]))
+        loop, thread = backend._loop, backend._thread
+        self.assertTrue(thread.is_alive())
+        backend.close()
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(loop.is_closed())
+        self.assertIsNone(backend._loop)
+        self.assertIsNone(backend._thread)
+        out, _ = self._send(backend, self._client([_result_msg()]))
+        self.assertEqual(out.stop_reason, "end_turn")
+        self.assertIsNot(backend._loop, loop)
+        self.assertTrue(backend._thread.is_alive())
+        backend.close()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            del loop
+            import gc
+            gc.collect()
+
 
 if __name__ == "__main__":
     unittest.main()
