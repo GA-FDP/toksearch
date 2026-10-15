@@ -19,6 +19,7 @@ amortise the namespace import cost. packages=[] skips contributor imports.
 """
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -453,10 +454,43 @@ class TestRestoreFailures(unittest.TestCase):
         self.assertIn("exit code 9", rep["error"])
         q = Path(rep["quarantined"])
         self.assertTrue(q.name.startswith("namespace.failed-"))
-        self.assertTrue((q / "index.json").exists())
-        self.assertTrue(any(q.glob("v*.pkl")))
+        self.assertEqual(sorted(p.name for p in q.iterdir()), ["current"])
+        self.assertTrue((q / "current" / "index.json").exists())
+        self.assertTrue(any((q / "current").glob("v*.pkl")))
         self.assertIsNone(find_checkpoint(self.ckpt))
         self.assertTrue(c2.running)
+
+    def test_quarantine_takes_every_copy_so_none_is_restored_later(self):
+        c1 = self._client()
+        c1.run("ok = 1", cell=1, fig_dir=self.figs)
+        c1.checkpoint()                       # older, loadable checkpoint
+        older = self.root / "older"
+        shutil.copytree(self.ckpt, older)
+        c1.run("frag = __import__('tests.test_llm_kernel_client', "
+               f"fromlist=['Fragile']).Fragile({str(self.marker)!r}, "
+               "'exit', 5)", cell=2, fig_dir=self.figs)
+        c1.checkpoint()                       # current: crashes on load
+        c1.close()
+        shutil.copytree(older, self.ckpt.with_name("namespace.old"))
+        self.marker.touch()
+
+        c2 = self._client()
+        r1 = c2.run("pass", cell=3, fig_dir=self.figs)
+        self.assertIn("exit code 9", r1.restore["error"])
+        q = Path(r1.restore["quarantined"])
+        self.assertEqual(sorted(p.name for p in q.iterdir()),
+                         ["current", "old"])
+        self.assertTrue((q / "current" / "index.json").exists())
+        self.assertTrue((q / "old" / "index.json").exists())
+        self.assertIsNone(find_checkpoint(self.ckpt))
+
+        r2 = c2.run("import os; os._exit(3)", cell=4, fig_dir=self.figs)
+        self.assertTrue(r2.restarted)
+        self.assertIsNone(r2.restore)
+        r3 = c2.run("print('ok' in globals(), 'frag' in globals())", cell=5,
+                    fig_dir=self.figs)
+        self.assertEqual(r3.stdout, "False False\n")
+        self.assertIsNone(r3.restore)
 
 
 class TestFiguresThroughWorker(_SharedKernel):

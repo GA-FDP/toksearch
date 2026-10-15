@@ -20,8 +20,8 @@ process group is killed and a new worker is started. A crashed worker is
 restarted on the spot. Whenever a worker starts and ``checkpoint_dir`` holds
 a checkpoint, the checkpoint is loaded and the report is attached to the
 next ExecResult. A restore that fails or crashes the worker moves the
-checkpoint aside (``<dir>.failed-<stamp>``) instead of deleting it, and the
-worker starts empty.
+checkpoint and every older copy aside (``<dir>.failed-<stamp>``) instead of
+deleting them, and the worker starts empty.
 """
 
 import multiprocessing as mp
@@ -150,21 +150,31 @@ class KernelClient:
         self._pending_restore = reply["report"]
 
     def _quarantine(self) -> tuple[str | None, str | None]:
-        """Move the checkpoint that failed to load aside; (path, problem)."""
-        found = find_checkpoint(self.checkpoint_dir)
-        if found is None:
+        """Move every copy of the checkpoint aside; (path, problem).
+
+        ``<dir>.new``, ``<dir>`` and ``<dir>.old`` (whichever exist) go into
+        one folder ``<dir>.failed-<stamp>/{new,current,old}``, so no older
+        copy is silently restored by the next start.
+        """
+        d = self.checkpoint_dir
+        copies = [(d.with_name(d.name + ".new"), "new"), (d, "current"),
+                  (d.with_name(d.name + ".old"), "old")]
+        copies = [(src, name) for src, name in copies if src.exists()]
+        if not copies:
             return None, "the checkpoint had already gone"
         stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-        base = self.checkpoint_dir.with_name(
-            f"{self.checkpoint_dir.name}.failed-{stamp}")
+        base = d.with_name(f"{d.name}.failed-{stamp}")
         target, n = base, 1
         while target.exists():
             n += 1
             target = base.with_name(f"{base.name}-{n}")
         try:
-            os.rename(found, target)
+            target.mkdir()
+            for src, name in copies:
+                os.rename(src, target / name)
         except OSError as e:
-            return None, f"could not move it aside: {e}"
+            return (str(target) if target.exists() else None,
+                    f"could not move it aside: {e}")
         return str(target), None
 
     def _close(self) -> None:
