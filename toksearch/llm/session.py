@@ -71,11 +71,14 @@ class Session:
         extra_namespace: dict | None = None,
         packages: list[str] | None = None,
         extra_skill_dirs: list[Path] | None = None,
+        executor=None,
     ):
         from .discovery import discover_namespace_contributors
         self.backend = backend
         self.model = model or backend.default_model
         self.max_iterations = max_iterations
+        # run_python runs here when set (a KernelExecutor); in-process otherwise.
+        self.executor = executor
         # ---- Namespace: defaults + discovered + extras ----
         self.namespace = _default_namespace()
         namespace_entries: list[tuple[str, str]] = []
@@ -134,13 +137,20 @@ class Session:
         """Clear history and reset the namespace to its initial pre-populated state."""
         self.namespace = _default_namespace()
         self.history = []
+        if self.executor is not None:
+            self.executor.restart()
 
     def close(self) -> None:
-        """Tear down the skills MCP server subprocess."""
+        """Tear down the skills MCP server, the executor and the backend."""
         client = getattr(self, "_skills_client", None)
         if client is not None:
             client.close()
             self._skills_client = None
+        if self.executor is not None:
+            self.executor.close()
+        backend_close = getattr(self.backend, "close", None)
+        if backend_close is not None:
+            backend_close()
 
     # ---- Hooks called by backends (semi-private) ----
 
