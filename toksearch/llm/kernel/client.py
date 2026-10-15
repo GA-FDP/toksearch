@@ -80,6 +80,8 @@ class KernelClient:
         self._proc = None
         self._conn = None
         self._pending_restore = None
+        self._closing = False
+        self._blocked: str | None = None   # checkpoint dir not safe to write
 
     @property
     def running(self) -> bool:
@@ -96,8 +98,8 @@ class KernelClient:
             # The child may not have called setsid() yet.
             try:
                 os.kill(pid, sig)
-            except ProcessLookupError:
-                pass
+            except (ProcessLookupError, PermissionError):
+                pass   # gone (macOS reports EPERM for a zombie's group)
 
     def _spawn(self) -> None:
         parent, child = self._ctx.Pipe()
@@ -131,7 +133,7 @@ class KernelClient:
         Raises KernelError only when a worker cannot be started at all.
         """
         self._spawn()
-        if (self.checkpoint_dir is None
+        if (self.checkpoint_dir is None or self._blocked is not None
                 or find_checkpoint(self.checkpoint_dir) is None):
             return
         try:
@@ -141,11 +143,16 @@ class KernelClient:
             self._close()
             quarantined, why = self._quarantine()
             self._spawn()
-            error = str(e) if why is None else f"{e} ({why})"
-            self._pending_restore = {
-                "found": True, "restored": [], "not_restored": [],
-                "origins": {}, "fdp_core_version": None, "error": error,
-                "quarantined": quarantined}
+            report = {"found": True, "restored": [], "not_restored": [],
+                      "origins": {}, "fdp_core_version": None,
+                      "error": str(e) if why is None else f"{e} ({why})",
+                      "quarantined": quarantined}
+            if why is not None:
+                # Copies are left in place: never restore or overwrite them
+                # until the caller picks another checkpoint dir.
+                self._blocked = why
+                report["checkpoint_blocked"] = True
+            self._pending_restore = report
             return
         self._pending_restore = reply["report"]
 
@@ -178,11 +185,13 @@ class KernelClient:
         return str(target), None
 
     def _close(self) -> None:
+        # Kill the group before closing the pipe: on EOF the worker would
+        # exit by itself, and a dead leader must not hide live children.
+        if self._proc is not None:
+            self._signal(signal.SIGKILL)
         if self._conn is not None:
             self._conn.close()
         if self._proc is not None:
-            if self._proc.is_alive():
-                self._signal(signal.SIGKILL)
             self._proc.join(5)
         self._proc = self._conn = None
 
@@ -193,7 +202,12 @@ class KernelClient:
 
     def _request(self, req: dict) -> dict:
         """Send a non-exec op and wait for its reply."""
-        self._conn.send(req)
+        try:
+            self._conn.send(req)
+        except OSError as e:   # BrokenPipeError: the worker has gone
+            self._close()
+            raise KernelError(f"The Python worker could not be reached for "
+                              f"{req['op']} ({type(e).__name__}).") from None
         if not self._conn.poll(self._op_timeout):
             self._close()
             raise KernelError(f"The Python worker did not finish {req['op']} "
@@ -233,8 +247,11 @@ class KernelClient:
             return result
 
     def _execute(self, code, cell, fig_dir, timeout) -> ExecResult:
-        self._conn.send({"op": "execute", "code": code, "cell": cell,
-                         "fig_dir": fig_dir})
+        try:
+            self._conn.send({"op": "execute", "code": code, "cell": cell,
+                             "fig_dir": fig_dir})
+        except OSError:   # BrokenPipeError: the worker died before the cell
+            return self._crashed()
         deadline = time.monotonic() + timeout
         if self._wait_reply(lambda: self._interrupt.is_set()
                             or time.monotonic() >= deadline):
@@ -245,6 +262,12 @@ class KernelClient:
         if self._wait_reply(lambda: time.monotonic() >= grace_end):
             return self._receive()
         self._close()
+        if self._closing:
+            return ExecResult(
+                stderr=("The code did not stop when interrupted, so the "
+                        "worker was stopped because the conversation is "
+                        "closing.\n"),
+                is_error=True, interrupted=True, restarted=False)
         self._start()
         why = ("did not stop when interrupted" if stopped
                else f"did not stop within {timeout:.0f} s")
@@ -256,17 +279,24 @@ class KernelClient:
     def _receive(self) -> ExecResult:
         try:
             reply = self._conn.recv()
-        except EOFError:
-            self._proc.join(5)
-            code = self._proc.exitcode
-            self._close()
-            self._start()
-            return ExecResult(
-                stderr=f"The Python worker crashed (exit code {code}).\n",
-                is_error=True, restarted=True)
+        except (EOFError, OSError):
+            return self._crashed()
         if "error" in reply:  # the worker failed outside the user's code
             return ExecResult(stderr=reply["error"] + "\n", is_error=True)
         return ExecResult(**reply)
+
+    def _crashed(self) -> ExecResult:
+        self._proc.join(5)
+        code = self._proc.exitcode
+        self._close()
+        if self._closing:
+            return ExecResult(
+                stderr=f"The Python worker crashed (exit code {code}).\n",
+                is_error=True)
+        self._start()
+        return ExecResult(
+            stderr=f"The Python worker crashed (exit code {code}).\n",
+            is_error=True, restarted=True)
 
     def interrupt(self) -> None:
         """Stop the running cell. Safe to call from another thread.
@@ -283,11 +313,16 @@ class KernelClient:
 
         ``wait`` bounds how long to wait for a running cell (None: forever);
         if the cell is still running then, KernelError("busy: ...") is raised.
+        After a restore whose checkpoint could not be fully moved aside,
+        checkpointing into that directory raises KernelError("checkpoint
+        blocked: ...") until restart() picks another directory.
         """
         target = out_dir if out_dir is not None else self.checkpoint_dir
         if target is None:
             raise ValueError("checkpoint() needs out_dir when the client has "
                              "no checkpoint_dir")
+        if self._blocked is not None and Path(target) == self.checkpoint_dir:
+            raise KernelError(f"checkpoint blocked: {self._blocked}")
         if not self._lock.acquire(timeout=-1 if wait is None else wait):
             raise KernelError("busy: a cell is running")
         try:
@@ -303,14 +338,31 @@ class KernelClient:
         """Stop the worker; the next run() starts a fresh one.
 
         ``checkpoint_dir`` (optional) replaces the directory the next worker
-        restores from and checkpoints into.
+        restores from and checkpoints into, and clears a checkpoint block.
+        A running cell that will not stop is killed without a cold start.
         """
+        self._closing = True
         with self._lock:
             self._close()
             self._pending_restore = None
             if checkpoint_dir is not _KEEP:
-                self.checkpoint_dir = (Path(checkpoint_dir)
-                                       if checkpoint_dir is not None else None)
+                new = (Path(checkpoint_dir)
+                       if checkpoint_dir is not None else None)
+                if new != self.checkpoint_dir:
+                    self._blocked = None
+                self.checkpoint_dir = new
+            self._closing = False
+
+    def begin_close(self) -> None:
+        """Mark the client as closing. Lock-free; safe from any thread.
+
+        A cell killed from now on is not followed by a new worker start.
+        """
+        self._closing = True
 
     def close(self) -> None:
-        self.restart()
+        """Stop the worker (a later run() would start a fresh one)."""
+        self._closing = True
+        with self._lock:
+            self._close()
+            self._pending_restore = None

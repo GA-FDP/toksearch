@@ -28,6 +28,7 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from toksearch.llm.kernel.checkpoint import find_checkpoint
 from toksearch.llm.kernel.client import KernelClient, KernelError
@@ -157,13 +158,51 @@ class TestTimeoutsAndCrashes(_SharedKernel):
         self.assertFalse(r.restarted)
         self.assertLess(elapsed, 10.0)
 
+    def test_stop_while_idle_is_discarded(self):
+        self.run_code("pass")
+        self.client.interrupt()
+        r = self.run_code("print('ran')")
+        self.assertEqual(r.stdout, "ran\n")
+        self.assertFalse(r.interrupted)
+
+    def test_segfault_restarts(self):
+        r = self.run_code("import ctypes; ctypes.string_at(0)")
+        self.assertTrue(r.restarted)
+        self.assertIn("exit code -11", r.stderr)
+        self.assertEqual(self.run_code("print(2)").stdout, "2\n")
+
+
+class _Dedicated(unittest.TestCase):
+    """Each test gets its own client (grace=2): kills never leak across tests."""
+
+    grace = 2.0
+
+    def setUp(self):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.cell = 0
+
+    def client(self, **kw):
+        c = KernelClient(packages=[], grace=self.grace, **kw)
+        self.addCleanup(c.close)
+        return c
+
+    def run_in(self, c, code, timeout=60.0):
+        self.cell += 1
+        return c.run(code, cell=self.cell, fig_dir=str(self.root / "figures"),
+                     timeout=timeout)
+
+
+class TestKillPath(_Dedicated):
     def test_stop_kills_a_cell_that_ignores_sigint(self):
-        old = int(self.run_code("import os; print(os.getpid())").stdout)
+        c = self.client()
+        old = int(self.run_in(c, "import os; print(os.getpid())").stdout)
         stopped, died = [], []
 
         def stop():
             stopped.append(time.monotonic())
-            self.client.interrupt()
+            c.interrupt()
 
         def watch():
             while _pid_alive(old) and time.monotonic() < t0 + 120:
@@ -175,10 +214,9 @@ class TestTimeoutsAndCrashes(_SharedKernel):
         watcher = threading.Thread(target=watch)
         timer.start()
         watcher.start()
-        r = self.run_code(
-            "import signal, time\n"
-            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-            "time.sleep(60)", timeout=600.0)
+        r = self.run_in(c, "import signal, time\n"
+                           "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                           "time.sleep(60)", timeout=600.0)
         returned = time.monotonic()
         timer.join()
         watcher.join()
@@ -191,107 +229,178 @@ class TestTimeoutsAndCrashes(_SharedKernel):
         self.assertLess(died[0] - stopped[0], self.grace + 3.0)
         self.assertLess(returned - stopped[0], self.grace + 3.0 + 30.0)
 
-    def test_stop_while_idle_is_discarded(self):
-        self.run_code("pass")
-        self.client.interrupt()
-        r = self.run_code("print('ran')")
-        self.assertEqual(r.stdout, "ran\n")
-        self.assertFalse(r.interrupted)
+    def test_unstoppable_code_is_killed(self):
+        c = self.client()
+        r = self.run_in(c, "import signal, time\n"
+                           "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                           "time.sleep(60)", timeout=1.0)
+        self.assertTrue(r.interrupted)
+        self.assertTrue(r.restarted)
+        self.assertIn("worker was killed", r.stderr)
 
-    def test_stop_during_startup_does_not_run_the_cell(self):
-        with TemporaryDirectory() as tmp:
-            c = KernelClient(packages=[])
-            self.addCleanup(c.close)
-            marker = Path(tmp) / "ran"
-            timer = threading.Timer(0.1, c.interrupt)
-            timer.start()
-            r = c.run(f"open({str(marker)!r}, 'w').close()", cell=1,
-                      fig_dir=str(Path(tmp) / "figures"))
-            timer.join()
-            self.assertEqual(r.stderr, "Interrupted before the code ran.\n")
-            self.assertTrue(r.interrupted)
-            self.assertTrue(r.is_error)
-            self.assertFalse(marker.exists())
-            self.assertEqual(c.run("print(1)", cell=2,
-                                   fig_dir=str(Path(tmp) / "f")).stdout, "1\n")
+    def test_timeout_kills_processes_the_cell_started(self):
+        c = self.client()
+        pidfile = self.root / "pid"
+        r = self.run_in(c, "import signal, subprocess, time\n"
+                           "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                           "p = subprocess.Popen(['sleep', '300'])\n"
+                           f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n"
+                           "time.sleep(60)", timeout=1.0)
+        pid = int(pidfile.read_text())
+        self.addCleanup(_kill_quietly, pid)
+        self.assertTrue(r.restarted)
+        self.assertTrue(_wait_gone(pid, 5.0),
+                        f"sleep (pid {pid}) outlived its worker")
 
     def test_slow_figure_save_is_interrupted_and_namespace_survives(self):
-        self.run_code("kept_fig = 1")
-        try:
-            t0 = time.monotonic()
-            r = self.run_code(
-                "import matplotlib.figure as _mf, time as _t\n"
-                "_orig_savefig = _mf.Figure.savefig\n"
-                "_mf.Figure.savefig = lambda self, *a, **k: _t.sleep(30)\n"
-                "plt.figure(); plt.plot([1, 2])\n"
-                "plt.figure(); plt.plot([2, 1])\n", timeout=1.0)
-            elapsed = time.monotonic() - t0
-        finally:
-            self.run_code("_mf.Figure.savefig = _orig_savefig")
+        # A dedicated client: the patched savefig dies with it, so no
+        # clean-up cell can fail or hide the assertions below.
+        c = self.client()
+        self.run_in(c, "kept_fig = 1")
+        t0 = time.monotonic()
+        r = self.run_in(c, "import matplotlib.figure as _mf, time as _t\n"
+                           "_mf.Figure.savefig = "
+                           "lambda self, *a, **k: _t.sleep(30)\n"
+                           "plt.figure(); plt.plot([1, 2])\n"
+                           "plt.figure(); plt.plot([2, 1])\n", timeout=1.0)
+        elapsed = time.monotonic() - t0
         self.assertTrue(r.interrupted)
         self.assertFalse(r.restarted)
         self.assertLess(elapsed, 1.0 + self.grace)
         self.assertEqual([f.get("error") for f in r.figures],
                          ["skipped: interrupted"] * 2)
-        self.assertEqual(self.run_code("print(kept_fig)").stdout, "1\n")
+        self.assertEqual(self.run_in(c, "print(kept_fig)").stdout, "1\n")
 
-    def test_timeout_kills_processes_the_cell_started(self):
+    def test_stop_during_startup_does_not_run_the_cell(self):
+        c = self.client()
+        real_start = c._start
+
+        def start_and_stop():   # Stop pressed while the worker starts
+            c.interrupt()
+            real_start()
+
+        c._start = start_and_stop
+        marker = self.root / "ran"
+        r = self.run_in(c, f"open({str(marker)!r}, 'w').close()")
+        self.assertEqual(r.stderr, "Interrupted before the code ran.\n")
+        self.assertTrue(r.interrupted)
+        self.assertTrue(r.is_error)
+        self.assertFalse(marker.exists())
+        c._start = real_start
+        self.assertEqual(self.run_in(c, "print(1)").stdout, "1\n")
+
+    def test_closing_client_kills_without_a_cold_start(self):
+        c = self.client()
+        self.run_in(c, "pass")
+        spawns = []
+        real_spawn = c._spawn
+        c._spawn = lambda: (spawns.append(1), real_spawn())
+        c.begin_close()
+        timer = threading.Timer(0.5, c.interrupt)
+        timer.start()
+        r = self.run_in(c, "import signal, time\n"
+                           "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+                           "time.sleep(60)", timeout=600.0)
+        timer.join()
+        self.assertTrue(r.interrupted)
+        self.assertFalse(r.restarted)
+        self.assertIn("conversation is closing", r.stderr)
+        self.assertEqual(spawns, [])
+        self.assertFalse(c.running)
+
+    def test_broken_pipe_on_send_is_a_crash_not_an_exception(self):
+        c = self.client()
+        self.run_in(c, "pass")
+
+        def broken(*a, **k):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        c._conn.send = broken
+        r = self.run_in(c, "print(1)")
+        self.assertTrue(r.restarted)
+        self.assertIn("crashed", r.stderr)
+        self.assertEqual(self.run_in(c, "print(2)").stdout, "2\n")
+        c._conn.send = broken
+        with self.assertRaises(KernelError):
+            c.checkpoint(self.root / "namespace")
+
+
+class TestProcessLifetime(unittest.TestCase):
+    """Workers and what their cells start never outlive the client."""
+
+    HELPER = ("import sys, time\n"
+              "from toksearch.llm.kernel.client import KernelClient\n"
+              "c = KernelClient(packages=[])\n"
+              "r = c.run('import os, subprocess\\n"
+              "p = subprocess.Popen([\"sleep\", \"300\"])\\n"
+              "print(os.getpid(), p.pid)', cell=1, fig_dir=sys.argv[1])\n"
+              "print(r.stdout.strip(), flush=True)\n")
+
+    def _helper(self, tail):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        helper = subprocess.Popen(
+            [sys.executable, "-c", self.HELPER + tail,
+             str(Path(tmp.name) / "figures")],
+            cwd=REPO, stdout=subprocess.PIPE, text=True)
+        self.addCleanup(helper.wait)
+        self.addCleanup(_kill_quietly, helper.pid)
+        worker, sleeper = map(int, helper.stdout.readline().split())
+        helper.stdout.close()
+        self.addCleanup(_kill_quietly, worker)
+        self.addCleanup(_kill_quietly, sleeper)
+        self.assertTrue(_pid_alive(sleeper))
+        return helper, worker, sleeper
+
+    def test_busy_worker_dies_with_its_parent(self):
+        helper, worker, sleeper = self._helper(
+            "c.run('import time; time.sleep(300)', cell=2,\n"
+            "      fig_dir=sys.argv[1], timeout=600)\n")
+        os.kill(helper.pid, signal.SIGKILL)
+        helper.wait()
+        self.assertTrue(_wait_gone(worker, 5.0), "the worker outlived its parent")
+        self.assertTrue(_wait_gone(sleeper, 5.0), "sleep outlived the parent")
+
+    def test_idle_worker_and_its_children_die_with_the_parent(self):
+        helper, worker, sleeper = self._helper("time.sleep(300)\n")
+        os.kill(helper.pid, signal.SIGKILL)
+        helper.wait()
+        self.assertTrue(_wait_gone(sleeper, 5.0), "sleep outlived the parent")
+        self.assertTrue(_wait_gone(worker, 5.0), "the worker outlived its parent")
+
+    def test_interpreter_exit_without_close_takes_children(self):
+        helper, worker, sleeper = self._helper("")   # just exits
+        self.assertEqual(helper.wait(30), 0)
+        self.assertTrue(_wait_gone(sleeper, 5.0), "sleep outlived the parent")
+        self.assertTrue(_wait_gone(worker, 5.0), "the worker outlived its parent")
+
+    def test_crashed_worker_leaves_no_children(self):
         with TemporaryDirectory() as tmp:
+            c = KernelClient(packages=[])
+            self.addCleanup(c.close)
             pidfile = Path(tmp) / "pid"
-            r = self.run_code(
-                "import signal, subprocess, time\n"
-                "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-                "p = subprocess.Popen(['sleep', '300'])\n"
-                f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n"
-                "time.sleep(60)", timeout=1.0)
+            r = c.run("import os, subprocess\n"
+                      "p = subprocess.Popen(['sleep', '300'])\n"
+                      f"open({str(pidfile)!r}, 'w').write(str(p.pid))\n"
+                      "os._exit(1)", cell=1, fig_dir=tmp)
             pid = int(pidfile.read_text())
             self.addCleanup(_kill_quietly, pid)
             self.assertTrue(r.restarted)
             self.assertTrue(_wait_gone(pid, 5.0),
-                            f"sleep (pid {pid}) outlived its worker")
+                            "sleep outlived its crashed worker")
 
-    def test_worker_dies_with_its_parent(self):
-        # The worker is busy in a cell (not waiting on the pipe, where EOF
-        # would end it anyway) when its parent is SIGKILLed.
+    def test_close_kills_processes_a_cell_started(self):
         with TemporaryDirectory() as tmp:
-            helper = subprocess.Popen(
-                [sys.executable, "-c",
-                 "import sys, time\n"
-                 "from toksearch.llm.kernel.client import KernelClient\n"
-                 "c = KernelClient(packages=[])\n"
-                 "r = c.run('import os; print(os.getpid())', cell=1,\n"
-                 "          fig_dir=sys.argv[1])\n"
-                 "print(r.stdout.strip(), flush=True)\n"
-                 "c.run('import time; time.sleep(300)', cell=2,\n"
-                 "      fig_dir=sys.argv[1], timeout=600)\n",
-                 str(Path(tmp) / "figures")],
-                cwd=REPO, stdout=subprocess.PIPE, text=True)
-            self.addCleanup(helper.wait)
-            self.addCleanup(_kill_quietly, helper.pid)
-            line = helper.stdout.readline()
-            helper.stdout.close()
-            worker = int(line)
-            self.addCleanup(_kill_quietly, worker)
-            self.assertTrue(_pid_alive(worker))
-            os.kill(helper.pid, signal.SIGKILL)
-            helper.wait()
-            self.assertTrue(_wait_gone(worker, 5.0),
-                            "the worker outlived its parent")
-
-    def test_unstoppable_code_is_killed(self):
-        r = self.run_code(
-            "import signal, time\n"
-            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
-            "time.sleep(60)", timeout=1.0)
-        self.assertTrue(r.interrupted)
-        self.assertTrue(r.restarted)
-        self.assertIn("worker was killed", r.stderr)
-
-    def test_segfault_restarts(self):
-        r = self.run_code("import ctypes; ctypes.string_at(0)")
-        self.assertTrue(r.restarted)
-        self.assertIn("exit code -11", r.stderr)
-        self.assertEqual(self.run_code("print(2)").stdout, "2\n")
+            for i in range(3):   # the race was on close's pipe EOF
+                c = KernelClient(packages=[])
+                r = c.run("import subprocess\n"
+                          "p = subprocess.Popen(['sleep', '300'])\n"
+                          "print(p.pid)", cell=1, fig_dir=tmp)
+                pid = int(r.stdout)
+                self.addCleanup(_kill_quietly, pid)
+                c.close()
+                self.assertTrue(_wait_gone(pid, 5.0),
+                                f"sleep outlived close() (round {i})")
 
 
 class TestCheckpointRestore(_SharedKernel):
@@ -339,14 +448,16 @@ class TestCheckpointRestore(_SharedKernel):
 
 class TestCheckpointCalls(_SharedKernel):
     def test_checkpoint_while_a_cell_runs_raises_busy(self):
-        self.run_code("pass")
-        t = threading.Thread(
-            target=self.run_code, args=("import time; time.sleep(5)",))
+        started = Path(self.tmp.name) / "busy-started"
+        t = threading.Thread(target=self.run_code, args=(
+            f"open({str(started)!r}, 'w').close()\n"
+            "import time; time.sleep(5)",))
         t.start()
         self.addCleanup(t.join)
-        deadline = time.monotonic() + 5
-        while not self.client._lock.locked() and time.monotonic() < deadline:
+        deadline = time.monotonic() + 60   # includes a possible cold start
+        while not started.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
+        self.assertTrue(started.exists(), "the cell never started")
         t0 = time.monotonic()
         with self.assertRaises(KernelError) as cm:
             self.client.checkpoint(wait=0.5)
@@ -491,6 +602,99 @@ class TestRestoreFailures(unittest.TestCase):
                     fig_dir=self.figs)
         self.assertEqual(r3.stdout, "False False\n")
         self.assertIsNone(r3.restore)
+
+
+class TestBlockedCheckpoint(unittest.TestCase):
+    def test_incomplete_quarantine_blocks_checkpoints_into_that_dir(self):
+        import toksearch.llm.kernel.client as client_mod
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ckpt, marker = root / "namespace", root / "broken"
+            figs = str(root / "figures")
+            c1 = KernelClient(packages=[], checkpoint_dir=ckpt)
+            self.addCleanup(c1.close)
+            c1.run("frag = __import__('tests.test_llm_kernel_client', "
+                   f"fromlist=['Fragile']).Fragile({str(marker)!r}, "
+                   "'exit', 5)", cell=1, fig_dir=figs)
+            c1.checkpoint()
+            c1.close()
+            old = ckpt.with_name("namespace.old")
+            shutil.copytree(ckpt, old)
+            before = {p.name: p.read_bytes() for p in old.iterdir()}
+            marker.touch()
+
+            real_rename = os.rename
+            moved = []
+
+            def rename_once(src, dst, *a, **k):
+                if ".failed-" in str(dst):
+                    if moved:
+                        raise OSError(13, "Permission denied")
+                    moved.append(src)
+                return real_rename(src, dst, *a, **k)
+
+            c2 = KernelClient(packages=[], checkpoint_dir=ckpt)
+            self.addCleanup(c2.close)
+            with mock.patch.object(client_mod.os, "rename",
+                                   side_effect=rename_once):
+                r = c2.run("x = 1", cell=2, fig_dir=figs)
+            self.assertTrue(r.restore["checkpoint_blocked"])
+            self.assertIn("could not move it aside", r.restore["error"])
+            with self.assertRaises(KernelError) as cm:
+                c2.checkpoint()
+            self.assertIn("checkpoint blocked", str(cm.exception))
+            self.assertEqual({p.name: p.read_bytes() for p in old.iterdir()},
+                             before)
+            # a crash does not restore the copy left behind either
+            r = c2.run("import os; os._exit(3)", cell=3, fig_dir=figs)
+            self.assertTrue(r.restarted)
+            self.assertIsNone(r.restore)
+            # another directory clears the block
+            elsewhere = root / "elsewhere"
+            c2.restart(checkpoint_dir=elsewhere)
+            c2.run("y = 2", cell=4, fig_dir=figs)
+            self.assertEqual(
+                [e["name"] for e in c2.checkpoint()["variables"]], ["y"])
+
+
+class TestWorkerUnits(unittest.TestCase):
+    """In-process checks of worker and client details (no spawn)."""
+
+    def test_sigint_between_regions_interrupts_the_next_figure_save(self):
+        from toksearch.llm.kernel import worker as wmod
+        w = wmod.Worker.__new__(wmod.Worker)
+        w._interruptible, w._in_execute, w._pending_interrupt = False, True, False
+        w.captured = [("plotly", {}), ("plotly", {})]
+        w._on_sigint(signal.SIGINT, None)      # after exec, before figures
+        self.assertTrue(w._pending_interrupt)
+        with mock.patch.object(wmod, "save_figure") as save, \
+                mock.patch.object(wmod, "_matplotlib_figures",
+                                  return_value=([], lambda: None)):
+            figures, interrupted = w._save_figures(
+                {"fig_dir": "/nonexistent", "cell": 1})
+        save.assert_not_called()
+        self.assertTrue(interrupted)
+        self.assertEqual([f["error"] for f in figures],
+                         ["skipped: interrupted"] * 2)
+        self.assertFalse(w._pending_interrupt)
+
+    def test_sigint_outside_execute_is_ignored(self):
+        from toksearch.llm.kernel import worker as wmod
+        w = wmod.Worker.__new__(wmod.Worker)
+        w._interruptible, w._in_execute, w._pending_interrupt = False, False, False
+        w._on_sigint(signal.SIGINT, None)
+        self.assertFalse(w._pending_interrupt)
+
+    def test_signal_tolerates_eperm_from_a_zombie_group(self):
+        import toksearch.llm.kernel.client as client_mod
+        c = KernelClient(packages=[])
+        c._proc = mock.Mock(pid=999999)
+        with mock.patch.object(client_mod.os, "killpg",
+                               side_effect=PermissionError), \
+                mock.patch.object(client_mod.os, "kill",
+                                  side_effect=PermissionError) as kill:
+            c._signal(signal.SIGKILL)       # must not raise
+        kill.assert_called_once_with(999999, signal.SIGKILL)
 
 
 class TestFiguresThroughWorker(_SharedKernel):

@@ -19,8 +19,9 @@ dicts over a Pipe. One SIGINT handler is installed at start-up; it raises
 KeyboardInterrupt only while user code or a figure save runs, so a cell can
 be stopped without losing the namespace and a stray SIGINT can never end the
 worker. The worker leads its own process group (the client signals the whole
-group, so processes a cell started die with it) and kills that group if its
-parent dies. Captured stdout/stderr are bounded.
+group, so processes a cell started die with it) and kills that group when
+its parent dies, closes the pipe, or sends SIGTERM. Captured stdout/stderr
+are bounded.
 
 Accepted limitations: bound names are tracked by ``id()``, so a rebind that
 happens to reuse an address is missed; baseline names (``np``, ``toksearch``,
@@ -129,6 +130,8 @@ def _matplotlib_figures():
 class Worker:
     def __init__(self, packages: list[str] | None):
         self._interruptible = False
+        self._in_execute = False
+        self._pending_interrupt = False
         signal.signal(signal.SIGINT, self._on_sigint)
         self.ns = build_namespace(packages)
         self.baseline = frozenset(self.ns)
@@ -142,6 +145,16 @@ class Worker:
     def _on_sigint(self, signum, frame):
         if self._interruptible:
             raise KeyboardInterrupt
+        if self._in_execute:
+            # Between interruptible regions (e.g. after exec, before the
+            # figures): honoured when the next region starts.
+            self._pending_interrupt = True
+
+    def _enter_interruptible(self) -> None:
+        self._interruptible = True
+        if self._pending_interrupt:
+            self._pending_interrupt = False
+            raise KeyboardInterrupt
 
     def _reinstall_sigint(self) -> None:
         # A cell may have replaced the handler (signal.signal(SIGINT, ...)).
@@ -152,6 +165,13 @@ class Worker:
         return {k: id(self.ns[k]) for k in user_names(self.ns, self.baseline)}
 
     def execute(self, req: dict) -> dict:
+        self._in_execute, self._pending_interrupt = True, False
+        try:
+            return self._execute(req)
+        finally:
+            self._in_execute = self._pending_interrupt = False
+
+    def _execute(self, req: dict) -> dict:
         out, err = BoundedText(), BoundedText()
         is_error = interrupted = False
         self.captured.clear()
@@ -196,7 +216,7 @@ class Worker:
                 figures.append({"kind": kind, "error": "skipped: interrupted"})
                 continue
             try:
-                self._interruptible = True
+                self._enter_interruptible()
                 rec = save_figure(kind, payload, req["fig_dir"],
                                   f"c{req['cell']}-{i}")
                 self._interruptible = False
@@ -240,14 +260,21 @@ class Worker:
         return getattr(self, req["op"])(req)
 
 
+def _end_group() -> None:
+    """Kill this worker and everything it started; never returns."""
+    try:
+        if os.getpgid(0) == os.getpid():   # we lead our own group
+            os.killpg(os.getpid(), signal.SIGKILL)
+    finally:
+        os._exit(0)
+
+
 def _watch_parent(ppid: int) -> None:
     """Kill this worker's process group once its parent has gone."""
     while True:
         time.sleep(1.0)
         if os.getppid() != ppid:
-            if os.getpgid(0) == os.getpid():   # we lead our own group
-                os.killpg(os.getpid(), signal.SIGKILL)
-            os.kill(os.getpid(), signal.SIGKILL)
+            _end_group()
 
 
 def worker_main(conn, packages: list[str] | None, ppid: int | None = None) -> None:
@@ -256,6 +283,9 @@ def worker_main(conn, packages: list[str] | None, ppid: int | None = None) -> No
     except OSError:
         pass
     signal.signal(signal.SIGINT, signal.SIG_IGN)   # until Worker installs its handler
+    # multiprocessing terminates daemonic workers with SIGTERM when the
+    # parent interpreter exits without close(): take the group along.
+    signal.signal(signal.SIGTERM, lambda signum, frame: _end_group())
     if ppid is None:
         ppid = os.getppid()
     threading.Thread(target=_watch_parent, args=(ppid,), daemon=True,
@@ -268,8 +298,8 @@ def worker_main(conn, packages: list[str] | None, ppid: int | None = None) -> No
     while True:
         try:
             req = conn.recv()
-        except EOFError:
-            return
+        except EOFError:   # the client closed the pipe or died
+            _end_group()
         try:
             reply = worker.handle(req)
         except BaseException as e:   # never let an op (or SIGINT) end the worker
