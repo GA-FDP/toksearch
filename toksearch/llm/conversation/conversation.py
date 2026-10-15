@@ -255,10 +255,15 @@ class Conversation:
     def close(self) -> None:
         """Stop any running cell, checkpoint, stop the worker, disconnect.
 
-        The checkpoint waits at most 30 s for the interrupted cell, so close()
-        never hangs on a stuck cell. The Session stays usable for a new
-        Conversation (its skills server is owned by the caller).
+        A cell that stops on SIGINT is still checkpointed; one that ignores
+        it is killed without starting a new worker. The checkpoint waits at
+        most 30 s, so close() never hangs on a stuck cell. The Session stays
+        usable for a new Conversation (its skills server is owned by the
+        caller).
         """
+        begin_close = getattr(self.client, "begin_close", None)
+        if begin_close is not None:
+            begin_close()
         self.executor.interrupt()
         self.checkpoint(wait=30)
         self.events.sync()

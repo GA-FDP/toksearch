@@ -278,9 +278,46 @@ class TestClose(_Tmp):
         conv = self._conv_with(client)
         conv.close()
         names = [c[0] for c in client.mock_calls]
-        self.assertEqual(names[:2], ["interrupt", "checkpoint"])
+        self.assertEqual(names[:3], ["begin_close", "interrupt", "checkpoint"])
         self.assertEqual(client.checkpoint.call_args.kwargs, {"wait": 30})
         client.close.assert_called_once_with()
+
+    def test_close_during_a_stuck_cell_is_bounded_and_starts_no_worker(self):
+        import threading
+        import time
+        clients = []
+
+        def factory(packages, checkpoint_dir):
+            c = KernelClient(packages, checkpoint_dir=checkpoint_dir, grace=2)
+            clients.append(c)
+            return c
+
+        conv = Conversation.create(_session([]), self.root, packages=[],
+                                   client_factory=factory)
+        client = clients[0]
+        spawns = []
+        real_spawn = client._spawn
+        client._spawn = lambda: (spawns.append(1), real_spawn())
+        started = self.root / "started"
+        results = []
+        t = threading.Thread(target=lambda: results.append(conv.executor.run(
+            "import signal, time\n"
+            "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+            f"open({str(started)!r}, 'w').close()\n"
+            "time.sleep(120)")))
+        t.start()
+        deadline = time.monotonic() + 60
+        while not started.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(started.exists(), "the cell never started")
+        t0 = time.monotonic()
+        conv.close()
+        elapsed = time.monotonic() - t0
+        t.join(30)
+        self.assertLess(elapsed, 2 + 15)
+        self.assertEqual(spawns, [1])        # only the first start
+        self.assertFalse(client.running)
+        self.assertTrue(results[0].interrupted)
 
     def test_busy_checkpoint_on_close_is_logged_not_raised(self):
         client = mock.create_autospec(KernelClient, instance=True)
