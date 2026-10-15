@@ -36,7 +36,8 @@ import time
 import traceback
 from pathlib import Path
 
-from .checkpoint import load_namespace, save_namespace, user_names
+from .checkpoint import (follow_carried, load_namespace, save_namespace,
+                         user_names)
 from .figures import save_figure
 
 HEAD_CHARS = 4_000_000
@@ -216,16 +217,15 @@ class Worker:
 
     def checkpoint(self, req: dict) -> dict:
         out_dir = Path(req["dir"])
-        index = save_namespace(
-            self.ns, self.baseline, self.origins, out_dir,
-            per_var_limit=req["per_var_limit"],
-            total_limit=req["total_limit"], carried=self.carried)
-        # The carried pickles now live in the new checkpoint.
-        for e in index["variables"]:
-            if e.get("carried") and e["name"] in self.carried:
-                self.carried[e["name"]] = (
-                    str((out_dir / e["file"]).resolve()),
-                    self.carried[e["name"]][1])
+        try:
+            index = save_namespace(
+                self.ns, self.baseline, self.origins, out_dir,
+                per_var_limit=req["per_var_limit"],
+                total_limit=req["total_limit"], carried=self.carried)
+        finally:
+            # Point carried pickles at where they are now, whether the swap
+            # finished or failed part-way.
+            follow_carried(self.carried, out_dir)
         return {"index": index}
 
     def restore(self, req: dict) -> dict:

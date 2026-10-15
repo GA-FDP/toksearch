@@ -24,19 +24,33 @@ is ordered so that after a crash at any point one of ``<dir>.new``,
 ``find_checkpoint`` (the index is written last, so a parseable index marks a
 complete checkpoint, and a complete ``.new`` is always the newest).
 
-Variables that could not be loaded at the last restore can be carried
-forward (``carried=``): their old pickle is copied into the new checkpoint,
-so a later restore (after the environment is fixed) tries them again.
+Each saved entry records the ``sha256`` and ``size`` of its pickle, and a
+load checks them, so a pickle can never be read back as a different
+variable. Variables that could not be loaded at the last restore can be
+carried forward (``carried=``): their old pickle is copied (and verified)
+into the new checkpoint, so a later restore (after the environment is fixed)
+tries them again. On macOS, fsync is ``F_FULLFSYNC``.
 
 Loading a pickle can run arbitrary code: only load folders the user's own
 app wrote. Every checkpoint rewrites every variable, even unchanged ones.
 """
 
+import hashlib
 import json
 import os
 import shutil
+import sys
 import types
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:   # not on Windows
+    fcntl = None
+
+_F_FULLFSYNC = getattr(fcntl, "F_FULLFSYNC", 51)   # 51 on macOS
+_CHUNK = 1 << 20
+CARRY_CHANGED = "carried pickle changed or missing"
 
 INDEX = "index.json"
 PER_VAR_LIMIT = 1 << 30   # 1 GiB
@@ -59,11 +73,13 @@ class _LimitedWriter:
         self._f = f
         self._limit = limit
         self.written = 0
+        self.sha256 = hashlib.sha256()
 
     def write(self, b):
         self.written += memoryview(b).nbytes
         if self.written > self._limit:
             raise _TooLarge
+        self.sha256.update(b)
         return self._f.write(b)
 
 
@@ -78,13 +94,24 @@ def _sibling(d: Path, suffix: str) -> Path:
     return d.with_name(d.name + suffix)
 
 
+def _fsync_fd(fd: int) -> None:
+    """fsync; on macOS F_FULLFSYNC (fsync there does not reach the platter)."""
+    if sys.platform == "darwin" and fcntl is not None:
+        try:
+            fcntl.fcntl(fd, _F_FULLFSYNC)
+            return
+        except OSError:
+            pass
+    os.fsync(fd)
+
+
 def _fsync_dir(d: Path) -> None:
     try:
         fd = os.open(d, os.O_RDONLY)
     except OSError:   # e.g. platforms that cannot open a directory
         return
     try:
-        os.fsync(fd)
+        _fsync_fd(fd)
     except OSError:
         pass
     finally:
@@ -93,7 +120,29 @@ def _fsync_dir(d: Path) -> None:
 
 def _sync_file(f) -> None:
     f.flush()
-    os.fsync(f.fileno())
+    _fsync_fd(f.fileno())
+
+
+def _mkdir_synced(d: Path) -> None:
+    """mkdir -p, then fsync the parent of every directory it created."""
+    missing = []
+    p = d
+    while not p.exists():
+        missing.append(p)
+        if p.parent == p:
+            break
+        p = p.parent
+    d.mkdir(parents=True)
+    for created in reversed(missing):
+        _fsync_dir(created.parent)
+
+
+def _file_sha256(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(_CHUNK):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _write_index(directory: Path, index: dict) -> None:
@@ -102,11 +151,16 @@ def _write_index(directory: Path, index: dict) -> None:
         _sync_file(f)
 
 
-def _copy_synced(src, dst: Path) -> int:
+def _copy_synced(src, dst: Path) -> tuple[int, str]:
+    """Copy ``src`` to ``dst`` (fsynced); return (size, sha256) of the copy."""
+    h, size = hashlib.sha256(), 0
     with open(src, "rb") as fin, open(dst, "wb") as fout:
-        shutil.copyfileobj(fin, fout)
+        while chunk := fin.read(_CHUNK):
+            h.update(chunk)
+            size += len(chunk)
+            fout.write(chunk)
         _sync_file(fout)
-    return dst.stat().st_size
+    return size, h.hexdigest()
 
 
 def _swap(new: Path, out_dir: Path) -> None:
@@ -141,26 +195,28 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
     """Checkpoint the user variables of ``ns`` into ``out_dir``; return the index.
 
     ``carried`` maps a name to ``(path, entry)``: a variable that could not
-    be loaded last time. When the name is not in ``ns``, its pickle at
-    ``path`` is copied into the checkpoint (entry ``carried: true``).
+    be loaded last time, ``entry`` holding its ``sha256`` and ``size``. When
+    the name is not in ``ns``, its pickle at ``path`` is copied into the
+    checkpoint (entry ``carried: true``) if it still matches; otherwise the
+    entry is ``unloadable``. The dict is updated in place: each copied name
+    points at its copy in ``<dir>.new`` as soon as it is written (callers
+    re-point it with ``follow_carried`` once the swap has ended or failed).
     """
     import cloudpickle
     out_dir = Path(out_dir)
     new = _sibling(out_dir, ".new")
-    carried = dict(carried or {})
+    if carried is None:
+        carried = {}
     if new.exists():
         if _index_ok(new):
             # A complete .new is the newest checkpoint (an earlier swap was
             # cut short): promote it rather than delete it, and follow any
             # carried pickles that lived in it.
             _swap(new, out_dir)
-            carried = {k: (str(out_dir / Path(p).name)
-                           if Path(p).resolve().parent == new.resolve()
-                           else p, e)
-                       for k, (p, e) in carried.items()}
+            follow_carried(carried, out_dir)
         else:
             shutil.rmtree(new)
-    new.mkdir(parents=True)
+    _mkdir_synced(new)
     entries, total, seq = [], 0, 0
     names = user_names(ns, baseline)
 
@@ -197,7 +253,8 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
             entry["status"] = "unpicklable"
             entry["error"] = f"{type(e).__name__}: {e}"
         else:
-            entry.update(status="saved", size=writer.written, file=path.name)
+            entry.update(status="saved", size=writer.written, file=path.name,
+                         sha256=writer.sha256.hexdigest())
             total += writer.written
 
     present = set(names)
@@ -213,13 +270,20 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
         seq += 1
         path = new / f"v{seq:04d}.pkl"
         try:
-            size = _copy_synced(src, path)
-        except OSError as e:
+            size, digest = _copy_synced(src, path)
+        except OSError:
+            size = digest = None
+        if (digest is None or old_entry.get("sha256") is None
+                or digest != old_entry.get("sha256")
+                or size != old_entry.get("size")):
             path.unlink(missing_ok=True)
             entry["status"] = "unloadable"
-            entry["error"] = f"{type(e).__name__}: {e}"
+            entry["error"] = CARRY_CHANGED
             continue
-        entry.update(status="saved", carried=True, size=size, file=path.name)
+        entry.update(status="saved", carried=True, size=size, file=path.name,
+                     sha256=digest)
+        carried[name] = (str(path.resolve()), {**old_entry, "size": size,
+                                               "sha256": digest})
         total += size
 
     index = {"variables": entries, "total_bytes": total,
@@ -229,6 +293,23 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
     _fsync_dir(new.parent)
     _swap(new, out_dir)
     return index
+
+
+def follow_carried(carried: dict, out_dir) -> None:
+    """Re-point carried pickles that lived in ``<dir>.new`` once it has moved.
+
+    After a swap, ``.new`` either still exists (the swap failed before its
+    rename: leave the paths) or has become ``out_dir`` (point there). The
+    sha256 check on copy guards any path this still gets wrong.
+    """
+    out_dir = Path(out_dir)
+    new = _sibling(out_dir, ".new").resolve()
+    if new.exists():
+        return
+    for name, (path, entry) in list(carried.items()):
+        p = Path(path)
+        if p.parent == new:
+            carried[name] = (str(out_dir.resolve() / p.name), entry)
 
 
 def find_checkpoint(out_dir) -> Path | None:
@@ -266,7 +347,9 @@ def load_namespace(ns: dict, out_dir) -> dict:
     """Load a checkpoint into ``ns``; report what was and was not restored.
 
     Each ``unloadable`` entry of ``not_restored`` carries ``path``, the
-    absolute path of its pickle, and ``type``, so it can be carried forward.
+    absolute path of its pickle, and ``type``, ``size`` and ``sha256``, so it
+    can be carried forward. A pickle whose sha256 does not match its entry
+    is not loaded.
     """
     import cloudpickle
     d = find_checkpoint(out_dir)
@@ -281,13 +364,18 @@ def load_namespace(ns: dict, out_dir) -> dict:
             continue
         path = (d / e["file"]).resolve()
         try:
+            if (e.get("sha256") is not None
+                    and _file_sha256(path) != e["sha256"]):
+                raise ValueError("the pickle does not match its checksum")
             with open(path, "rb") as f:
                 ns[e["name"]] = cloudpickle.load(f)
         except Exception as ex:
             not_restored.append({"name": e["name"], "reason": "unloadable",
                                  "cell": e.get("cell"),
                                  "error": f"{type(ex).__name__}: {ex}",
-                                 "path": str(path), "type": e.get("type")})
+                                 "path": str(path), "type": e.get("type"),
+                                 "size": e.get("size"),
+                                 "sha256": e.get("sha256")})
             continue
         restored.append(e["name"])
         if e.get("cell") is not None:

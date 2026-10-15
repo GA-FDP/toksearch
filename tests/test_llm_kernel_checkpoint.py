@@ -218,6 +218,38 @@ class TestCrashSafety(unittest.TestCase):
             self.assertEqual({k: dst[k] for k in names}, names)
 
 
+class TestDurability(unittest.TestCase):
+    def test_macos_uses_full_fsync_for_files_and_directories(self):
+        calls = []
+        with TemporaryDirectory() as tmp, \
+                mock.patch.object(ck.sys, "platform", "darwin"), \
+                mock.patch.object(ck, "fcntl") as fake:
+            fake.fcntl.side_effect = lambda fd, op: calls.append(op)
+            ck.save_namespace(_ns(x=1), BASELINE, {}, Path(tmp) / "namespace")
+        self.assertGreaterEqual(len(calls), 4)   # pickle, index, dirs
+        self.assertEqual(set(calls), {ck._F_FULLFSYNC})
+
+    def test_macos_falls_back_to_fsync(self):
+        with TemporaryDirectory() as tmp, \
+                mock.patch.object(ck.sys, "platform", "darwin"), \
+                mock.patch.object(ck, "fcntl") as fake, \
+                mock.patch.object(ck.os, "fsync", wraps=os.fsync) as fsync:
+            fake.fcntl.side_effect = OSError("not supported")
+            ck.save_namespace(_ns(x=1), BASELINE, {}, Path(tmp) / "namespace")
+        self.assertGreaterEqual(fsync.call_count, 2)
+
+    def test_created_parents_are_fsynced(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "conv" / "namespace"
+            synced = []
+            real = ck._fsync_dir
+            with mock.patch.object(ck, "_fsync_dir",
+                                   side_effect=lambda p: (synced.append(Path(p)),
+                                                          real(p))):
+                ck.save_namespace(_ns(x=1), BASELINE, {}, d)
+            self.assertIn(Path(tmp), synced)          # conv/ was created
+
+
 class TestCarryForward(unittest.TestCase):
     def test_unloadable_variable_is_carried_and_loads_once_fixed(self):
         with TemporaryDirectory() as tmp:
@@ -245,6 +277,81 @@ class TestCarryForward(unittest.TestCase):
             report = ck.load_namespace(dst2, d)
             self.assertEqual(sorted(report["restored"]), ["frag", "ok"])
             self.assertEqual(dst2["frag"].value, 99)
+
+    def test_entries_record_size_and_sha256_and_load_checks_them(self):
+        import hashlib
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            index = ck.save_namespace(_ns(a="A", b="B"), BASELINE, {}, d)
+            for e in index["variables"]:
+                data = (d / e["file"]).read_bytes()
+                self.assertEqual(e["size"], len(data))
+                self.assertEqual(e["sha256"], hashlib.sha256(data).hexdigest())
+            # b's pickle replaced by a's: never loaded as b
+            (d / "v0002.pkl").write_bytes((d / "v0001.pkl").read_bytes())
+            dst = {}
+            report = ck.load_namespace(dst, d)
+            self.assertEqual(dst, {"a": "A"})
+            self.assertEqual([(e["name"], e["reason"])
+                              for e in report["not_restored"]],
+                             [("b", "unloadable")])
+
+    def test_changed_carried_pickle_is_written_unloadable(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            marker = Path(tmp) / "broken"
+            ck.save_namespace(_ns(a="A", frag=Fragile(marker, 99)),
+                              BASELINE, {}, d)
+            marker.touch()
+            report = ck.load_namespace({}, d)
+            bad = report["not_restored"][0]
+            # the carried path now holds another variable's pickle
+            Path(bad["path"]).write_bytes((d / "v0001.pkl").read_bytes())
+            index = ck.save_namespace(_ns(a="A"), BASELINE, {}, d,
+                                      carried={"frag": (bad["path"], bad)})
+            frag = next(e for e in index["variables"] if e["name"] == "frag")
+            self.assertEqual(frag["status"], "unloadable")
+            self.assertEqual(frag["error"], "carried pickle changed or missing")
+
+    def test_failed_swap_never_restores_a_carried_name_as_another_value(self):
+        from toksearch.llm.kernel.worker import Worker
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            marker = Path(tmp) / "broken"
+            ck.save_namespace(_ns(a="A-value", frag=Fragile(marker, 99)),
+                              BASELINE, {}, d)
+            marker.touch()
+            w = Worker.__new__(Worker)   # no namespace imports needed
+            w.ns, w.baseline, w.origins, w.carried = {}, BASELINE, {}, {}
+            w.restore({"dir": str(d)})
+            self.assertIn("frag", w.carried)
+            w.ns.update(b0="B0", b1="B1")
+            req = {"dir": str(d), "per_var_limit": 1 << 30,
+                   "total_limit": 1 << 32}
+            real = shutil.rmtree
+
+            def fail_final_old(path, *a, **k):
+                # the .old removal after a completed rename(.new -> dir)
+                if (str(path).endswith(".old") and d.exists()
+                        and not d.with_name("namespace.new").exists()):
+                    raise OSError(39, "Directory not empty")
+                return real(path, *a, **k)
+
+            with mock.patch.object(ck.shutil, "rmtree",
+                                   side_effect=fail_final_old):
+                with self.assertRaises(OSError):
+                    w.checkpoint(req)
+            w.ns.update(b2="B2")
+            w.checkpoint(req)
+            marker.unlink()
+            dst = {}
+            report = ck.load_namespace(dst, d)
+            unloadable = [e["name"] for e in report["not_restored"]]
+            self.assertTrue("frag" in unloadable
+                            or getattr(dst.get("frag"), "value", None) == 99,
+                            f"frag restored as {dst.get('frag')!r}")
+            # re-pointing after the failed swap keeps the true value
+            self.assertEqual(getattr(dst.get("frag"), "value", None), 99)
 
     def test_carried_name_rebound_by_the_user_is_not_copied(self):
         with TemporaryDirectory() as tmp:
