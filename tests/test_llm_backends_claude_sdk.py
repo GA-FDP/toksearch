@@ -336,6 +336,26 @@ class TestPersistence(unittest.TestCase):
             self._send(backend, client)
         self.assertIsNone(backend._client)
 
+    def test_runtime_error_at_connect_without_resume_is_a_backend_error(self):
+        from toksearch.llm.errors import LLMAuthError, LLMBackendError
+        backend = ClaudeSDKBackend()
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError("boom"))
+        with self.assertRaises(LLMBackendError) as cm:
+            self._send(backend, client)
+        self.assertNotIsInstance(cm.exception, LLMAuthError)
+        self.assertIn("boom", str(cm.exception))
+
+    def test_runtime_error_at_connect_while_resuming_is_a_resume_error(self):
+        from toksearch.llm.errors import LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError("no store"))
+        with self.assertRaises(LLMResumeError):
+            self._send(backend, client)
+
     def test_error_result_before_any_reply_while_resuming(self):
         from toksearch.llm.errors import LLMResumeError
         backend = ClaudeSDKBackend()

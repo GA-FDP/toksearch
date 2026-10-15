@@ -281,9 +281,7 @@ class ClaudeSDKBackend(Backend):
                 "Could not find the `claude` CLI. Install Claude Code "
                 "(see https://docs.claude.com/en/docs/claude-code) and "
                 "run `claude login` to use the claude-max backend.") from e
-        except (sdk.CLIConnectionError, RuntimeError) as e:
-            # With a session_store, connect() also loads the saved transcript;
-            # a RuntimeError there means the store could not be read.
+        except sdk.CLIConnectionError as e:
             if self._resuming:
                 raise LLMResumeError(
                     f"The saved conversation could not be resumed: {e}") from e
@@ -291,6 +289,14 @@ class ClaudeSDKBackend(Backend):
                 "Failed to connect to the `claude` CLI. Run `claude login` "
                 "or set CLAUDE_CODE_OAUTH_TOKEN. Original error: " + str(e)
             ) from e
+        except RuntimeError as e:
+            # With a session_store, connect() also loads the saved transcript;
+            # a RuntimeError while resuming means the store could not be read.
+            # Otherwise it is an SDK failure, not a login problem.
+            if self._resuming:
+                raise LLMResumeError(
+                    f"The saved conversation could not be resumed: {e}") from e
+            raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
         except sdk.ClaudeSDKError as e:
             raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
         self._client = client
