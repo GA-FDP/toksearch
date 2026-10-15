@@ -15,8 +15,21 @@
 """Save and load a run_python namespace, one cloudpickle file per variable.
 
 A checkpoint is written into ``<dir>.new`` and swapped into place, so an
-interrupted write leaves the previous checkpoint intact. Loading a pickle can
-run arbitrary code: only load folders the user's own app wrote.
+interrupted write leaves the previous checkpoint intact. Files are named by
+position (``v0001.pkl``, ...); the index keeps each variable's name, so no
+name (``globals()['../x']``, ``"A"`` beside ``"a"`` on a case-insensitive
+disk) can escape the folder or collide. Every file is fsynced, and the swap
+is ordered so that after a crash at any point one of ``<dir>.new``,
+``<dir>`` and ``<dir>.old`` holds a complete checkpoint, found by
+``find_checkpoint`` (the index is written last, so a parseable index marks a
+complete checkpoint, and a complete ``.new`` is always the newest).
+
+Variables that could not be loaded at the last restore can be carried
+forward (``carried=``): their old pickle is copied into the new checkpoint,
+so a later restore (after the environment is fixed) tries them again.
+
+Loading a pickle can run arbitrary code: only load folders the user's own
+app wrote. Every checkpoint rewrites every variable, even unchanged ones.
 """
 
 import json
@@ -65,37 +78,116 @@ def _sibling(d: Path, suffix: str) -> Path:
     return d.with_name(d.name + suffix)
 
 
+def _fsync_dir(d: Path) -> None:
+    try:
+        fd = os.open(d, os.O_RDONLY)
+    except OSError:   # e.g. platforms that cannot open a directory
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _sync_file(f) -> None:
+    f.flush()
+    os.fsync(f.fileno())
+
+
 def _write_index(directory: Path, index: dict) -> None:
-    (directory / INDEX).write_text(json.dumps(index, indent=1))
+    with open(directory / INDEX, "w") as f:
+        f.write(json.dumps(index, indent=1))
+        _sync_file(f)
+
+
+def _copy_synced(src, dst: Path) -> int:
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        shutil.copyfileobj(fin, fout)
+        _sync_file(fout)
+    return dst.stat().st_size
+
+
+def _swap(new: Path, out_dir: Path) -> None:
+    """Move the complete checkpoint in ``new`` to ``out_dir``, crash-safely."""
+    old = _sibling(out_dir, ".old")
+    parent = out_dir.parent
+    if out_dir.exists():
+        if old.exists():
+            shutil.rmtree(old)
+        os.rename(out_dir, old)
+        _fsync_dir(parent)
+    # When out_dir is missing, .old may be the only other checkpoint: keep it.
+    os.rename(new, out_dir)
+    _fsync_dir(parent)
+    if old.exists():
+        shutil.rmtree(old)
+        _fsync_dir(parent)
+
+
+def _index_ok(d: Path) -> bool:
+    try:
+        json.loads((d / INDEX).read_text())
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
                    per_var_limit: int = PER_VAR_LIMIT,
-                   total_limit: int = TOTAL_LIMIT) -> dict:
-    """Checkpoint the user variables of ``ns`` into ``out_dir``; return the index."""
+                   total_limit: int = TOTAL_LIMIT,
+                   carried: dict | None = None) -> dict:
+    """Checkpoint the user variables of ``ns`` into ``out_dir``; return the index.
+
+    ``carried`` maps a name to ``(path, entry)``: a variable that could not
+    be loaded last time. When the name is not in ``ns``, its pickle at
+    ``path`` is copied into the checkpoint (entry ``carried: true``).
+    """
     import cloudpickle
     out_dir = Path(out_dir)
     new = _sibling(out_dir, ".new")
+    carried = dict(carried or {})
     if new.exists():
-        shutil.rmtree(new)
+        if _index_ok(new):
+            # A complete .new is the newest checkpoint (an earlier swap was
+            # cut short): promote it rather than delete it, and follow any
+            # carried pickles that lived in it.
+            _swap(new, out_dir)
+            carried = {k: (str(out_dir / Path(p).name)
+                           if Path(p).resolve().parent == new.resolve()
+                           else p, e)
+                       for k, (p, e) in carried.items()}
+        else:
+            shutil.rmtree(new)
     new.mkdir(parents=True)
-    entries, total = [], 0
-    for name in user_names(ns, baseline):
-        value = ns[name]
-        entry = {"name": name, "type": type(value).__name__,
-                 "cell": origins.get(name), "size": None, "file": None}
+    entries, total, seq = [], 0, 0
+    names = user_names(ns, baseline)
+
+    def room_for(entry):
         room = total_limit - total
         if room <= 0:
             entry["status"] = "over_total"
-            entries.append(entry)
+            return None
+        return room
+
+    for name in names:
+        value = ns[name]
+        entry = {"name": name, "type": type(value).__name__,
+                 "cell": origins.get(name), "size": None, "file": None}
+        entries.append(entry)
+        room = room_for(entry)
+        if room is None:
             continue
         limit = min(per_var_limit, room)
-        path = new / f"{name}.pkl"
+        seq += 1
+        path = new / f"v{seq:04d}.pkl"
         writer = None
         try:
             with open(path, "wb") as f:
                 writer = _LimitedWriter(f, limit)
                 cloudpickle.dump(value, writer, protocol=5)
+                _sync_file(f)
         except _TooLarge:
             path.unlink(missing_ok=True)
             entry["status"] = ("too_large" if limit == per_var_limit
@@ -107,26 +199,47 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
         else:
             entry.update(status="saved", size=writer.written, file=path.name)
             total += writer.written
+
+    present = set(names)
+    for name in sorted(carried):
+        if name in present:
+            continue
+        src, old_entry = carried[name]
+        entry = {"name": name, "type": old_entry.get("type"),
+                 "cell": old_entry.get("cell"), "size": None, "file": None}
         entries.append(entry)
+        if room_for(entry) is None:
+            continue
+        seq += 1
+        path = new / f"v{seq:04d}.pkl"
+        try:
+            size = _copy_synced(src, path)
+        except OSError as e:
+            path.unlink(missing_ok=True)
+            entry["status"] = "unloadable"
+            entry["error"] = f"{type(e).__name__}: {e}"
+            continue
+        entry.update(status="saved", carried=True, size=size, file=path.name)
+        total += size
+
     index = {"variables": entries, "total_bytes": total,
              "fdp_core_version": os.environ.get("FDP_CORE_VERSION")}
     _write_index(new, index)
-    old = _sibling(out_dir, ".old")
-    if old.exists():
-        shutil.rmtree(old)
-    if out_dir.exists():
-        out_dir.rename(old)
-    new.rename(out_dir)
-    if old.exists():
-        shutil.rmtree(old)
+    _fsync_dir(new)
+    _fsync_dir(new.parent)
+    _swap(new, out_dir)
     return index
 
 
 def find_checkpoint(out_dir) -> Path | None:
-    """The directory holding the newest complete checkpoint, if any."""
+    """The directory holding the newest complete checkpoint, if any.
+
+    Tries ``<dir>.new``, ``<dir>`` and ``<dir>.old`` in that order and
+    returns the first whose index exists and parses.
+    """
     out_dir = Path(out_dir)
-    for d in (out_dir, _sibling(out_dir, ".old")):
-        if (d / INDEX).exists():
+    for d in (_sibling(out_dir, ".new"), out_dir, _sibling(out_dir, ".old")):
+        if _index_ok(d):
             return d
     return None
 
@@ -150,7 +263,11 @@ def not_saved(index: dict) -> list[dict]:
 
 
 def load_namespace(ns: dict, out_dir) -> dict:
-    """Load a checkpoint into ``ns``; report what was and was not restored."""
+    """Load a checkpoint into ``ns``; report what was and was not restored.
+
+    Each ``unloadable`` entry of ``not_restored`` carries ``path``, the
+    absolute path of its pickle, and ``type``, so it can be carried forward.
+    """
     import cloudpickle
     d = find_checkpoint(out_dir)
     if d is None:
@@ -162,13 +279,15 @@ def load_namespace(ns: dict, out_dir) -> dict:
     for e in index["variables"]:
         if e["status"] != "saved":
             continue
+        path = (d / e["file"]).resolve()
         try:
-            with open(d / e["file"], "rb") as f:
+            with open(path, "rb") as f:
                 ns[e["name"]] = cloudpickle.load(f)
         except Exception as ex:
             not_restored.append({"name": e["name"], "reason": "unloadable",
                                  "cell": e.get("cell"),
-                                 "error": f"{type(ex).__name__}: {ex}"})
+                                 "error": f"{type(ex).__name__}: {ex}",
+                                 "path": str(path), "type": e.get("type")})
             continue
         restored.append(e["name"])
         if e.get("cell") is not None:

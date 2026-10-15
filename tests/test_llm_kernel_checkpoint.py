@@ -16,6 +16,7 @@
 
 import json
 import os
+import shutil
 import threading
 import types
 import unittest
@@ -79,7 +80,8 @@ class TestLimitsAndFailures(unittest.TestCase):
             lock = next(e for e in index["variables"] if e["name"] == "lock")
             self.assertEqual(lock["status"], "unpicklable")
             self.assertIn("lock", lock["error"])
-            self.assertFalse((d / "lock.pkl").exists())
+            self.assertEqual(sorted(p.name for p in d.glob("*.pkl")),
+                             ["v0002.pkl"])
             report = ck.load_namespace({}, d)
             self.assertEqual(report["restored"], ["ok"])
             self.assertEqual(report["not_restored"],
@@ -129,10 +131,131 @@ class TestLimitsAndFailures(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             d = Path(tmp) / "namespace"
             ck.save_namespace(_ns(x=1), BASELINE, {"x": 4}, d)
-            (d / "x.pkl").write_bytes(b"not a pickle")
+            (d / "v0001.pkl").write_bytes(b"not a pickle")
             report = ck.load_namespace({}, d)
             self.assertEqual(report["not_restored"][0]["reason"], "unloadable")
             self.assertEqual(report["not_restored"][0]["cell"], 4)
+            self.assertEqual(report["not_restored"][0]["path"],
+                             str((d / "v0001.pkl").resolve()))
+
+
+class Fragile:
+    """Unpickling raises while the marker file exists."""
+
+    def __init__(self, marker, value):
+        self.marker, self.value = str(marker), value
+
+    def __setstate__(self, state):
+        if os.path.exists(state["marker"]):
+            raise RuntimeError("environment is broken")
+        self.__dict__.update(state)
+
+
+class TestCrashSafety(unittest.TestCase):
+    def test_double_crash_restores_the_second_checkpoint_from_new(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            ck.save_namespace(_ns(x=1), BASELINE, {}, d)
+            os.rename(d, d.with_name("namespace.old"))
+            real_rename = os.rename
+
+            def failing(src, dst, *a, **k):
+                if Path(src).name == "namespace.new" and Path(dst) == d:
+                    raise OSError("crash during swap")
+                return real_rename(src, dst, *a, **k)
+
+            with mock.patch.object(ck.os, "rename", side_effect=failing):
+                with self.assertRaises(OSError):
+                    ck.save_namespace(_ns(x=2), BASELINE, {}, d)
+            self.assertTrue(d.with_name("namespace.old").exists())
+            self.assertEqual(ck.find_checkpoint(d), d.with_name("namespace.new"))
+            dst = {}
+            self.assertTrue(ck.load_namespace(dst, d)["found"])
+            self.assertEqual(dst["x"], 2)
+            # The next save promotes nothing stale and ends clean.
+            ck.save_namespace(_ns(x=3), BASELINE, {}, d)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["namespace"])
+            dst = {}
+            ck.load_namespace(dst, d)
+            self.assertEqual(dst["x"], 3)
+
+    def test_truncated_index_falls_back_to_old(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            ck.save_namespace(_ns(x=1), BASELINE, {}, d)
+            old = d.with_name("namespace.old")
+            keep = Path(tmp) / "keep"
+            shutil.copytree(d, keep)
+            ck.save_namespace(_ns(x=2), BASELINE, {}, d)
+            # The state a crash leaves mid-write: .old still present and the
+            # index in namespace cut short.
+            shutil.copytree(keep, old)
+            text = (d / "index.json").read_text()
+            (d / "index.json").write_text(text[: len(text) // 2])
+            self.assertEqual(ck.find_checkpoint(d), old)
+            dst = {}
+            ck.load_namespace(dst, d)
+            self.assertEqual(dst["x"], 1)
+
+    def test_hostile_names_round_trip_inside_the_folder(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "conv"
+            root.mkdir()
+            d = root / "namespace"
+            names = {"../x": 1, "a/b": 2, "A": 3, "a": 4}
+            ck.save_namespace(_ns(**names), BASELINE, {}, d)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()),
+                             ["conv"])
+            self.assertEqual(sorted(p.name for p in root.iterdir()),
+                             ["namespace"])
+            self.assertEqual(sorted(p.name for p in d.iterdir()),
+                             ["index.json", "v0001.pkl", "v0002.pkl",
+                              "v0003.pkl", "v0004.pkl"])
+            dst = {}
+            report = ck.load_namespace(dst, d)
+            self.assertEqual(report["not_restored"], [])
+            self.assertEqual({k: dst[k] for k in names}, names)
+
+
+class TestCarryForward(unittest.TestCase):
+    def test_unloadable_variable_is_carried_and_loads_once_fixed(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            marker = Path(tmp) / "broken"
+            ck.save_namespace(_ns(frag=Fragile(marker, 99), ok=1),
+                              BASELINE, {"frag": 3}, d)
+            marker.touch()
+            dst = {}
+            report = ck.load_namespace(dst, d)
+            self.assertEqual(report["restored"], ["ok"])
+            bad = report["not_restored"][0]
+            self.assertEqual((bad["name"], bad["reason"]),
+                             ("frag", "unloadable"))
+            carried = {"frag": (bad["path"], bad)}
+            index = ck.save_namespace(_ns(**dst), BASELINE, {"ok": 1}, d,
+                                      carried=carried)
+            frag = next(e for e in index["variables"] if e["name"] == "frag")
+            self.assertEqual(frag["status"], "saved")
+            self.assertTrue(frag["carried"])
+            self.assertEqual(frag["cell"], 3)
+            self.assertEqual(frag["type"], "Fragile")
+            marker.unlink()
+            dst2 = {}
+            report = ck.load_namespace(dst2, d)
+            self.assertEqual(sorted(report["restored"]), ["frag", "ok"])
+            self.assertEqual(dst2["frag"].value, 99)
+
+    def test_carried_name_rebound_by_the_user_is_not_copied(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            ck.save_namespace(_ns(v=1), BASELINE, {}, d)
+            entry = {"name": "v", "type": "int", "cell": 1}
+            index = ck.save_namespace(_ns(v=5), BASELINE, {}, d,
+                                      carried={"v": (str(d / "v0001.pkl"),
+                                                     entry)})
+            self.assertEqual(len(index["variables"]), 1)
+            self.assertNotIn("carried", index["variables"][0])
 
 
 class TestDescribe(unittest.TestCase):
