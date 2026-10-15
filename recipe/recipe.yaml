@@ -108,6 +108,13 @@ tests:
         - openjdk >=17
         # the snapshot tests import SqlSnapshotLocator at module level; test-only, the run dep on fdp-schema is unchanged
         - fdp-schema >=0.3.0
+        # The snapshot reader's stack, so its tests run instead of skipping.
+        # macOS loads DuckDB's own signed httpfs (conda-forge's osx-arm64
+        # package cannot be installed), so the extension package is Linux-only.
+        - python-duckdb >=1.5,<2
+        - sqlglot >=30
+        - if: linux
+          then: duckdb-extension-httpfs >=1.5,<2
     files:
       source:
         - tests/

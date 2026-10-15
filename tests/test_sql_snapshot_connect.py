@@ -219,7 +219,8 @@ class TestConnection(unittest.TestCase):
         # is off, so LOAD fails here instead of fetching from DuckDB's server.
         with tempfile.TemporaryDirectory() as prefix:
             os.makedirs(os.path.join(prefix, "duckdb", "extensions"))
-            with mock.patch("sys.prefix", prefix):
+            with mock.patch("sys.prefix", prefix), \
+                    mock.patch("sys.platform", "linux"):
                 with self.assertRaises(snapshot.SnapshotError) as cm:
                     snapshot._open_duckdb(duckdb, None)
         self.assertIn("duckdb-extension-httpfs", str(cm.exception))
@@ -227,12 +228,34 @@ class TestConnection(unittest.TestCase):
     def test_the_extension_directory_is_set_even_when_absent(self):
         # Unset, DuckDB would use ~/.duckdb -- with unsigned loading allowed.
         fake = mock.Mock(Error=duckdb.Error)
-        with tempfile.TemporaryDirectory() as prefix, mock.patch("sys.prefix", prefix):
+        with tempfile.TemporaryDirectory() as prefix, mock.patch("sys.prefix", prefix), \
+                mock.patch("sys.platform", "linux"):
             snapshot._open_duckdb(fake, None)
         config = fake.connect.call_args.kwargs["config"]
         self.assertEqual(config["extension_directory"],
                          os.path.join(prefix, "duckdb", "extensions"))
         self.assertFalse(os.path.isdir(config["extension_directory"]))   # control
+
+    def test_macos_installs_the_signed_extension_from_duckdb(self):
+        # conda-forge's osx-arm64 httpfs cannot be installed, so macOS takes
+        # DuckDB's own signed build: INSTALL before LOAD, and no unsigned
+        # loading or prefix extension directory.
+        fake = mock.Mock(Error=duckdb.Error)
+        with mock.patch("sys.platform", "darwin"):
+            snapshot._open_duckdb(fake, None)
+        config = fake.connect.call_args.kwargs["config"]
+        self.assertNotIn("allow_unsigned_extensions", config)
+        self.assertNotIn("extension_directory", config)
+        sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
+        self.assertEqual(sqls[:2], ["INSTALL httpfs", "LOAD httpfs"])
+
+    def test_macos_install_failure_names_the_repository(self):
+        fake = mock.Mock(Error=duckdb.Error)
+        fake.connect.return_value.execute.side_effect = duckdb.IOException("offline")
+        with mock.patch("sys.platform", "darwin"):
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                snapshot._open_duckdb(fake, None)
+        self.assertIn("extensions.duckdb.org", str(cm.exception))
 
     def test_a_placeholder_mismatch_is_a_value_error(self):
         with self.connect() as conn:

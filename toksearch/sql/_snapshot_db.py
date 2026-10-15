@@ -66,7 +66,7 @@ _token_for = token_for
 
 
 def _open_duckdb(duckdb, token, base=None):
-    """An in-memory DuckDB with httpfs loaded from the conda prefix.
+    """An in-memory DuckDB with httpfs loaded (from the conda prefix on Linux).
 
     Extensions are never fetched from DuckDB's own server: an FDP
     environment gets its binaries from conda-forge. That package installs
@@ -76,24 +76,44 @@ def _open_duckdb(duckdb, token, base=None):
     the environment has. The directory is set even when it does not
     exist, so unsigned loading never reaches ~/.duckdb instead.
 
+    macOS is the exception: conda-forge's osx-arm64 package cannot be
+    installed (its extension carries a prefix placeholder, and re-signing
+    the rewritten file fails on DuckDB's appended signature block), so
+    httpfs comes from DuckDB's own repository instead -- signed, verified
+    on load, and cached in DuckDB's default ~/.duckdb.
+
     `token`, when given, is installed as an http secret scoped to `base`.
     """
-    ext_dir = os.path.join(sys.prefix, "duckdb", "extensions")
-    config = {
-        "autoinstall_known_extensions": False,
-        "autoload_known_extensions": False,
-        "allow_unsigned_extensions": True,
-        "extension_directory": ext_dir,
-    }
-    con = duckdb.connect(config=config)
-    try:
-        con.execute("LOAD httpfs")
-    except duckdb.Error as exc:
-        raise SnapshotError(
-            "DuckDB's httpfs extension is not installed ({}). Install "
-            "duckdb-extension-httpfs from conda-forge; it is not fetched "
-            "from the network at first use.".format(
-                str(exc).splitlines()[0])) from exc
+    if sys.platform == "darwin":
+        con = duckdb.connect(config={
+            "autoinstall_known_extensions": False,
+            "autoload_known_extensions": False,
+        })
+        try:
+            con.execute("INSTALL httpfs")
+            con.execute("LOAD httpfs")
+        except duckdb.Error as exc:
+            raise SnapshotError(
+                "could not install DuckDB's httpfs extension from "
+                "extensions.duckdb.org ({}). On macOS it is fetched there on "
+                "first use and cached in ~/.duckdb.".format(
+                    str(exc).splitlines()[0])) from exc
+    else:
+        ext_dir = os.path.join(sys.prefix, "duckdb", "extensions")
+        con = duckdb.connect(config={
+            "autoinstall_known_extensions": False,
+            "autoload_known_extensions": False,
+            "allow_unsigned_extensions": True,
+            "extension_directory": ext_dir,
+        })
+        try:
+            con.execute("LOAD httpfs")
+        except duckdb.Error as exc:
+            raise SnapshotError(
+                "DuckDB's httpfs extension is not installed ({}). Install "
+                "duckdb-extension-httpfs from conda-forge; it is not fetched "
+                "from the network at first use.".format(
+                    str(exc).splitlines()[0])) from exc
     if token:
         _set_secret(duckdb, con, token, base)
     con.execute("SET enable_object_cache = true")
