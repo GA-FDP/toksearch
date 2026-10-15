@@ -5,12 +5,20 @@ platforms = ["linux-64"]
 
 [dependencies]
 python = ">=3.11,<3.13"
-mdsplus-xrdcl = ">=1,<2"
+# 1.1.0 is the first mdsplus-xrdcl that allows numpy 2.
+mdsplus-xrdcl = ">=1.1.0,<2"
 # Supplies libMdsIpFDP.so, the transport MDSplus loads for an 'fdp://' location.
 # Also a run requirement of the conda package -- see recipe/recipe.yaml.
 mdsip-fdp = ">=0.1.0"
-numpy = ">=1.20, <2"
+numpy = ">=1.22,<3"
 pymssql = "*"
+# toksearch.sql.snapshot imports these lazily and the conda package does
+# NOT declare them (recipe/recipe.yaml): a device package that ships a
+# sql_snapshot locator declares them. The dev env needs them to run the
+# snapshot tests, which skip when they are absent.
+python-duckdb = ">=1.5,<2"
+duckdb-extension-httpfs = ">=1.5,<2"
+sqlglot = ">=30"
 ray-core = "*"
 pyspark = ">=4"
 openjdk = ">=17"
@@ -34,7 +42,11 @@ gradio = ">=4"
 mcp = ">=1.23,<2"
 plotly = "*"
 python-kaleido = "*"
-fdp-schema = ">=0.1.1"
+fdp-schema = ">=0.3.0"
+# The suite is unittest (tests/testit); pytest is here for running single
+# tests by hand. It used to arrive only through python-kaleido 1.2's
+# pytest-timeout dependency, which later kaleido releases dropped.
+pytest = "*"
 
 [tasks]
 build = "pip install -e . --no-deps"

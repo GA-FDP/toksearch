@@ -44,13 +44,10 @@ def ell1_extension():
     return Extension(
         'toksearch.library.ell1module',
         sources=['src/ell1_python.c', 'src/ell1lib.c'],
-        libraries=[
-            'm',
-            'rt',
-            'pthread',
-            'gfortran',
-            'openblas',
-        ],
+        # librt and an explicit libgfortran are Linux-only; macOS's libSystem
+        # covers rt, and openblas carries its own gfortran dependency.
+        libraries=(['m', 'pthread', 'openblas'] if sys.platform == 'darwin'
+                   else ['m', 'rt', 'pthread', 'gfortran', 'openblas']),
         extra_compile_args=['-Wno-unused-variable', '-O0', '-g', '-std=c99'],
         include_dirs=include_dirs,
     )

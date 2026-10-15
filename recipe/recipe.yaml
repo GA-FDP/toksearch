@@ -20,7 +20,9 @@ requirements:
     - python
     - pip
     - setuptools
-    - numpy >=1.20, <2
+    # Build against numpy 2 headers: the extension then runs on 1.x and 2.x
+    # (the reverse does not hold). numpy's run_export sets the runtime range.
+    - numpy >=2
     - openblas
   # rattler-build 0.39 synthesises a python run-export of
   # `python 3.12.* *_debug_cpython` from a host python whose build string is
@@ -49,7 +51,7 @@ requirements:
     # the matching variant.
     - mdsip-fdp >=0.1.0
     - fdp-schema >=0.1.1
-    - numpy >=1.20, <2
+    - numpy >=1.22,<3
     - pymssql
     - ray-core
     - pyspark >=4
@@ -76,13 +78,43 @@ requirements:
     - plotly
     - python-kaleido
 
+  # NOT a run dependency. toksearch is device-neutral and most of it never
+  # touches a store; ptdata is imported lazily and a MAST-only install needs
+  # none of it. But an older ptdata alongside this toksearch is silently
+  # wrong rather than broken: compute() exports FDP_STORE_SNAPSHOT and
+  # ptdata < 2.9.0 does not read FDP_STORE_CATALOG (it read the pre-B7b
+  # FDP_STORE_SNAPSHOT), so every pin would be accepted, recorded
+  # in the provenance, and ignored -- a run that says it read one snapshot
+  # while reading whatever was newest.
+  #
+  # run_constraints is exactly this case: install nothing, but impose a floor
+  # if the package is present at all. The solver is the only protection,
+  # because nothing at runtime can tell an ignored pin from an honoured one.
+  run_constraints:
+    - ptdata >=2.9.0
+
 tests:
+  # setup.py builds no extension when numpy is missing at build time, and the
+  # package would ship without ell1module. Fail the build instead.
+  - python:
+      imports:
+        - toksearch.library.ell1module
+      pip_check: false
   - script:
       content:
         - cd tests && ./testit
     requirements:
       run:
         - openjdk >=17
+        # the snapshot tests import SqlSnapshotLocator at module level; test-only, the run dep on fdp-schema is unchanged
+        - fdp-schema >=0.3.0
+        # The snapshot reader's stack, so its tests run instead of skipping.
+        # macOS loads DuckDB's own signed httpfs (conda-forge's osx-arm64
+        # package cannot be installed), so the extension package is Linux-only.
+        - python-duckdb >=1.5,<2
+        - sqlglot >=30
+        - if: linux
+          then: duckdb-extension-httpfs >=1.5,<2
     files:
       source:
         - tests/

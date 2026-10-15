@@ -1,7 +1,18 @@
+# Linux: a glibc 2.28 sysroot, so the extension runs on RHEL 8. osx-arm64
+# targets macOS 11, the first release for Apple Silicon.
 c_stdlib:
-  - sysroot
+  - if: linux
+    then: [sysroot]
+  - if: osx
+    then: [macosx_deployment_target]
 c_stdlib_version:
-  - "2.28"
+  - if: linux
+    then: ["2.28"]
+  - if: osx
+    then: ["11.0"]
+MACOSX_DEPLOYMENT_TARGET:
+  - if: osx
+    then: ["11.0"]
 python:
   # "3.11" and "3.12" (without the .*) mean ==3.11.0 and ==3.12.0 exactly, not
   # "any 3.11.x". Those specific patch releases carry debug-interpreter builds

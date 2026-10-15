@@ -75,6 +75,67 @@ For multi-dimensional data, use ``dims`` to label axes::
 
     MdsSignal(r'\\psirz', 'efit01', dims=('times',))
 
+Reading a pinned version
+========================
+
+A record can name which version of a shot to read, and ``MdsSignal`` honours
+it on both transports::
+
+    Pipeline([
+        {'shot': 165920, 'version': 2},                   # one shot, one version
+        {'shot': 165921, 'catalog': 'catalog_20260907T232802Z'},
+    ])
+
+``version`` pins a single shot. ``catalog`` resolves through that published
+catalog rather than the newest, so one recorded value reproduces a whole campaign.
+Omit both and the newest version is read, falling back to the unversioned
+archive for anything the store has not absorbed.
+
+**A pin is a guarantee, not a preference.** If it cannot be satisfied the
+fetch raises ``StoreVersionError``; it never quietly answers from another
+version or from the archive. That is the point -- a pin exists so a rerun can
+prove it read the same bytes, and a silent substitution would destroy exactly
+that.
+
+Reading from the store needs ``ptdata >= 2.9.0`` and a deployment that
+declares where its store is. Over ``fdp://`` the origin declares it; for a
+local read set ``FDP_VIEWS_ROOT``. Without one, pinned reads raise and
+unpinned reads behave exactly as they always have.
+
+Pinning a whole run
+===================
+
+"Latest" is a lookup that moves. A run that performs it more than once can
+read its early shots from one catalog snapshot and its later ones from the
+next -- and under ``compute_multiprocessing``, Ray or Spark each worker
+resolves independently, so they can disagree from the first fetch. Every
+``compute_*`` call therefore settles one snapshot *before any worker exists*
+and hands it to them, so a run always reads from exactly one catalog.
+
+Three places can name it, most specific first::
+
+    Pipeline.from_catalog('catalog_20260907T232802Z', shots)    # 1. in code
+    $ fdp run --catalog catalog_20260907T232802Z python x.py    # 2. FDP_STORE_CATALOG
+    Pipeline(shots)                                             # 3. newest, frozen
+
+Code outranks the environment. The environment outranks the default, because
+there it was *told* rather than guessed. Whichever wins is recorded in the
+provenance ``RunContext`` and folded into ``input_identity()`` -- two runs
+over the same shots at different snapshots read different bytes, so they are
+different inputs.
+
+``from_catalog('latest', ...)`` names *nothing*: it falls through to (2) and
+then (3). That is so a script can take the snapshot as an argument without
+special-casing the word, and still be overridable from the command line::
+
+    parser.add_argument('--catalog', default='latest')
+    pipe = Pipeline.from_catalog(args.catalog, shots)
+
+**A process reads from one catalog.** Worker processes are reused between
+runs and keep the environment they were started with, so a second run in the
+same process cannot be pinned differently -- it raises rather than reading
+from a catalog it did not report. To compare catalogs, run one process each.
+
 Datasets and Alignment
 ======================
 
@@ -153,7 +214,7 @@ Run the pipeline for one shot without building the full list::
 
 from .signal.signal import Signal
 from .signal.zarr import ZarrSignal
-from .signal.mds import MdsSignal, MdsTreePath
+from .signal.mds import MdsSignal, MdsTreePath, StoreVersionError
 from .pipeline.align import XarrayAligner
 from .pipeline import Pipeline
 

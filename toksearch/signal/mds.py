@@ -63,6 +63,12 @@ import psutil
 from typing import Union, Iterable, Optional
 
 from .signal import Signal
+from .store_path import (
+    join_tree_path,
+    shard_key,
+    shared_tree_paths,
+    shot_tree_paths,
+)
 from ..utilities.utilities import set_env
 
 _log = logging.getLogger(__name__)
@@ -93,6 +99,202 @@ def _dim_of_expression(expression, dim=0):
 # Set on a Connection to record the tree it currently has open. Kept on the
 # connection so it dies with it -- see MdsConnectionRegistry.open_tree.
 _CURRENT_TREE = "_toksearch_current_tree"
+
+# The origin's views root, cached per connection. Read from the server rather
+# than configured here: the path a client names over the wire must be the path
+# that exists inside the mdsip sandbox, and baking one deployment's filesystem
+# layout into a published package would make relocating the store a client
+# release rather than a config change.
+_VIEWS_ROOT = "_toksearch_views_root"
+
+# The tree path last sent on a connection. Several trees read at one shot
+# resolve to the same search path, so without this each one re-sends an
+# identical setenv -- a round trip per tree per shot, for nothing.
+_CURRENT_PATH = "_toksearch_current_tree_path"
+
+# One resolver per store root per process. StoreIndex holds a catalog snapshot
+# and its bucket maps, so rebuilding it per record would re-read the catalog
+# for every shot.
+_STORE_INDEX = {}
+
+
+class StoreVersionError(Exception):
+    """A version pin the store cannot satisfy.
+
+    Raised rather than resolved from somewhere else. A pin is a guarantee, and
+    falling back to the latest version would hand back data the caller did not
+    ask for, with no error -- the failure this whole path exists to prevent.
+    """
+
+
+# The run-wide pin, set by `fdp run --snapshot`, by a user's own export, or
+# by toksearch settling one snapshot before the workers start. Named here
+# rather than imported from store_catalog to keep this module's dependency
+# on it one-way: store_catalog knows nothing about signals.
+from .store_catalog import pinned_shards
+
+_RUN_PIN = "FDP_STORE_CATALOG"
+
+
+def _snapshot_missing():
+    """``StoreMiss.SnapshotMissing``, or a sentinel matching nothing.
+
+    Imported lazily for the same reason as StoreIndex: toksearch is
+    device-neutral and an install without ptdata must not fail here. If the
+    enum is unavailable the store is unreachable anyway, so nothing is lost
+    by matching no miss at all.
+    """
+    try:
+        from ptdata import StoreMiss
+    except ImportError:
+        return object()
+    return StoreMiss.SnapshotMissing
+
+
+def _store_index(store_root):
+    index = _STORE_INDEX.get(store_root)
+    if index is None:
+        # Imported lazily, and deliberately not a hard dependency: toksearch
+        # is device-neutral and most of it never touches a store. The cost is
+        # that a mismatched pair is only discovered here, so the failure has
+        # to name the fix rather than surface as a bare ImportError.
+        try:
+            from ptdata import StoreIndex
+        except ImportError as exc:
+            raise StoreVersionError(
+                "reading from the versioned store needs ptdata >= 2.7.0, "
+                "which provides StoreIndex ({}). Either install it or unset "
+                "the store root to read from archives instead.".format(exc)
+            ) from exc
+
+        index = StoreIndex(store_root)
+        _STORE_INDEX[store_root] = index
+    return index
+
+
+def _resolve_store_path(treename, shot, version, snapshot, catalog_root,
+                        views_root, fallback, subject):
+    """The version to open, and the search path that selects it.
+
+    Takes TWO roots, and they are genuinely different things:
+
+    ``catalog_root`` is where **this client** reads ``catalog/`` from, so it
+    must be readable here -- ``pelican://osg-htc.org:443/fdp-d3d``, say.
+
+    ``views_root`` is the prefix written into the tree path, which is read by
+    **whoever opens the tree**. Over ``fdp://`` that is the origin's mdsip
+    sandbox, so it is the sandbox's own filesystem path and the client can
+    never read it. For a local read the two coincide.
+
+    Deriving one from the other looks natural and is wrong: it makes a client
+    try to list the origin's filesystem, which fails as
+    ``ShotNotInCatalog`` -- so pinned reads raise for a reason that has
+    nothing to do with the pin, and unpinned reads quietly fall back to
+    archives having resolved nothing at all.
+
+    Shared by both transports, so there is one definition of what a pin
+    means. Returns ``(None, None)`` when there is no pin and no version to
+    resolve, leaving a deployment without a store exactly as it was.
+    """
+    pinned = version is not None or snapshot is not None
+
+    if not catalog_root or not views_root:
+        if pinned:
+            raise StoreVersionError(
+                "{} has no store configured, so it cannot honour "
+                "version={!r} snapshot={!r} for shot {}".format(
+                    subject, version, snapshot, shot))
+        return None, None
+
+    index = _store_index(catalog_root)
+
+    got = index.resolve_version(shot, version=version, snapshot=snapshot)
+    if not got.found:
+        if pinned:
+            raise StoreVersionError(
+                "cannot honour version={!r} snapshot={!r} for shot {} on "
+                "{}: {} {}".format(version, snapshot, shot, subject,
+                                   got.miss, got.detail))
+
+        # A snapshot that does not EXIST is a broken configuration, not an
+        # unminted shot, and it is broken for every shot this run will read.
+        # Falling back here would answer from the unversioned archive while
+        # the run believed it was pinned -- silently serving data from
+        # nowhere near the snapshot it reports, which is precisely the
+        # failure this whole feature exists to remove.
+        #
+        # Distinguished from the record-level pin above because the run-wide
+        # variable is set on EVERY run with a store, including unpinned ones
+        # (toksearch settles one snapshot before the workers start). Treating
+        # its mere presence as a pin would turn every not-yet-ingested shot
+        # into an error and break the migration story; treating a NONEXISTENT
+        # snapshot as an error does not.
+        if got.miss == _snapshot_missing():
+            raise StoreVersionError(
+                "this run is pinned to snapshot {!r} by {}, and it does not "
+                "exist on {} ({}). Nothing can be read at that pin. Check "
+                "the value, or unset it to read the newest.".format(
+                    os.environ.get(_RUN_PIN, ""), _RUN_PIN, subject,
+                    got.detail))
+
+        # Unpinned and unminted: fall back rather than fail. A store that has
+        # not reached this shot yet must not break reads that worked before.
+        return None, None
+
+    entries = shot_tree_paths(views_root, shot, got.version)
+
+    # A shared shard carries its own version chain, so the shot's pin does NOT
+    # apply to it -- only the snapshot does. Every tree has a shard, since a
+    # model tree has no shot to belong to, so a hit here is ordinary rather
+    # than evidence that the tree is a shared one.
+    shard = shard_key(treename, shot)
+
+    # A saved snapshot names its shards explicitly, and that beats the
+    # catalog's answer. Without this a replay reads the right DATA and
+    # whatever instrument description happens to be current -- reproducible
+    # for the measurement and not for what it means.
+    # NOT named `pinned`: that is the flag deciding whether the archives
+    # fallback is dropped, and shadowing it here silently kept the archive
+    # path on pinned reads -- the exact thing join_tree_path(pinned=) exists
+    # to prevent.
+    shard_version = pinned_shards().get(shard)
+    if shard_version is not None:
+        entries += shared_tree_paths(views_root, shard, shard_version, treename)
+    else:
+        shared = index.resolve_shared_version(shard, snapshot=snapshot)
+        if shared.found:
+            entries += shared_tree_paths(views_root, shard, shared.version,
+                                         treename)
+        elif shared.miss == _snapshot_missing():
+            # Same reasoning as the shot branch above, and it was missing
+            # here: a catalog that does not EXIST is a broken configuration,
+            # not an un-ingested tree. Skipping it dropped the model tree out
+            # of the search path with no message -- and under a pin there is
+            # no archives fallback behind it, so the read either failed with
+            # an MDSplus node error naming nothing relevant, or succeeded
+            # because the shot's own tree happened to carry the node. Both
+            # are worse than saying so.
+            raise StoreVersionError(
+                "the shared shard for {!r} resolves through catalog {!r}, "
+                "and that catalog does not exist on {} ({}). A saved "
+                "snapshot that names its shards does not need the catalog "
+                "at all -- rebuild it with `--tree {}`.".format(
+                    treename, snapshot or os.environ.get(_RUN_PIN, ""),
+                    subject, shared.detail, treename))
+        # A shard the catalog simply does not list is an un-ingested tree,
+        # not a broken pin, and still skips: failing there would break every
+        # pinned read of a tree the shared area has not absorbed yet.
+
+    # Setting a tree path replaces the whole search path, so the fallback --
+    # where archives/ lives -- vanishes unless carried along. Unpinned reads
+    # keep it: a tree the store has not absorbed yet must not stop resolving
+    # just because its shot has a version. Under a pin it is dropped, because
+    # a pin is a guarantee and answering from archives would return
+    # unversioned data with no error.
+    if fallback:
+        entries += [e for e in fallback.split(";") if e]
+
+    return got.version, join_tree_path(entries, pinned=pinned)
 
 
 class _BatchedGatherFailed(Exception):
@@ -212,7 +414,7 @@ class MdsLocalSignal(Signal):
             "treepath": treepath,
         }
 
-    def gather(self, shot):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot
 
         Arguments:
@@ -227,7 +429,12 @@ class MdsLocalSignal(Signal):
         """
         results = {}
 
-        tree = MdsTreeRegistry().open_tree(self.treename, shot, treepath=self.treepath)
+        resolved, store_path = self._store_path(shot, version, snapshot)
+        treepath = (MdsTreePath(**{self.treename: store_path})
+                    if store_path else self.treepath)
+
+        tree = MdsTreeRegistry().open_tree(
+            self.treename, shot, treepath=treepath, version=resolved)
         node = tree.getNode(self.expression)
         results["data"] = node.data()
 
@@ -251,6 +458,24 @@ class MdsLocalSignal(Signal):
             results["units"] = units
 
         return results
+
+    def _store_path(self, shot, version, snapshot):
+        """Resolve for this signal, taking the store root from the environment.
+
+        A local read has no session to ask, so FDP_STORE_ROOT is the seam --
+        `fdp env` composes it from the device locator. It names the namespace
+        holding catalog/ and views/, and because this process opens the tree
+        itself, the same root serves both roles. The ambient
+        default_tree_path is the fallback, since setting <tree>_path overrides
+        it for this tree and it would otherwise disappear.
+        """
+        root = os.environ.get("FDP_STORE_ROOT", "")
+        # A local read opens the tree itself, so the two roots coincide.
+        return _resolve_store_path(
+            self.treename, shot, version, snapshot,
+            root, (root + "/views") if root else "",
+            os.environ.get("default_tree_path", ""),
+            "this environment")
 
     def cleanup_shot(self, shot: int):
         """Close the tree for this shot
@@ -414,7 +639,7 @@ class MdsSignal(Signal):
         )
 
 
-    def gather(self, shot):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot
         
         Arguments:
@@ -427,7 +652,11 @@ class MdsSignal(Signal):
                 attribute is True, the dictionary will also contain a key 'units' with the units
                 of the data and dimensions.
         """
-        return self.sig.gather(shot)
+        # The record travels through. MdsSignal is the class users actually
+        # instantiate, so dropping it here discards any version pin before it
+        # can reach the signal that would honour it -- silently, because an
+        # unpinned read of a real shot returns perfectly good data.
+        return self.sig.gather(shot, version=version, snapshot=snapshot)
 
 
     def cleanup_shot(self, shot: int):
@@ -482,8 +711,8 @@ class MdsConnectionRegistry(object):
             self._connection_map[server] = conn
         return conn
 
-    def open_tree(self, server, treename, shot):
-        """Open a tree on the server's connection, if it isn't already open.
+    def open_tree(self, server, treename, shot, version=None, tree_path=None):
+        """Open a tree on the server's connection, if the right one isn't open.
 
         Signals sharing a server share a connection, and openTree only sets
         that connection's current tree. Several signals reading one tree --
@@ -494,11 +723,37 @@ class MdsConnectionRegistry(object):
         cannot outlive what it describes: connections are deliberately left
         out of the registry's pickled state, so a marker kept here could
         travel to a process whose connection has none of those trees open.
+
+        ``version`` joins the marker because MDSplus serves an already-open
+        tree regardless of the current path. Keyed by tree and shot alone, a
+        re-read at a different version returns the first version's data with a
+        success status -- no exception, no warning, the wrong bytes behind the
+        right name.
+
+        ``tree_path`` is sent as a session ``setenv`` before the open, and is
+        what selects the version. It must arrive first: the path is re-read on
+        every open of a tree the session does not already hold, but once a
+        tree is open a later setenv is silently ignored.
         """
         connection = self.connect(server)
-        if getattr(connection, _CURRENT_TREE, None) != (treename, shot):
-            connection.openTree(treename, shot)
-            setattr(connection, _CURRENT_TREE, (treename, shot))
+        wanted = (treename, shot, version)
+        current = getattr(connection, _CURRENT_TREE, None)
+        if current == wanted:
+            return connection
+
+        # Only a version change under a tree+shot we already hold needs a
+        # close, and that is the one case a setenv cannot reach on its own.
+        # A different tree or a different shot re-reads the path by itself,
+        # and closing for those would spend a round trip per record.
+        if current is not None and current[:2] == (treename, shot):
+            connection.closeAllTrees()
+
+        if tree_path and getattr(connection, _CURRENT_PATH, None) != tree_path:
+            connection.get("setenv($)", "default_tree_path=" + tree_path)
+            setattr(connection, _CURRENT_PATH, tree_path)
+
+        connection.openTree(treename, shot)
+        setattr(connection, _CURRENT_TREE, wanted)
         return connection
 
     def close_all_trees(self, server):
@@ -591,7 +846,7 @@ class MdsRemoteSignal(Signal):
         return MdsConnectionRegistry().connect(self.server)
 
 
-    def gather(self, shot):
+    def gather(self, shot, version=None, snapshot=None):
         """Gather the data for a shot, with one retry on MDSplusERROR.
 
         The mdsip server can leave per-connection state wedged after returning
@@ -615,7 +870,7 @@ class MdsRemoteSignal(Signal):
                 of the data and dimensions.
         """
         try:
-            return self._do_gather(shot)
+            return self._do_gather(shot, version=version, snapshot=snapshot)
         except MDSplusERROR as e:
             _log.warning(
                 "MDSplusERROR on %s for shot=%s expr=%r (%s); "
@@ -623,7 +878,10 @@ class MdsRemoteSignal(Signal):
                 self.server, shot, self.expression, e,
             )
             MdsConnectionRegistry().disconnect(self.server)
-            return self._do_gather(shot)
+            # The record travels into the retry too. Dropping it here would
+            # lose the pin exactly when a connection has been re-dialled,
+            # which is the hardest case to notice.
+            return self._do_gather(shot, version=version, snapshot=snapshot)
 
     def _gather_plan(self):
         """The expressions this signal needs, as (slot, name, expression).
@@ -705,9 +963,51 @@ class MdsRemoteSignal(Signal):
 
         return self._assemble(plan, values)
 
-    def _do_gather(self, shot):
+    def _sandbox_env(self, connection):
+        """The sandbox's views root and its original tree path, read once.
+
+        Both come from the server rather than from client config. $VAR is not
+        expanded inside default_tree_path, so a path must be spelled
+        literally, and a client package cannot spell one deployment's
+        filesystem layout without turning a store relocation into a release.
+
+        Read together, and before anything overwrites them: a setenv replaces
+        default_tree_path wholesale, so the original -- which is where
+        archives/ lives -- is only observable until the first pinned open.
+        An empty views root means this origin has no store.
+        """
+        cached = getattr(connection, _VIEWS_ROOT, None)
+        if cached is None:
+            def env(name):
+                try:
+                    return str(connection.get('getenv("%s")' % name)) or ""
+                except Exception:
+                    return ""
+
+            cached = (env("fdp_views_root"), env("default_tree_path"))
+            setattr(connection, _VIEWS_ROOT, cached)
+        return cached
+
+    def _store_path(self, registry, shot, version, snapshot):
+        """Resolve for this signal.
+
+        The catalog is read from where THIS process can reach it, while the
+        path is written for the sandbox that will open the tree. Two roots,
+        two sources: the client's own configuration, and the origin's
+        declaration of its own layout.
+        """
+        views_root, archives = self._sandbox_env(registry.connect(self.server))
+        return _resolve_store_path(
+            self.treename, shot, version, snapshot,
+            os.environ.get("FDP_STORE_ROOT", ""), views_root,
+            archives, self.server)
+
+    def _do_gather(self, shot, version=None, snapshot=None):
         registry = MdsConnectionRegistry()
-        connection = registry.open_tree(self.server, self.treename, shot)
+        resolved, tree_path = self._store_path(registry, shot, version, snapshot)
+        connection = registry.open_tree(
+            self.server, self.treename, shot,
+            version=resolved, tree_path=tree_path)
 
         plan = self._gather_plan()
 
@@ -802,8 +1102,14 @@ class MdsTreeRegistry(object):
         self.__dict__.update(state)
         self.__dict__["_tree_map"] = {} if existing is None else existing
 
-    def open_tree(self, treename, shot, treepath=None):
-        tree = self._get_tree(treename, shot)
+    def open_tree(self, treename, shot, treepath=None, version=None):
+        """Open a tree, reusing one already open at the same version.
+
+        The version is part of the key because two versions of a shot are
+        different data behind the same name. Keyed by shot alone, a pinned
+        re-read would be handed whatever was opened first, with no error.
+        """
+        tree = self._get_tree(treename, shot, version)
         if tree is None:
 
             if not treepath:
@@ -818,7 +1124,7 @@ class MdsTreeRegistry(object):
             if treename not in self._tree_map:
                 self._tree_map[treename] = {}
 
-            self._tree_map[treename][shot] = tree
+            self._tree_map[treename][(shot, version)] = tree
 
         return tree
 
@@ -831,20 +1137,33 @@ class MdsTreeRegistry(object):
             tree = mds.Tree(treename, shot, mode="READONLY")
             return tree
 
-    def _get_tree(self, treename, shot):
-        return self._tree_map.get(treename, {}).get(shot, None)
+    def _get_tree(self, treename, shot, version=None):
+        return self._tree_map.get(treename, {}).get((shot, version), None)
 
-    def close_tree(self, treename, shot):
-        tree = self._tree_map.get(treename, {}).pop(shot, None)
-        if tree is not None:
-            try:
-                tree.close()
-            except Exception:
-                pass
+    def close_tree(self, treename, shot, version=None):
+        """Close a shot's tree, or every version of it.
+
+        Lookup is exact but closing sweeps by default, and the asymmetry is
+        deliberate: cleanup_shot wants the shot gone and does not know which
+        versions were opened for it. Passing a version closes only that one.
+        """
+        shots = self._tree_map.get(treename, {})
+        if version is None:
+            keys = [k for k in list(shots.keys()) if k[0] == shot]
+        else:
+            keys = [(shot, version)]
+
+        for key in keys:
+            tree = shots.pop(key, None)
+            if tree is not None:
+                try:
+                    tree.close()
+                except Exception:
+                    pass
 
     def close_all_trees(self):
         for treename, shots_dict in list(self._tree_map.items()):
-            for shot in list(shots_dict.keys()):
-                self.close_tree(treename, shot)
+            for shot, version in list(shots_dict.keys()):
+                self.close_tree(treename, shot, version)
 
 

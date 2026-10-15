@@ -1,0 +1,482 @@
+"""Settling one catalog snapshot for a run.
+
+The defect these guard: "latest" is a lookup that moves, and a run that
+performs it more than once can read early shots from one catalog and later
+ones from the next. Fixing that per-process is not enough -- each worker
+resolves independently, so the snapshot has to be settled before any worker
+exists. See tests/test_store_catalog_workers.py for that half, which is the
+only one that needs more than one process.
+"""
+
+import contextlib
+import os
+import unittest
+from unittest import mock
+
+from toksearch import Pipeline
+from toksearch.signal import store_catalog
+
+
+@contextlib.contextmanager
+def env(**kw):
+    """Set environment variables for the block. None means unset."""
+    old = {k: os.environ.get(k) for k in kw}
+    for k, v in kw.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+class TestPinningARun(unittest.TestCase):
+    def test_it_exports_the_resolved_snapshot(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_X"):
+            self.assertEqual(store_catalog.pin_run(), "catalog_X")
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"], "catalog_X")
+
+    def test_it_does_not_overwrite_an_existing_pin(self):
+        # `fdp run --snapshot` and a user's own export both precede the
+        # pipeline, and both outrank it: there the environment was told,
+        # here the pipeline is guessing.
+        with env(FDP_STORE_ROOT="/some/root",
+                 FDP_STORE_CATALOG="catalog_USER"), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_X") as resolve:
+            self.assertEqual(store_catalog.pin_run(), "catalog_USER")
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"], "catalog_USER")
+            resolve.assert_not_called()
+
+    def test_no_store_root_is_not_an_error(self):
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None):
+            self.assertIsNone(store_catalog.pin_run())
+            self.assertNotIn("FDP_STORE_CATALOG", os.environ)
+
+    def test_a_missing_ptdata_is_not_an_error(self):
+        # The one place the store guard skips rather than raising: nothing
+        # was asked for. Contrast mds.py's _store_index, which raises because
+        # by the time it runs a pin HAS been asked for.
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               side_effect=ImportError("no ptdata")):
+            self.assertIsNone(store_catalog.pin_run())
+            self.assertNotIn("FDP_STORE_CATALOG", os.environ)
+
+    def test_an_unreachable_store_is_not_an_error(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               side_effect=OSError("origin down")):
+            self.assertIsNone(store_catalog.pin_run())
+
+    def test_a_store_with_no_catalog_is_not_an_error(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve", return_value=""):
+            self.assertIsNone(store_catalog.pin_run())
+            self.assertNotIn("FDP_STORE_CATALOG", os.environ)
+
+
+class TestPinningInCode(unittest.TestCase):
+    def test_from_snapshot_wins_over_an_unset_environment(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_NEWER") as resolve:
+            Pipeline.from_catalog("catalog_PINNED", [1]).compute_serial()
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"],
+                             "catalog_PINNED")
+            resolve.assert_not_called()
+
+    def test_a_conflicting_environment_pin_raises_naming_both(self):
+        with env(FDP_STORE_ROOT="/some/root",
+                 FDP_STORE_CATALOG="catalog_FROM_CLI"):
+            pipe = Pipeline.from_catalog("catalog_FROM_CODE", [1])
+            with self.assertRaises(store_catalog.CatalogConflict) as cm:
+                pipe.compute_serial()
+        msg = str(cm.exception)
+        self.assertIn("catalog_FROM_CLI", msg)
+        self.assertIn("catalog_FROM_CODE", msg)
+
+    def test_the_same_value_from_both_sources_is_not_a_conflict(self):
+        with env(FDP_STORE_ROOT="/some/root",
+                 FDP_STORE_CATALOG="catalog_SAME"):
+            Pipeline.from_catalog("catalog_SAME", [1]).compute_serial()
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"], "catalog_SAME")
+
+    def test_a_continuation_keeps_the_pin(self):
+        # A guarantee that quietly stops applying when a pipeline is extended
+        # is the toksearch_mast defect's shape.
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None):
+            pinned = Pipeline.from_catalog("catalog_PINNED", [1])
+            extended = Pipeline(pinned)
+            extended.map(lambda rec: rec.update({"x": 1}))
+            extended.compute_serial()
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"],
+                             "catalog_PINNED")
+
+    def test_from_catalog_composes_with_another_source(self):
+        inner = Pipeline([1, 2])
+        pipe = Pipeline.from_catalog("catalog_PINNED", inner)
+        self.assertEqual(pipe._catalog, "catalog_PINNED")
+
+
+class TestLatestNamesNothing(unittest.TestCase):
+    """A sweep script defaults --snapshot to the word; it must not have to
+    special-case it, and the shortest special case drops the pin entirely."""
+
+    def test_latest_means_no_explicit_pin(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_NEWEST"):
+            Pipeline.from_catalog("latest", [1]).compute_serial()
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"],
+                             "catalog_NEWEST")
+
+    def test_latest_does_not_override_the_environment(self):
+        # What keeps `fdp run --snapshot X python sweep.py` working: a
+        # default nobody typed must not outrank a value the user did.
+        with env(FDP_STORE_ROOT="/some/root",
+                 FDP_STORE_CATALOG="catalog_FROM_CLI"), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_NEWEST") as resolve:
+            Pipeline.from_catalog("latest", [1]).compute_serial()
+            self.assertEqual(os.environ["FDP_STORE_CATALOG"],
+                             "catalog_FROM_CLI")
+            resolve.assert_not_called()
+
+    def test_latest_is_not_a_conflict(self):
+        with env(FDP_STORE_ROOT="/some/root",
+                 FDP_STORE_CATALOG="catalog_FROM_CLI"):
+            # Must not raise: the word names nothing to conflict with.
+            Pipeline.from_catalog("latest", [1]).compute_serial()
+
+    def test_latest_is_case_insensitive_and_stripped(self):
+        for word in ("LATEST", " latest ", "Latest"):
+            with self.subTest(word=word):
+                with env(FDP_STORE_ROOT="/some/root",
+                         FDP_STORE_CATALOG=None), \
+                     mock.patch.object(store_catalog, "_resolve",
+                                       return_value="catalog_NEWEST"):
+                    Pipeline.from_catalog(word, [1]).compute_serial()
+                    self.assertEqual(os.environ["FDP_STORE_CATALOG"],
+                                     "catalog_NEWEST")
+
+    def test_the_word_never_reaches_the_environment(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_NEWEST"):
+            Pipeline.from_catalog("latest", [1]).compute_serial()
+            got = os.environ.get("FDP_STORE_CATALOG", "")
+        self.assertNotIn("latest", got.lower())
+
+
+class TestTheRunContextCarriesIt(unittest.TestCase):
+    def _record(self, pipe):
+        seen = []
+
+        class Backend:
+            run_id = "r1"
+
+            def on_compute_start(self, ctx):
+                seen.append(ctx)
+
+            def on_compute_end(self, ctx, result):
+                pass
+
+        pipe.compute_serial(provenance=Backend())
+        return seen[0]
+
+    def test_the_snapshot_reaches_a_provenance_backend(self):
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_X"):
+            ctx = self._record(Pipeline([1, 2]))
+        self.assertEqual(ctx.to_dict()["store"], {"catalog": "catalog_X"})
+
+    def test_no_store_leaves_the_field_none(self):
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None):
+            ctx = self._record(Pipeline([1, 2]))
+        self.assertIsNone(ctx.to_dict()["store"])
+
+    def test_the_snapshot_does_not_change_the_input_identity(self):
+        # input_identity is the LOGICAL input -- which shots, which signals.
+        # It must dedupe across store states, so that two runs over the same
+        # shots at different snapshots are recognised as the same input. The
+        # PHYSICAL identity (which exact bytes) belongs to the provenance
+        # backend, which records the resolved versions alongside this; see
+        # toksearch_cmf/inputs.py, whose content hash is what CMF dedupes on.
+        #
+        # This asserted the opposite in 2.15.0/2.15.1. Folding the snapshot
+        # in collapsed the two levels and lost the logical notion.
+        ids = []
+        for snap in ("catalog_A", "catalog_B"):
+            with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+                 mock.patch.object(store_catalog, "_resolve",
+                                   return_value=snap):
+                ids.append(self._record(Pipeline([1, 2])).input_identity())
+        self.assertEqual(ids[0], ids[1])
+
+    def test_the_snapshot_still_reaches_the_backend(self):
+        # Excluded from the hash, NOT from the context: the backend needs it
+        # to record the physical identity.
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_A"):
+            ctx = self._record(Pipeline([1, 2]))
+        self.assertEqual(ctx.store, {"catalog": "catalog_A"})
+        self.assertEqual(ctx.to_dict()["store"], {"catalog": "catalog_A"})
+
+
+SQL_VAR = "FDP_SQL_SNAPSHOT_D3DRDB"
+
+
+def _sql_locator(name="d3drdb"):
+    from fdp_schema import SqlSnapshotLocator
+    # file:// so no token is needed; the listing itself is mocked.
+    return SqlSnapshotLocator(name=name, base_url="file:///nonexistent/d3drdb",
+                              id_pattern="d3drdb_*")
+
+
+def _catalogs(*locators):
+    from types import SimpleNamespace
+    return {"fake": SimpleNamespace(name="fake", locators=list(locators))}
+
+
+class SqlPinTest(unittest.TestCase):
+    """Clears the d3drdb pin and the process's record of it, both ways.
+
+    DuckDB is declared present: the conda test environment has none, and
+    without it settling is (correctly) a no-op."""
+
+    def setUp(self):
+        duck = mock.patch.object(store_catalog, "_have_duckdb", return_value=True)
+        duck.start()
+        self.addCleanup(duck.stop)
+        flag = mock.patch.object(store_catalog, "_SQL_SETTLE_FAILED", False)
+        flag.start()
+        self.addCleanup(flag.stop)
+        from toksearch.sql import snapshot
+        self._snapshot = snapshot
+        self._pinned_before = set(snapshot._pinned)
+        snapshot._pinned.clear()
+        self._env = env(**{SQL_VAR: None})
+        self._env.__enter__()
+
+    def tearDown(self):
+        self._env.__exit__(None, None, None)
+        self._snapshot._pinned.clear()
+        self._snapshot._pinned.update(self._pinned_before)
+
+
+class TestPinningSqlSnapshots(SqlPinTest):
+    def test_it_exports_and_returns_the_mapping(self):
+        got = store_catalog.pin_sql_snapshots({"d3drdb": "A"})
+        self.assertEqual(got, {"d3drdb": "A"})
+        self.assertEqual(os.environ[SQL_VAR], "A")
+
+    def test_a_different_environment_pin_raises_naming_both(self):
+        os.environ[SQL_VAR] = "B"
+        with self.assertRaises(self._snapshot.SnapshotConflict) as cm:
+            store_catalog.pin_sql_snapshots({"d3drdb": "A"})
+        msg = str(cm.exception)
+        self.assertIn("'A'", msg)
+        self.assertIn("'B'", msg)
+        self.assertIn(SQL_VAR, msg)
+        self.assertEqual(os.environ[SQL_VAR], "B")
+
+    def test_a_second_different_pin_in_one_process_says_so(self):
+        store_catalog.pin_sql_snapshots({"d3drdb": "A"})
+        with self.assertRaises(self._snapshot.SnapshotConflict) as cm:
+            store_catalog.pin_sql_snapshots({"d3drdb": "B"})
+        msg = str(cm.exception)
+        self.assertIn("already settled to 'A'", msg)
+        self.assertIn("start a fresh process", msg)
+        self.assertIn("FDP_SQL_SNAPSHOT_D3DRDB='B'", msg)
+
+    def test_the_same_value_is_not_a_conflict(self):
+        os.environ[SQL_VAR] = "A"
+        self.assertEqual(store_catalog.pin_sql_snapshots({"d3drdb": "A"}),
+                         {"d3drdb": "A"})
+
+    def test_an_empty_mapping_exports_nothing(self):
+        self.assertEqual(store_catalog.pin_sql_snapshots({}), {})
+        self.assertNotIn(SQL_VAR, os.environ)
+
+
+class TestSettlingSqlSnapshots(SqlPinTest):
+    def _patch_catalogs(self, *locators):
+        return mock.patch("toksearch.sql.mssql._discover_catalogs",
+                          return_value=_catalogs(*locators))
+
+    def test_newest_is_settled_and_exported(self):
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(self._snapshot, "list_ids",
+                               return_value=["d3drdb_OLD", "d3drdb_N"]):
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_N"})
+        self.assertEqual(os.environ[SQL_VAR], "d3drdb_N")
+
+    def test_an_environment_pin_is_reported_without_a_lookup(self):
+        os.environ[SQL_VAR] = "d3drdb_E"
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(self._snapshot, "list_ids") as listing:
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_E"})
+        listing.assert_not_called()
+
+    def test_a_failed_resolve_settles_nothing(self):
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(self._snapshot, "resolve",
+                               side_effect=self._snapshot.SnapshotError("down")):
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+        self.assertNotIn(SQL_VAR, os.environ)
+
+    def _remote(self):
+        from fdp_schema import AuthHint, SqlSnapshotLocator
+        return SqlSnapshotLocator(
+            name="d3drdb", base_url="https://origin.example/d3drdb",
+            id_pattern="d3drdb_*",
+            auth=AuthHint(kind="bearer_token", env="FDP_TEST_SETTLE_TOKEN"))
+
+    def test_settling_uses_a_short_timeout(self):
+        listing = (b'<D:multistatus xmlns:D="DAV:"><D:response><D:href>'
+                   b'/d3drdb/d3drdb_20261005T120000Z/</D:href></D:response>'
+                   b'</D:multistatus>')
+        with env(FDP_TEST_SETTLE_TOKEN="t"), self._patch_catalogs(self._remote()), \
+             mock.patch.object(self._snapshot, "_request",
+                               return_value=(207, {}, listing)) as req:
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_20261005T120000Z"})
+        self.assertTrue(req.call_args_list)
+        for call in req.call_args_list:
+            self.assertEqual(call.kwargs.get("timeout"), 10, call)
+
+    def test_a_failed_settle_is_not_paid_for_twice(self):
+        with env(FDP_TEST_SETTLE_TOKEN="t"), self._patch_catalogs(self._remote()), \
+             mock.patch.object(self._snapshot, "_request",
+                               side_effect=self._snapshot.SnapshotError("timed out")) as req:
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+            self.assertEqual(req.call_count, 1)
+            self.assertTrue(store_catalog._SQL_SETTLE_FAILED)
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+            self.assertEqual(req.call_count, 1)
+
+    def test_after_a_failed_settle_an_exported_pin_is_still_reported(self):
+        store_catalog._SQL_SETTLE_FAILED = True
+        os.environ[SQL_VAR] = "d3drdb_E"
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(self._snapshot, "list_ids") as listing:
+            self.assertEqual(store_catalog.settle_sql_snapshots(),
+                             {"d3drdb": "d3drdb_E"})
+        listing.assert_not_called()
+
+    def test_no_duckdb_settles_nothing(self):
+        with self._patch_catalogs(_sql_locator()), \
+             mock.patch.object(store_catalog, "_have_duckdb", return_value=False), \
+             mock.patch.object(self._snapshot, "list_ids",
+                               return_value=["d3drdb_N"]) as listing:
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+        listing.assert_not_called()
+        self.assertNotIn(SQL_VAR, os.environ)
+
+    def test_no_locator_settles_nothing(self):
+        with self._patch_catalogs():
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+
+    def test_an_unreadable_catalog_registry_settles_nothing(self):
+        with mock.patch("toksearch.sql.mssql._discover_catalogs",
+                        side_effect=RuntimeError("bad yaml")):
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+
+    def test_a_remote_locator_without_a_token_settles_nothing(self):
+        from fdp_schema import AuthHint, SqlSnapshotLocator
+        loc = SqlSnapshotLocator(
+            name="d3drdb", base_url="https://origin.example/d3drdb",
+            id_pattern="d3drdb_*",
+            auth=AuthHint(kind="bearer_token", env="FDP_TEST_NO_SUCH_TOKEN"))
+        with env(FDP_TEST_NO_SUCH_TOKEN=None), self._patch_catalogs(loc), \
+             mock.patch.object(self._snapshot, "_request") as req:
+            self.assertEqual(store_catalog.settle_sql_snapshots(), {})
+        req.assert_not_called()
+        self.assertNotIn(SQL_VAR, os.environ)
+
+
+class TestComputeSettlesSqlSnapshots(SqlPinTest):
+    def _record(self, pipe):
+        seen = []
+
+        class Backend:
+            run_id = "r1"
+
+            def on_compute_start(self, ctx):
+                seen.append(ctx)
+
+            def on_compute_end(self, ctx, result):
+                pass
+
+        pipe.compute_serial(provenance=Backend())
+        return seen[0]
+
+    def test_a_carried_pin_is_exported_and_recorded(self):
+        pipe = Pipeline([1, 2])
+        pipe._sql_snapshots = {"d3drdb": "A"}
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "settle_sql_snapshots") as settle:
+            ctx = self._record(pipe)
+            self.assertEqual(os.environ[SQL_VAR], "A")
+        settle.assert_not_called()
+        self.assertEqual(ctx.to_dict()["store"], {"sql_snapshots": {"d3drdb": "A"}})
+
+    def test_it_sits_beside_the_catalog(self):
+        pipe = Pipeline([1, 2])
+        pipe._sql_snapshots = {"d3drdb": "A"}
+        with env(FDP_STORE_ROOT="/some/root", FDP_STORE_CATALOG=None), \
+             mock.patch.object(store_catalog, "_resolve",
+                               return_value="catalog_X"):
+            ctx = self._record(pipe)
+        self.assertEqual(ctx.store, {"catalog": "catalog_X",
+                                     "sql_snapshots": {"d3drdb": "A"}})
+
+    def test_an_unpinned_run_settles_newest_and_records_it(self):
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None), \
+             mock.patch("toksearch.sql.mssql._discover_catalogs",
+                        return_value=_catalogs(_sql_locator())), \
+             mock.patch.object(self._snapshot, "list_ids",
+                               return_value=["d3drdb_N"]):
+            ctx = self._record(Pipeline([1, 2]))
+            self.assertEqual(os.environ[SQL_VAR], "d3drdb_N")
+        self.assertEqual(ctx.store, {"sql_snapshots": {"d3drdb": "d3drdb_N"}})
+
+    def test_a_failed_resolve_records_nothing_and_the_run_proceeds(self):
+        with env(FDP_STORE_ROOT=None, FDP_STORE_CATALOG=None), \
+             mock.patch("toksearch.sql.mssql._discover_catalogs",
+                        return_value=_catalogs(_sql_locator())), \
+             mock.patch.object(self._snapshot, "resolve",
+                               side_effect=self._snapshot.SnapshotError("down")):
+            ctx = self._record(Pipeline([1, 2]))
+        self.assertNotIn(SQL_VAR, os.environ)
+        self.assertIsNone(ctx.store)
+
+    def test_a_conflicting_environment_pin_fails_the_run(self):
+        pipe = Pipeline([1])
+        pipe._sql_snapshots = {"d3drdb": "A"}
+        os.environ[SQL_VAR] = "B"
+        with self.assertRaises(self._snapshot.SnapshotConflict):
+            pipe.compute_serial()
+
+    def test_a_continuation_keeps_the_pin(self):
+        pipe = Pipeline([1])
+        pipe._sql_snapshots = {"d3drdb": "A"}
+        self.assertEqual(Pipeline(pipe)._sql_snapshots, {"d3drdb": "A"})
+        self.assertEqual(Pipeline([1])._sql_snapshots, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -73,6 +73,20 @@ class RunContext:
     code: CodeSpec
     device: Optional[str] = None
     parent_run: Optional[str] = None
+    # What this run read from, beyond its shots and signals:
+    #   {"catalog": "catalog_...",
+    #    "sql_snapshots": {"d3drdb": "d3drdb_<stamp>"}}
+    # Either key may be absent; None when neither applies. "catalog" is the
+    # versioned store's published catalog; "sql_snapshots" the SQL database
+    # snapshots compute() pinned or settled, by locator name. A dict rather
+    # than a bare string so a source can join it without a backend that
+    # reads ctx["store"]["catalog"] having to change shape.
+    store: Optional[dict] = None
+    #: The shot numbers this run reads, sorted, or None when the source
+    #: cannot name them. SourceSpec records a count and a hash, which a
+    #: backend cannot turn back into a list -- and a backend receives a
+    #: RunContext and nothing else, so a snapshot builder needs them here.
+    shots: Optional[Tuple[int, ...]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +97,8 @@ class RunContext:
             "code": self.code.to_dict(),
             "device": self.device,
             "parent_run": self.parent_run,
+            "store": self.store,
+            "shots": self.shots,
         }
 
     def input_identity(self) -> str:
@@ -92,6 +108,19 @@ class RunContext:
         same data share an input artifact even if they then do different
         things with it. That shared artifact is what connects the lineage
         graph.
+
+        It also excludes ``store``, and that is the point rather than an
+        oversight. Identity here is LOGICAL -- which shots, which signals --
+        and it is meant to dedupe across store states, so that two runs over
+        the same shots at different catalog snapshots are recognised as the
+        same input. The PHYSICAL identity (which exact bytes) belongs to the
+        provenance backend, which records the resolved versions alongside
+        this and hashes the pair; see toksearch_cmf's inputs.py, whose
+        content hash is what CMF actually dedupes on.
+
+        Folding the snapshot in here collapses those two levels into one and
+        loses the logical notion entirely. It was briefly folded in (2.15.0,
+        2.15.1) before that was noticed.
         """
         return sha256_of(
             {
