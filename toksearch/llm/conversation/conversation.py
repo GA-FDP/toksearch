@@ -230,10 +230,14 @@ class Conversation:
 
     # ---- checkpoints and shutdown ----
 
-    def checkpoint(self) -> dict | None:
-        """Checkpoint the variables; logs and returns the index (None if no worker)."""
+    def checkpoint(self, wait: float | None = None) -> dict | None:
+        """Checkpoint the variables; logs and returns the index (None if no worker).
+
+        ``wait`` bounds how long to wait for a running cell; a cell still
+        running then is logged as a failed checkpoint.
+        """
         try:
-            index = self.client.checkpoint()
+            index = self.client.checkpoint(wait=wait)
         except KernelError as e:
             self.events.append({"type": "error",
                                 "text": f"Checkpoint failed: {e}"})
@@ -249,12 +253,14 @@ class Conversation:
         return index
 
     def close(self) -> None:
-        """Checkpoint, stop the worker and disconnect the backend.
+        """Stop any running cell, checkpoint, stop the worker, disconnect.
 
-        The Session stays usable for a new Conversation (its skills server is
-        owned by the caller).
+        The checkpoint waits at most 30 s for the interrupted cell, so close()
+        never hangs on a stuck cell. The Session stays usable for a new
+        Conversation (its skills server is owned by the caller).
         """
-        self.checkpoint()
+        self.executor.interrupt()
+        self.checkpoint(wait=30)
         self.events.sync()
         self.executor.close()
         if self.session.executor is self.executor:

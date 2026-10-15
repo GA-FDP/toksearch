@@ -29,6 +29,7 @@ from toksearch.llm.backends.base import AssistantTurn
 from toksearch.llm.backends.fake import FakeBackend
 from toksearch.llm.conversation import Conversation, list_conversations
 from toksearch.llm.errors import LLMResumeError
+from toksearch.llm.kernel.client import KernelClient, KernelError
 from toksearch.llm.messages import TextBlock, ToolUseBlock
 from toksearch.llm.session import Session
 
@@ -263,6 +264,34 @@ class TestClaudeStylePersistence(_Tmp):
                          new_sid)
         restores = [e for e in conv2.events.read() if e["type"] == "restore"]
         self.assertTrue(restores[-1]["recap_used"])
+
+
+class TestClose(_Tmp):
+    def _conv_with(self, client):
+        return Conversation.create(_session([]), self.root, packages=[],
+                                   client_factory=lambda packages,
+                                   checkpoint_dir: client)
+
+    def test_close_stops_the_cell_then_checkpoints_with_a_bound(self):
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.return_value = None
+        conv = self._conv_with(client)
+        conv.close()
+        names = [c[0] for c in client.mock_calls]
+        self.assertEqual(names[:2], ["interrupt", "checkpoint"])
+        self.assertEqual(client.checkpoint.call_args.kwargs, {"wait": 30})
+        client.close.assert_called_once_with()
+
+    def test_busy_checkpoint_on_close_is_logged_not_raised(self):
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.side_effect = KernelError("busy: a cell is running")
+        conv = self._conv_with(client)
+        conv.close()
+        errors = [e["text"] for e in conv.events.read()
+                  if e["type"] == "error"]
+        self.assertEqual(errors,
+                         ["Checkpoint failed: busy: a cell is running"])
+        client.close.assert_called_once_with()
 
 
 class TestList(_Tmp):
