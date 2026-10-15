@@ -16,7 +16,9 @@
 
 plotly HTML uses include_plotlyjs="directory": plotly.min.js is written once
 beside the HTML files and every figure references it, so a conversation with
-many plots carries one copy and still works offline.
+many plots carries one copy and still works offline. An existing
+plotly.min.js is reused, so after a plotly upgrade new figures in an old
+folder load the older plotly.js (accepted limitation).
 """
 
 from pathlib import Path

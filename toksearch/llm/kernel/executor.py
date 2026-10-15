@@ -28,7 +28,13 @@ def _restart_text(r) -> str:
     lines = []
     if r.restarted:
         lines.append("The Python worker was restarted.")
-    if rep and rep.get("found"):
+    if rep and rep.get("error"):
+        where = (f"; the checkpoint was moved to {rep['quarantined']}"
+                 if rep.get("quarantined") else "")
+        lines.append("The saved variables could not be loaded "
+                     f"({rep['error']}){where}. Python started with no "
+                     "saved variables.")
+    elif rep and rep.get("found"):
         lead = ("Variables restored from the last checkpoint" if r.restarted
                 else "Variables loaded from the saved conversation")
         lines.append(f"{lead}: {', '.join(rep['restored']) or 'none'}.")

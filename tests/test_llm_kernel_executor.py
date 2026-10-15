@@ -55,6 +55,17 @@ class TestFormatResult(unittest.TestCase):
         text = format_result(ExecResult(restarted=True))
         self.assertIn("all variables were lost", text)
 
+    def test_failed_restore_names_the_error_and_quarantine(self):
+        r = ExecResult(restore={
+            "found": True, "restored": [], "not_restored": [], "origins": {},
+            "fdp_core_version": None,
+            "error": "The Python worker crashed during restore (exit code 9).",
+            "quarantined": "/c/namespace.failed-20261015T120000"})
+        text = format_result(r)
+        self.assertIn("exit code 9", text)
+        self.assertIn("/c/namespace.failed-20261015T120000", text)
+        self.assertNotIn("Variables loaded", text)
+
     def test_first_load_after_open(self):
         r = ExecResult(restore={"found": True, "restored": ["x"],
                                 "not_restored": []})
