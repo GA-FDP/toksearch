@@ -13,3 +13,9 @@
 # limitations under the License.
 
 """Persistent, restorable conversations over a Session."""
+
+from .conversation import Conversation
+from .folder import ConversationFolder, default_root, list_conversations
+
+__all__ = ["Conversation", "ConversationFolder", "default_root",
+           "list_conversations"]
