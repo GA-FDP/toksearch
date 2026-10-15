@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 
 import claude_agent_sdk as sdk
 
-from ..errors import LLMAuthError, LLMBackendError
+from ..errors import LLMAuthError, LLMBackendError, LLMConfigError, LLMResumeError
 from ..events import TurnComplete
 from .base import Backend, Callbacks
 
@@ -58,6 +58,38 @@ class ClaudeSDKBackend(Backend):
         self._client = None
         self._current_callbacks = None
         self._current_session = None
+        self._persist: dict = {}
+        self._resuming = False
+        self.session_id: str | None = None
+
+    def configure_persistence(self, *, store, cwd, session_id=None,
+                              resume=None) -> None:
+        """Keep the transcript in ``store``; set before the first send.
+
+        Pass ``session_id`` (a new UUID) to start a conversation or
+        ``resume`` (an existing one) to continue it.
+        """
+        if self._client is not None:
+            raise LLMConfigError(
+                "configure_persistence must be called before the first send")
+        if (session_id is None) == (resume is None):
+            raise ValueError("pass exactly one of session_id and resume")
+        self._persist = {"session_store": store, "cwd": str(cwd),
+                         "session_id": session_id, "resume": resume}
+        self._resuming = resume is not None
+        self.session_id = session_id or resume
+
+    def close(self) -> None:
+        """Disconnect the CLI; the next send starts a new SDK conversation."""
+        client, self._client = self._client, None
+        if client is not None and self._loop is not None:
+            try:
+                self._run_coro(client.disconnect())
+            except Exception:  # noqa: BLE001 -- closing must not fail
+                pass
+        self._persist = {}
+        self._resuming = False
+        self.session_id = None
 
     # ------------------------------------------------------------------
     # MCP tool handlers (called by the SDK's internal loop via in-process MCP)
@@ -175,37 +207,48 @@ class ClaudeSDKBackend(Backend):
 
     async def _async_turn(self, session, prompt, callbacks, max_iterations):
         from ..messages import TextBlock as _TextBlock, ToolUseBlock as _ToolUseBlock
-        client = await self._get_or_create_client(session, max_iterations)
-        await client.query(prompt)
-        # Collect assistant blocks across all messages from this turn.
         assistant_blocks: list = []
         final_text = ""
         stop_reason = "end_turn"
-        async for msg in client.receive_response():
-            if isinstance(msg, sdk.AssistantMessage):
-                for b in msg.content:
-                    if isinstance(b, sdk.TextBlock):
-                        # Native text deltas can be streamed; fire on_text once
-                        # per AssistantMessage in PR 3 (no chunking).
-                        callbacks.fire_text(b.text)
-                        assistant_blocks.append(_TextBlock(text=b.text))
-                        final_text = b.text
-                    elif isinstance(b, sdk.ToolUseBlock):
-                        # The SDK already invoked the tool via our MCP server
-                        # (which appended the tool_result to history). Record
-                        # the tool_use block in our history too.
-                        assistant_blocks.append(_ToolUseBlock(
-                            id=b.id, name=b.name, args=dict(b.input)))
-            elif isinstance(msg, sdk.ResultMessage):
-                if msg.stop_reason:
-                    if msg.stop_reason in ("end_turn", "max_iterations",
-                                            "interrupted"):
-                        stop_reason = msg.stop_reason
-                    else:
-                        stop_reason = "end_turn"
-                if msg.result:
-                    final_text = msg.result
-                break
+        try:
+            client = await self._get_or_create_client(session, max_iterations)
+            await client.query(prompt)
+            async for msg in client.receive_response():
+                if isinstance(msg, sdk.AssistantMessage):
+                    for b in msg.content:
+                        if isinstance(b, sdk.TextBlock):
+                            callbacks.fire_text(b.text)
+                            assistant_blocks.append(_TextBlock(text=b.text))
+                            final_text = b.text
+                        elif isinstance(b, sdk.ToolUseBlock):
+                            # The SDK already invoked the tool via our MCP
+                            # server (which appended the tool_result to
+                            # history). Record the tool_use block too.
+                            assistant_blocks.append(_ToolUseBlock(
+                                id=b.id, name=b.name, args=dict(b.input)))
+                elif isinstance(msg, sdk.ResultMessage):
+                    if msg.session_id:
+                        self.session_id = msg.session_id
+                    if (self._resuming and msg.is_error
+                            and not assistant_blocks):
+                        raise LLMResumeError(
+                            "The saved conversation could not be resumed: "
+                            f"{msg.result or msg.subtype}")
+                    if msg.stop_reason:
+                        if msg.stop_reason in ("end_turn", "max_iterations",
+                                                "interrupted"):
+                            stop_reason = msg.stop_reason
+                        else:
+                            stop_reason = "end_turn"
+                    if msg.result:
+                        final_text = msg.result
+                    break
+        except sdk.ClaudeSDKError as e:
+            if self._resuming:
+                raise LLMResumeError(
+                    f"The saved conversation could not be resumed: {e}") from e
+            raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
+        self._resuming = False
         if assistant_blocks:
             session._append_assistant(assistant_blocks)
         result = TurnComplete(stop_reason=stop_reason, final_text=final_text)
@@ -215,6 +258,9 @@ class ClaudeSDKBackend(Backend):
     async def _get_or_create_client(self, session, max_iterations):
         if self._client is not None:
             return self._client
+        persist = {k: v for k, v in self._persist.items() if v is not None}
+        if persist:
+            persist["session_store_flush"] = "eager"
         options = sdk.ClaudeAgentOptions(
             system_prompt=session.system_prompt,
             mcp_servers={"toksearch": self._build_mcp_server()},
@@ -225,20 +271,27 @@ class ClaudeSDKBackend(Backend):
             permission_mode="bypassPermissions",
             model=session.model,
             max_turns=max_iterations,
+            **persist,
         )
+        client = sdk.ClaudeSDKClient(options=options)
         try:
-            self._client = sdk.ClaudeSDKClient(options=options)
-            await self._client.connect()
+            await client.connect()
         except sdk.CLINotFoundError as e:
             raise LLMAuthError(
                 "Could not find the `claude` CLI. Install Claude Code "
                 "(see https://docs.claude.com/en/docs/claude-code) and "
                 "run `claude login` to use the claude-max backend.") from e
-        except sdk.CLIConnectionError as e:
+        except (sdk.CLIConnectionError, RuntimeError) as e:
+            # With a session_store, connect() also loads the saved transcript;
+            # a RuntimeError there means the store could not be read.
+            if self._resuming:
+                raise LLMResumeError(
+                    f"The saved conversation could not be resumed: {e}") from e
             raise LLMAuthError(
                 "Failed to connect to the `claude` CLI. Run `claude login` "
                 "or set CLAUDE_CODE_OAUTH_TOKEN. Original error: " + str(e)
             ) from e
         except sdk.ClaudeSDKError as e:
             raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
-        return self._client
+        self._client = client
+        return client

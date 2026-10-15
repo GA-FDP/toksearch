@@ -252,5 +252,136 @@ class TestRunConversation(unittest.TestCase):
                                       max_iterations=5)
 
 
+def _result_msg(session_id="s", is_error=False, result=""):
+    from claude_agent_sdk import ResultMessage
+    return ResultMessage(
+        subtype="error_during_execution" if is_error else "success",
+        duration_ms=1, duration_api_ms=1, is_error=is_error, num_turns=1,
+        session_id=session_id, stop_reason="end_turn", total_cost_usd=0.0,
+        usage=None, result=result, structured_output=None, model_usage=None,
+        permission_denials=None, deferred_tool_use=None, errors=None,
+        api_error_status=None, uuid="u")
+
+
+@unittest.skipUnless(_SDK_AVAILABLE, "claude-agent-sdk not installed")
+class TestPersistence(unittest.TestCase):
+    SID = "11111111-1111-4111-8111-111111111111"
+
+    def _client(self, msgs):
+        async def gen():
+            for m in msgs:
+                yield m
+        client = mock.MagicMock()
+        client.connect = mock.AsyncMock()
+        client.query = mock.AsyncMock()
+        client.disconnect = mock.AsyncMock()
+        client.receive_response = mock.MagicMock(return_value=gen())
+        return client
+
+    def _send(self, backend, client):
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ) as ctor:
+            out = backend.run_conversation(_stub_session(), "hi", Callbacks(),
+                                           max_iterations=5)
+        return out, ctor
+
+    def test_new_conversation_options(self):
+        store = object()
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=store, cwd="/conv",
+                                      session_id=self.SID)
+        _, ctor = self._send(backend,
+                             self._client([_result_msg(session_id=self.SID)]))
+        opts = ctor.call_args.kwargs["options"]
+        self.assertEqual(opts.session_id, self.SID)
+        self.assertIsNone(opts.resume)
+        self.assertIs(opts.session_store, store)
+        self.assertEqual(opts.session_store_flush, "eager")
+        self.assertEqual(str(opts.cwd), "/conv")
+        self.assertEqual(backend.session_id, self.SID)
+
+    def test_resume_options_and_session_id_update(self):
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/conv",
+                                      resume=self.SID)
+        other = "22222222-2222-4222-8222-222222222222"
+        _, ctor = self._send(backend,
+                             self._client([_result_msg(session_id=other)]))
+        opts = ctor.call_args.kwargs["options"]
+        self.assertEqual(opts.resume, self.SID)
+        self.assertIsNone(opts.session_id)
+        self.assertEqual(backend.session_id, other)
+
+    def test_exactly_one_of_session_id_and_resume(self):
+        backend = ClaudeSDKBackend()
+        with self.assertRaises(ValueError):
+            backend.configure_persistence(store=object(), cwd="/c")
+        with self.assertRaises(ValueError):
+            backend.configure_persistence(store=object(), cwd="/c",
+                                          session_id=self.SID,
+                                          resume=self.SID)
+
+    def test_connect_failure_while_resuming_is_a_resume_error(self):
+        from claude_agent_sdk import CLIConnectionError
+        from toksearch.llm.errors import LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        client = self._client([])
+        client.connect = mock.AsyncMock(
+            side_effect=CLIConnectionError("no conversation"))
+        with self.assertRaises(LLMResumeError):
+            self._send(backend, client)
+        self.assertIsNone(backend._client)
+
+    def test_error_result_before_any_reply_while_resuming(self):
+        from toksearch.llm.errors import LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        with self.assertRaises(LLMResumeError):
+            self._send(backend, self._client([_result_msg(is_error=True)]))
+
+    def test_error_result_after_resume_succeeded_is_not_a_resume_error(self):
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        client = self._client([_result_msg(session_id=self.SID)])
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ):
+            backend.run_conversation(_stub_session(), "a", Callbacks(),
+                                     max_iterations=5)
+            async def gen():
+                yield _result_msg(is_error=True)
+            client.receive_response = mock.MagicMock(return_value=gen())
+            out = backend.run_conversation(_stub_session(), "b", Callbacks(),
+                                           max_iterations=5)
+        self.assertEqual(out.stop_reason, "end_turn")
+
+    def test_configure_after_first_send_is_refused(self):
+        from toksearch.llm.errors import LLMConfigError
+        backend = ClaudeSDKBackend()
+        self._send(backend, self._client([_result_msg()]))
+        with self.assertRaises(LLMConfigError):
+            backend.configure_persistence(store=object(), cwd="/c",
+                                          session_id=self.SID)
+
+    def test_close_disconnects_and_resets(self):
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      session_id=self.SID)
+        client = self._client([_result_msg(session_id=self.SID)])
+        self._send(backend, client)
+        backend.close()
+        client.disconnect.assert_awaited_once()
+        self.assertIsNone(backend._client)
+        self.assertIsNone(backend.session_id)
+        backend.close()  # idempotent
+
+
 if __name__ == "__main__":
     unittest.main()
