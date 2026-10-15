@@ -77,6 +77,7 @@ requirements:
     - matplotlib
     - plotly
     - python-kaleido
+    - cloudpickle >=3
 
   # NOT a run dependency. toksearch is device-neutral and most of it never
   # touches a store; ptdata is imported lazily and a MAST-only install needs
