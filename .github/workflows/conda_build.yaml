@@ -45,6 +45,8 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.8.1
         with:
           pixi-version: latest
+          # The build needs only rattler-build; the dev environment is linux-64.
+          run-install: false
 
       - name: Build Conda package
         env:
