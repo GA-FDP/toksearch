@@ -259,6 +259,53 @@ variable (os.pathsep-delimited). `Session` launches its own copy of this server
 as a subprocess, so the built-in agent and an external one read byte-identical
 documentation.
 
+## Conversations
+
+`Conversation` wraps a `Session` so a chat survives quitting, a crash or a
+reboot. `run_python` runs in a separate worker process that can be
+interrupted, killed and restarted without taking the app down.
+
+```python
+from toksearch.llm.conversation import Conversation, list_conversations
+
+conv = Conversation.create(session)          # new folder under ~/FDP/sessions
+conv.send("Plot Ip for MAST shot 30420")
+conv.close()                                 # checkpoints, stops the worker
+
+latest = list_conversations()[0]["path"]
+conv = Conversation.open(session, latest)    # chat, model context, variables
+print(conv.restore_line)                     # what came back and what did not
+```
+
+Each conversation is one folder (under `$TOKSEARCH_SESSIONS_DIR`, default
+`~/FDP/sessions/<date>-<time>/`):
+
+| Path | Contents |
+|------|----------|
+| `conversation.json` | id, title, times, backend, model, versions |
+| `events.jsonl` | everything shown, appended as it happens |
+| `history.jsonl` | the message history (API-key backends resume from it) |
+| `claude/` | the `claude-max` transcript (resumed through the Agent SDK) |
+| `namespace/` | the variables: pickle files named by position (`v0001.pkl`, ...) plus `index.json` with each variable's name, size and checksum |
+| `figures/` | PNG and HTML figures, one shared `plotly.min.js` |
+
+Variables are checkpointed after every turn and on `close()`. A variable over
+1 GB, past a 4 GB total, or that cannot be pickled (an open connection) is not
+saved; the restore note names it and the cell that created it. A variable that
+cannot be loaded on restore (for example after an environment change) is
+kept in the checkpoint and tried again on the next restore. If restoring the
+checkpoint fails or crashes the worker, it is moved aside to
+`namespace.failed-<time>/`, the conversation continues with no variables, and
+the first tool result says so. If the model's own context cannot be resumed,
+the next prompt carries a summary rebuilt from `events.jsonl` instead.
+
+Stop and timeouts interrupt `run_python` and keep the variables. If the worker
+does not stop within the grace period, it and any processes it started are
+killed, and a new worker starts from the last checkpoint.
+
+Loading a checkpoint runs code from the pickles: open only conversations your
+own app wrote. Export a notebook to share a session.
+
 ## Contributors
 
 Any installed package can contribute three things to `toksearch.llm` via Python
