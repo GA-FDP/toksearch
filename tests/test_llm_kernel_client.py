@@ -36,18 +36,30 @@ from toksearch.llm.kernel.client import KernelClient, KernelError
 REPO = Path(__file__).resolve().parents[1]
 
 
+# Defined inside the worker by the cell itself, so cloudpickle saves the class
+# by value: the restore path is exercised however the tests were started (the
+# worker cannot import this module under every runner's sys.path).
+FRAGILE_SRC = """
 class Fragile:
-    """Unpickling fails while ``marker`` exists: raises, or exits the process."""
+    \"\"\"Unpickling fails while ``marker`` exists: raises, or exits.\"\"\"
 
     def __init__(self, marker, mode, value):
         self.marker, self.mode, self.value = str(marker), mode, value
 
     def __setstate__(self, state):
+        import os
         if os.path.exists(state["marker"]):
             if state["mode"] == "exit":
                 os._exit(9)
             raise RuntimeError("environment is broken")
         self.__dict__.update(state)
+"""
+
+
+def _fragile_cell(marker, mode, extra=""):
+    """Cell code binding ``frag`` (value 5) and nothing else of Fragile's."""
+    return (FRAGILE_SRC + f"frag = Fragile({str(marker)!r}, {mode!r}, 5)\n"
+            "del Fragile\n" + extra)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -580,9 +592,10 @@ class TestRestoreFailures(unittest.TestCase):
 
     def _save_fragile(self, mode):
         c = self._client()
-        c.run("frag = __import__('tests.test_llm_kernel_client', "
-              f"fromlist=['Fragile']).Fragile({str(self.marker)!r}, "
-              f"{mode!r}, 5)\nok = 1", cell=1, fig_dir=self.figs)
+        r = c.run(_fragile_cell(self.marker, mode, "ok = 1\n"), cell=1,
+                  fig_dir=self.figs)
+        self.assertFalse(r.is_error, r.stderr)
+        self.assertEqual(r.bound, ["frag", "ok"])
         c.checkpoint()
         c.close()
 
@@ -645,9 +658,9 @@ class TestRestoreFailures(unittest.TestCase):
         c1.checkpoint()                       # older, loadable checkpoint
         older = self.root / "older"
         shutil.copytree(self.ckpt, older)
-        c1.run("frag = __import__('tests.test_llm_kernel_client', "
-               f"fromlist=['Fragile']).Fragile({str(self.marker)!r}, "
-               "'exit', 5)", cell=2, fig_dir=self.figs)
+        r = c1.run(_fragile_cell(self.marker, "exit"), cell=2,
+                   fig_dir=self.figs)
+        self.assertFalse(r.is_error, r.stderr)
         c1.checkpoint()                       # current: crashes on load
         c1.close()
         shutil.copytree(older, self.ckpt.with_name("namespace.old"))
@@ -681,9 +694,8 @@ class TestBlockedCheckpoint(unittest.TestCase):
             figs = str(root / "figures")
             c1 = KernelClient(packages=[], checkpoint_dir=ckpt)
             self.addCleanup(c1.close)
-            c1.run("frag = __import__('tests.test_llm_kernel_client', "
-                   f"fromlist=['Fragile']).Fragile({str(marker)!r}, "
-                   "'exit', 5)", cell=1, fig_dir=figs)
+            r = c1.run(_fragile_cell(marker, "exit"), cell=1, fig_dir=figs)
+            self.assertFalse(r.is_error, r.stderr)
             c1.checkpoint()
             c1.close()
             old = ckpt.with_name("namespace.old")
