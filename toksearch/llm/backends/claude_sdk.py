@@ -32,6 +32,7 @@ Implementation notes:
 """
 
 import asyncio
+import re
 import threading
 from typing import TYPE_CHECKING
 
@@ -46,15 +47,27 @@ if TYPE_CHECKING:
 
 # Errors that say nothing about the saved transcript: retrying with a recap
 # would only lose the real context, so they are reported as they are.
-_ACCOUNT_ERROR_MARKERS = ("rate limit", "usage limit", "limit reached",
-                          "overloaded", "authentication", "login",
-                          "unauthorized", "401", "429")
-_AUTH_ERROR_MARKERS = ("authentication", "login", "unauthorized", "401")
+# Status codes match only as whole tokens, and only after session UUIDs and
+# paths are removed, since those often contain the digits 401 or 429.
+_AUTH_PHRASES = ("please run /login", "claude login", "not logged in",
+                 "invalid api key", "authentication_error", "oauth token",
+                 "authentication", "unauthorized")
+_LIMIT_PHRASES = ("rate limit", "rate_limit", "usage limit", "limit reached",
+                  "overloaded")
+_ACCOUNT_ERROR_MARKERS = (_AUTH_PHRASES + _LIMIT_PHRASES, ("401", "429"))
+_AUTH_ERROR_MARKERS = (_AUTH_PHRASES, ("401",))
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}"
+                      r"-[0-9a-f]{12}", re.IGNORECASE)
+_PATH_RE = re.compile(r"\S*[/\\]\S*")
 
 
 def _mentions(text: str, markers) -> bool:
-    text = text.lower()
-    return any(m in text for m in markers)
+    phrases, codes = markers
+    text = _UUID_RE.sub(" ", text).lower()
+    if any(p in text for p in phrases):
+        return True
+    bare = _PATH_RE.sub(" ", text)
+    return any(re.search(rf"\b{c}\b", bare) for c in codes)
 
 
 def _result_error_text(msg) -> str:

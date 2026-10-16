@@ -500,6 +500,52 @@ class TestPersistence(unittest.TestCase):
         backend.interrupt()
         backend.close()
 
+    def _resume_send(self, client):
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        return self._send(backend, client)
+
+    def test_missing_conversation_whose_uuid_holds_401_429(self):
+        from toksearch.llm.errors import LLMResumeError
+        msg = _result_msg(is_error=True, result=(
+            "No conversation found with session ID: "
+            "0f401a29-4011-4429-8401-a401b429c401"))
+        with self.assertRaises(LLMResumeError):
+            self._resume_send(self._client([msg]))
+
+    def test_connect_error_naming_a_path_with_429_is_a_resume_error(self):
+        from toksearch.llm.errors import LLMResumeError
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError(
+            "could not read /tmp/claude-429/sessions/x 401/y.jsonl"))
+        with self.assertRaises(LLMResumeError):
+            self._resume_send(client)
+
+    def test_genuine_429_is_a_backend_error(self):
+        from toksearch.llm.errors import LLMBackendError, LLMResumeError
+        msg = _result_msg(is_error=True,
+                          result="API Error: 429 rate_limit_error")
+        with self.assertRaises(LLMBackendError) as cm:
+            self._resume_send(self._client([msg]))
+        self.assertNotIsInstance(cm.exception, LLMResumeError)
+
+    def test_invalid_api_key_at_connect_is_an_auth_error(self):
+        from toksearch.llm.errors import LLMAuthError
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError(
+            "Invalid API key \u00b7 Please run /login"))
+        with self.assertRaises(LLMAuthError):
+            self._resume_send(client)
+
+    def test_the_word_login_alone_is_not_an_auth_error(self):
+        from toksearch.llm.errors import LLMResumeError
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError(
+            "no transcript in /home/login/.claude"))
+        with self.assertRaises(LLMResumeError):
+            self._resume_send(client)
+
     def test_configure_after_first_send_is_refused(self):
         from toksearch.llm.errors import LLMConfigError
         backend = ClaudeSDKBackend()
