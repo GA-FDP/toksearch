@@ -102,6 +102,48 @@ class TestEventLog(unittest.TestCase):
             self.assertEqual(len(log.read()), 1)
 
 
+class TestEventLogConcurrency(unittest.TestCase):
+    def test_threads_appending_large_lines_never_interleave(self):
+        import threading
+        with TemporaryDirectory() as tmp:
+            log = EventLog(Path(tmp) / "events.jsonl")
+            payload = "x" * 20_000
+
+            def worker(n):
+                for i in range(200):
+                    log.append({"type": "cell", "w": n, "i": i,
+                                "stdout": payload})
+            threads = [threading.Thread(target=worker, args=(n,))
+                       for n in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            lines = log.path.read_text().splitlines()
+            self.assertEqual(len(lines), 8 * 200)
+            for line in lines:
+                json.loads(line)        # every line parses
+            self.assertEqual(len(log.read()), 8 * 200)
+
+    def test_each_event_is_one_write_of_a_whole_line(self):
+        import toksearch.llm.conversation.events as events_mod
+        real_write = os.write
+        writes = []
+
+        def spy(fd, data):
+            writes.append(bytes(data))
+            return real_write(fd, data)
+        with TemporaryDirectory() as tmp:
+            log = EventLog(Path(tmp) / "events.jsonl")
+            with mock.patch.object(events_mod.os, "write", side_effect=spy):
+                log.append({"type": "user", "text": "hi"})
+                log.append({"type": "cell", "stdout": "y" * 50_000})
+            self.assertEqual(len(writes), 2)
+            for w in writes:
+                self.assertTrue(w.endswith(b"\n"))
+                json.loads(w)
+
+
 def _dead_pid() -> int:
     import subprocess
     p = subprocess.Popen(["true"])

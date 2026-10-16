@@ -14,14 +14,17 @@
 
 """events.jsonl: an append-only log of everything shown in a conversation.
 
-Each event is one JSON line, written and flushed as it happens, so a crash
-loses at most the line being written; read() skips a truncated last line.
+Each event is one JSON line, written as it happens with a single write()
+on an O_APPEND descriptor, so lines from concurrent threads never
+interleave and a crash loses at most the line being written; read() skips
+a truncated last line.
 Event types: user, assistant_text, tool_call, tool_result, cell, turn_end,
 checkpoint, restore, error.
 """
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -29,12 +32,20 @@ from pathlib import Path
 class EventLog:
     def __init__(self, path):
         self.path = Path(path)
+        self._lock = threading.Lock()
 
     def append(self, event: dict) -> dict:
         event = {"t": time.time(), **event}
-        with open(self.path, "a") as f:
-            f.write(json.dumps(event, default=str) + "\n")
-            f.flush()
+        data = (json.dumps(event, default=str) + "\n").encode()
+        with self._lock:
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+                         0o644)
+            try:
+                view = memoryview(data)
+                while view:     # one write unless the kernel takes less
+                    view = view[os.write(fd, view):]
+            finally:
+                os.close(fd)
         return event
 
     def sync(self) -> None:
