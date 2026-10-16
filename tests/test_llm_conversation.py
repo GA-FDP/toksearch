@@ -336,6 +336,23 @@ class TestResumeFallback(_Tmp):
         meta = json.loads((path / "conversation.json").read_text())
         self.assertEqual(meta["claude_session_id"], sid)
 
+    def test_after_a_failed_retry_the_next_send_still_carries_the_recap(self):
+        path, _ = self._folder_with_transcript()
+        record = []
+        sess = _session([], record=record,
+                        backend_cls=_ResumeFailingBackend)  # retry fails
+        conv = Conversation.open(sess, path, packages=[])
+        self.addCleanup(conv.close)
+        with self.assertRaises(RuntimeError):
+            conv.send("second")
+        sess.backend._turns.append(_text("back"))
+        conv.send("third time")
+        prompt = record[-1]["user_message"]
+        self.assertIn("Summary of the earlier conversation", prompt)
+        self.assertIn("User: first", prompt)
+        self.assertEqual(prompt.count("third time"), 1)
+        self.assertTrue(prompt.endswith("third time"))
+
     def test_recap_excludes_the_current_prompt(self):
         path, _ = self._folder_with_transcript()
         record = []

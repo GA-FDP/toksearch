@@ -278,6 +278,9 @@ class Conversation:
         note, line = restore_messages(index, saved, current,
                                       recap=build_recap(earlier))
         self.restore_line = line
+        # Kept until a turn succeeds: if this retry fails too, the next
+        # send still gives the fresh SDK conversation the recap.
+        self._pending_note = note
         self.events.append({"type": "restore", "line": line,
                             "recap_used": True})
         return f"{note}\n\n{prompt}"
