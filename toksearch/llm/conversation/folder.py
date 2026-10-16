@@ -22,6 +22,8 @@ namespace/ (variable checkpoint), figures/, and .lock while it is open.
 import json
 import os
 import socket
+import subprocess
+import sys
 import uuid
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -41,10 +43,55 @@ def _toksearch_version() -> str | None:
 
 
 class ConversationInUse(RuntimeError):
-    """The conversation is open in another process."""
+    """The conversation is open in another process.
+
+    ``host``, ``pid`` and ``since`` describe the holder, for a message such
+    as "open on <host> since <since>"; any may be None if unknown.
+    """
+
+    def __init__(self, message, *, host=None, pid=None, since=None):
+        super().__init__(message)
+        self.host, self.pid, self.since = host, pid, since
 
 
 LOCK_NAME = ".lock"
+
+
+def _machine_id() -> str | None:
+    """This machine's hardware address as hex, or None if it has none.
+
+    uuid.getnode() falls back to a random number (multicast bit set) that
+    changes per process, which would make every lock look foreign.
+    """
+    node = uuid.getnode()
+    if node >> 40 & 1:
+        return None
+    return format(node, "012x")
+
+
+def _process_start(pid) -> str | None:
+    """An opaque start-time stamp for ``pid``, or None if it cannot be read.
+
+    Linux: field 22 of /proc/<pid>/stat (clock ticks since boot). macOS:
+    ``ps -o lstart=``. Distinguishes a reused pid from the original holder.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    try:
+        stat = open(f"/proc/{pid}/stat").read()
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        pass
+    if sys.platform == "darwin":
+        try:
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=2)
+            return out.stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            return None
+    return None
 
 
 def _pid_is_dead(pid) -> bool:
@@ -55,6 +102,27 @@ def _pid_is_dead(pid) -> bool:
     except (PermissionError, ValueError, TypeError, OverflowError):
         return False
     return False
+
+
+def _lock_is_stale(held: dict) -> bool:
+    """True only if the holder is provably gone: same machine, process dead.
+
+    Machine identity is the hardware address when both sides have one, else
+    the hostname. A live pid whose start time differs from the recorded one
+    is a reused pid, so the holder is dead.
+    """
+    mine = _machine_id()
+    if held.get("machine") and mine:
+        same_machine = held["machine"] == mine
+    else:
+        same_machine = held.get("host") == socket.gethostname()
+    if not same_machine or "pid" not in held:
+        return False
+    if _pid_is_dead(held["pid"]):
+        return True
+    recorded = held.get("start")
+    current = _process_start(held["pid"])
+    return bool(recorded and current and recorded != current)
 
 
 class ConversationFolder:
@@ -119,26 +187,37 @@ class ConversationFolder:
         except (OSError, ValueError):
             return {}
 
+    def _lock_info(self) -> dict:
+        info = {"pid": os.getpid(), "host": socket.gethostname(),
+                "machine": _machine_id(),
+                "start": _process_start(os.getpid()),
+                "since": datetime.now().isoformat(timespec="seconds")}
+        return {k: v for k, v in info.items() if v is not None}
+
     def _create_lock(self) -> bool:
         try:
             fd = os.open(self.lock_path,
                          os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             return False
-        info = {"pid": os.getpid(), "host": socket.gethostname(),
-                "since": datetime.now().isoformat(timespec="seconds")}
         with os.fdopen(fd, "w") as f:
-            json.dump(info, f)
+            json.dump(self._lock_info(), f)
         return True
+
+    def _in_use(self, held: dict) -> ConversationInUse:
+        return ConversationInUse(
+            f"Conversation {self.path} is open in another process "
+            f"(host {held.get('host', '?')}, pid {held.get('pid', '?')}, "
+            f"since {held.get('since', '?')}).",
+            host=held.get("host"), pid=held.get("pid"),
+            since=held.get("since"))
 
     def acquire_lock(self) -> None:
         """Mark the conversation open here; ConversationInUse if it is elsewhere."""
         if self._create_lock():
             return
         held = self._read_lock()
-        stale = (held.get("host") == socket.gethostname()
-                 and "pid" in held and _pid_is_dead(held["pid"]))
-        if stale:
+        if _lock_is_stale(held):
             try:
                 os.unlink(self.lock_path)
             except FileNotFoundError:
@@ -146,10 +225,14 @@ class ConversationFolder:
             if self._create_lock():
                 return
             held = self._read_lock()    # another process won the race
-        raise ConversationInUse(
-            f"Conversation {self.path} is open in another process "
-            f"(host {held.get('host', '?')}, pid {held.get('pid', '?')}, "
-            f"since {held.get('since', '?')}).")
+        raise self._in_use(held)
+
+    def break_lock(self) -> None:
+        """Remove the lock whoever holds it ("open anyway"); the caller confirms."""
+        try:
+            os.unlink(self.lock_path)
+        except FileNotFoundError:
+            pass
 
     def release_lock(self) -> None:
         """Remove the lock if this process holds it; safe to call twice."""

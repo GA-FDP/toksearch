@@ -576,6 +576,32 @@ class TestCrash(_Tmp):
         self.assertIn("y", cells[-1]["restore"]["restored"])
 
 
+class TestForceOpen(_Tmp):
+    def test_force_open_breaks_a_live_lock_elsewhere(self):
+        import socket
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.return_value = None
+        factory = lambda packages, checkpoint_dir: client  # noqa: E731
+        conv = Conversation.create(_session([]), self.root, packages=[],
+                                   client_factory=factory)
+        conv.close()
+        lock = conv.folder.path / ".lock"
+        lock.write_text(json.dumps({"pid": os.getpid(),
+                                    "host": "elsewhere.example",
+                                    "machine": "0000000000aa",
+                                    "since": "x"}))
+        with self.assertRaises(ConversationInUse):
+            Conversation.open(_session([]), conv.folder.path, packages=[],
+                              client_factory=factory)
+        again = Conversation.open(_session([]), conv.folder.path,
+                                  packages=[], client_factory=factory,
+                                  force=True)
+        self.addCleanup(again.close)
+        info = json.loads(lock.read_text())
+        self.assertEqual((info["pid"], info["host"]),
+                         (os.getpid(), socket.gethostname()))
+
+
 class TestList(_Tmp):
     def test_list_conversations_is_reexported(self):
         conv = Conversation.create(_session([]), self.root, packages=[])

@@ -126,12 +126,20 @@ class Conversation:
         return conv
 
     @classmethod
-    def open(cls, session, path, *, packages=None,
+    def open(cls, session, path, *, packages=None, force=False,
              client_factory=KernelClient) -> "Conversation":
-        """Reopen the conversation at ``path``; packages default as in create."""
+        """Reopen the conversation at ``path``; packages default as in create.
+
+        Raises ConversationInUse if another process has it open. With
+        ``force=True`` the lock is broken first ("open anyway"); the caller
+        should confirm with the user, since two processes writing one
+        folder corrupt it.
+        """
         packages = _worker_packages(session, packages)
         folder = ConversationFolder(Path(path))
         meta = folder.read_meta()
+        if force:
+            folder.break_lock()
         folder.acquire_lock()
         try:
             return cls._open_locked(session, folder, meta, packages,

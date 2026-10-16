@@ -203,6 +203,63 @@ class TestLock(unittest.TestCase):
         self.folder.release_lock()
         self.assertTrue((self.folder.path / ".lock").exists())
 
+    def test_lock_records_machine_and_start_time(self):
+        from toksearch.llm.conversation import folder as folder_mod
+        self.folder.acquire_lock()
+        info = json.loads((self.folder.path / ".lock").read_text())
+        self.folder.release_lock()
+        self.assertEqual(info.get("machine"), folder_mod._machine_id())
+        self.assertEqual(info.get("start"),
+                         folder_mod._process_start(os.getpid()))
+        self.assertIsNotNone(info.get("start"))     # Linux /proc
+
+    def test_same_machine_other_hostname_dead_pid_is_taken_over(self):
+        from toksearch.llm.conversation import folder as folder_mod
+        machine = folder_mod._machine_id()
+        if machine is None:
+            self.skipTest("no hardware machine id here")
+        self._write_lock(pid=_dead_pid(), host="renamed.example",
+                         machine=machine, since="x")
+        self.folder.acquire_lock()
+        info = json.loads((self.folder.path / ".lock").read_text())
+        self.assertEqual(info["pid"], os.getpid())
+        self.folder.release_lock()
+
+    def test_other_machine_same_hostname_is_in_use(self):
+        import socket
+        self._write_lock(pid=_dead_pid(), host=socket.gethostname(),
+                         machine="0000000000aa", since="x")
+        with self.assertRaises(ConversationInUse):
+            self.folder.acquire_lock()
+
+    def test_live_pid_with_another_start_time_is_taken_over(self):
+        import socket
+        from toksearch.llm.conversation import folder as folder_mod
+        self._write_lock(pid=os.getpid(), host=socket.gethostname(),
+                         machine=folder_mod._machine_id(),
+                         start="not-this-process", since="x")
+        self.folder.acquire_lock()
+        info = json.loads((self.folder.path / ".lock").read_text())
+        self.assertEqual(info["start"], folder_mod._process_start(os.getpid()))
+        self.folder.release_lock()
+
+    def test_in_use_carries_holder_details(self):
+        self._write_lock(pid=4242, host="elsewhere.example",
+                         machine="0000000000aa", since="2026-01-01T00:00:00")
+        with self.assertRaises(ConversationInUse) as cm:
+            self.folder.acquire_lock()
+        e = cm.exception
+        self.assertEqual((e.host, e.pid, e.since),
+                         ("elsewhere.example", 4242, "2026-01-01T00:00:00"))
+
+    def test_break_lock(self):
+        self._write_lock(pid=4242, host="elsewhere.example", since="x")
+        self.folder.break_lock()
+        self.assertFalse((self.folder.path / ".lock").exists())
+        self.folder.break_lock()        # nothing to break is fine
+        self.folder.acquire_lock()
+        self.folder.release_lock()
+
     def test_list_ignores_the_lock(self):
         before = list_conversations(self._tmp.name)[0]["size_bytes"]
         self.folder.acquire_lock()
