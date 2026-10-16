@@ -122,14 +122,21 @@ class Conversation:
     def _is_persistent_backend(self) -> bool:
         return hasattr(self.session.backend, "configure_persistence")
 
-    def _start_backend_fresh(self) -> None:
+    def _start_backend_fresh(self, *, record: bool = True) -> None:
+        """Start a new SDK conversation; ``record`` writes its id to meta.
+
+        The recap fallback passes record=False: the id is recorded only
+        after a turn succeeds, so a failed retry leaves the old transcript
+        to be tried again on the next open.
+        """
         if not self._is_persistent_backend():
             return
         sid = str(uuid.uuid4())
         self.session.backend.configure_persistence(
             store=FolderSessionStore(self.folder.claude_dir),
             cwd=self.folder.path, session_id=sid)
-        self.folder.update_meta(claude_session_id=sid)
+        if record:
+            self.folder.update_meta(claude_session_id=sid)
 
     def _restore_model_context(self, meta: dict) -> bool:
         """Restore what the model remembers; False means a recap is needed."""
@@ -178,6 +185,7 @@ class Conversation:
              on_tool_result=None, on_event=None, confirm=None):
         if not self.folder.read_meta().get("title"):
             self.folder.update_meta(title=prompt[:TITLE_LENGTH])
+        n_before = len(self.events.read())
         self.events.append({"type": "user", "text": prompt})
         callbacks = dict(
             on_text=_chain(self._log_text, on_text),
@@ -193,7 +201,7 @@ class Conversation:
                 result = self.session.send(model_prompt, **callbacks)
             except LLMResumeError:
                 del self.session.history[mark:]
-                model_prompt = self._fall_back_to_recap(prompt)
+                model_prompt = self._fall_back_to_recap(prompt, n_before)
                 result = self.session.send(model_prompt, **callbacks)
         except Exception as e:
             self.events.append({"type": "error",
@@ -208,10 +216,12 @@ class Conversation:
         self._after_turn()
         return result
 
-    def _fall_back_to_recap(self, prompt: str) -> str:
+    def _fall_back_to_recap(self, prompt: str, n_before: int) -> str:
         self.session.backend.close()
-        self._start_backend_fresh()
-        earlier = self.events.read()[:-1]   # without the user line just logged
+        self._start_backend_fresh(record=False)
+        # Only events before this turn: not the prompt, nor anything the
+        # failed attempt logged.
+        earlier = self.events.read()[:n_before]
         index, saved, current = self._restore_parts or (None, None, None)
         note, line = restore_messages(index, saved, current,
                                       recap=build_recap(earlier))

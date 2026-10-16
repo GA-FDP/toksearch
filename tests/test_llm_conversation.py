@@ -302,6 +302,53 @@ class TestClaudeStylePersistence(_Tmp):
         self.assertTrue(restores[-1]["recap_used"])
 
 
+class _LateResumeFailingBackend(_ResumeFailingBackend):
+    """The failed resume attempt shows some text before it fails."""
+
+    def run_conversation(self, session, new_user_message, callbacks,
+                         max_iterations):
+        if self.fail_next:
+            callbacks.fire_text("partial reply")
+        return super().run_conversation(session, new_user_message, callbacks,
+                                        max_iterations)
+
+
+class TestResumeFallback(_Tmp):
+    def _folder_with_transcript(self):
+        sess = _session([_text("hi")], backend_cls=_ResumeFailingBackend)
+        conv = Conversation.create(sess, self.root, packages=[])
+        conv.send("first")
+        sid = conv.folder.read_meta()["claude_session_id"]
+        conv.folder.claude_dir.mkdir()
+        (conv.folder.claude_dir / f"{sid}.jsonl").write_text('{"type":"x"}\n')
+        conv.close()
+        return conv.folder.path, sid
+
+    def test_failed_retry_keeps_the_saved_session_id(self):
+        path, sid = self._folder_with_transcript()
+        sess = _session([], backend_cls=_ResumeFailingBackend)  # retry fails
+        conv = Conversation.open(sess, path, packages=[])
+        self.addCleanup(conv.close)
+        with self.assertRaises(RuntimeError):
+            conv.send("second")
+        meta = json.loads((path / "conversation.json").read_text())
+        self.assertEqual(meta["claude_session_id"], sid)
+
+    def test_recap_excludes_the_current_prompt(self):
+        path, _ = self._folder_with_transcript()
+        record = []
+        sess = _session([_text("back")], record=record,
+                        backend_cls=_LateResumeFailingBackend)
+        conv = Conversation.open(sess, path, packages=[])
+        self.addCleanup(conv.close)
+        conv.send("zebra question")
+        prompt = record[0]["user_message"]
+        self.assertEqual(prompt.count("zebra question"), 1)
+        self.assertTrue(prompt.endswith("zebra question"))
+        self.assertIn("User: first", prompt)
+        self.assertNotIn("partial reply", prompt)
+
+
 class TestClose(_Tmp):
     def _conv_with(self, client):
         return Conversation.create(_session([]), self.root, packages=[],
