@@ -20,8 +20,9 @@ KeyboardInterrupt only while user code or a figure save runs, so a cell can
 be stopped without losing the namespace and a stray SIGINT can never end the
 worker. The worker leads its own process group (the client signals the whole
 group, so processes a cell started die with it) and kills that group when
-its parent dies, closes the pipe, or sends SIGTERM. Captured stdout/stderr
-are bounded.
+its parent dies or closes the pipe (the client also SIGKILLs the group when
+its interpreter exits). SIGTERM keeps its default action, so it ends the
+worker even while a cell runs C code. Captured stdout/stderr are bounded.
 
 Accepted limitations: bound names are tracked by ``id()``, so a rebind that
 happens to reuse an address is missed; baseline names (``np``, ``toksearch``,
@@ -178,7 +179,7 @@ class Worker:
         before = self._ids()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
-                self._interruptible = True
+                self._enter_interruptible()   # honours a SIGINT during setup
                 exec(req["code"], self.ns)  # noqa: S102 -- intentional
                 self._interruptible = False
             except KeyboardInterrupt:
@@ -283,9 +284,6 @@ def worker_main(conn, packages: list[str] | None, ppid: int | None = None) -> No
     except OSError:
         pass
     signal.signal(signal.SIGINT, signal.SIG_IGN)   # until Worker installs its handler
-    # multiprocessing terminates daemonic workers with SIGTERM when the
-    # parent interpreter exits without close(): take the group along.
-    signal.signal(signal.SIGTERM, lambda signum, frame: _end_group())
     if ppid is None:
         ppid = os.getppid()
     threading.Thread(target=_watch_parent, args=(ppid,), daemon=True,

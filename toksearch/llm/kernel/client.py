@@ -22,13 +22,23 @@ a checkpoint, the checkpoint is loaded and the report is attached to the
 next ExecResult. A restore that fails or crashes the worker moves the
 checkpoint and every older copy aside (``<dir>.failed-<stamp>``) instead of
 deleting them, and the worker starts empty.
+
+The worker's process group is SIGKILLed when the client closes and, through
+an atexit hook registered at each start (so it runs before multiprocessing's
+own exit handler), when the interpreter exits without close(). The worker
+also watches for its parent's death, but that watcher is a Python thread: it
+cannot act while a cell holds the GIL in C code (e.g. ``sum(range(10**12))``)
+and only takes effect once the cell returns to Python.
 """
 
+import atexit
+import functools
 import multiprocessing as mp
 import os
 import signal
 import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +48,18 @@ from .worker import worker_main
 
 _POLL = 0.2       # seconds between checks while waiting for the worker
 _KEEP = object()  # restart(): keep the current checkpoint_dir
+
+
+def _kill_group(pid: int, sig=signal.SIGKILL) -> None:
+    """Send ``sig`` to the group led by ``pid``, else to ``pid`` alone."""
+    try:
+        os.killpg(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        # The child may not have called setsid() yet.
+        try:
+            os.kill(pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass   # gone (macOS reports EPERM for a zombie's group)
 
 
 class KernelError(RuntimeError):
@@ -82,6 +104,8 @@ class KernelClient:
         self._pending_restore = None
         self._closing = False
         self._blocked: str | None = None   # checkpoint dir not safe to write
+        self._blocked_dir: Path | None = None
+        self._exit_kill = None   # (atexit callback, weakref finalizer)
 
     @property
     def running(self) -> bool:
@@ -91,15 +115,25 @@ class KernelClient:
 
     def _signal(self, sig) -> None:
         """Send ``sig`` to the worker's process group (or just the worker)."""
-        pid = self._proc.pid
-        try:
-            os.killpg(pid, sig)
-        except (ProcessLookupError, PermissionError):
-            # The child may not have called setsid() yet.
-            try:
-                os.kill(pid, sig)
-            except (ProcessLookupError, PermissionError):
-                pass   # gone (macOS reports EPERM for a zombie's group)
+        _kill_group(self._proc.pid, sig)
+
+    def _arm_exit_kill(self, pid: int) -> None:
+        # Registered after proc.start(), hence after multiprocessing's exit
+        # handler, so it runs first (atexit is LIFO): that handler would
+        # SIGTERM and join() a worker stuck in C forever. The callback holds
+        # only the pid, never the client; collecting the client disarms it.
+        callback = functools.partial(_kill_group, pid)
+        atexit.register(callback)
+        finalizer = weakref.finalize(self, atexit.unregister, callback)
+        finalizer.atexit = False
+        self._exit_kill = (callback, finalizer)
+
+    def _disarm_exit_kill(self) -> None:
+        if self._exit_kill is not None:
+            callback, finalizer = self._exit_kill
+            atexit.unregister(callback)
+            finalizer.detach()
+            self._exit_kill = None
 
     def _spawn(self) -> None:
         parent, child = self._ctx.Pipe()
@@ -107,6 +141,7 @@ class KernelClient:
                                  args=(child, self.packages, os.getpid()),
                                  daemon=True)
         proc.start()
+        self._arm_exit_kill(proc.pid)
         child.close()
         try:
             if not parent.poll(self._startup_timeout):
@@ -114,16 +149,17 @@ class KernelClient:
                                   f"{self._startup_timeout:.0f} s.")
             parent.recv()
         except EOFError:
+            _kill_group(proc.pid)
             proc.join(5)
             parent.close()
+            self._disarm_exit_kill()
             raise KernelError("The Python worker exited during startup "
                               f"(exit code {proc.exitcode}).") from None
         except KernelError:
-            self._proc = proc
-            self._signal(signal.SIGKILL)
-            self._proc = None
+            _kill_group(proc.pid)
             proc.join(5)
             parent.close()
+            self._disarm_exit_kill()
             raise
         self._proc, self._conn = proc, parent
 
@@ -151,6 +187,7 @@ class KernelClient:
                 # Copies are left in place: never restore or overwrite them
                 # until the caller picks another checkpoint dir.
                 self._blocked = why
+                self._blocked_dir = self.checkpoint_dir.resolve()
                 report["checkpoint_blocked"] = True
             self._pending_restore = report
             return
@@ -193,6 +230,7 @@ class KernelClient:
             self._conn.close()
         if self._proc is not None:
             self._proc.join(5)
+        self._disarm_exit_kill()
         self._proc = self._conn = None
 
     def _ensure_started(self) -> None:
@@ -215,6 +253,7 @@ class KernelClient:
         try:
             reply = self._conn.recv()
         except EOFError:
+            self._signal(signal.SIGKILL)   # its children, before reaping
             self._proc.join(5)
             code = self._proc.exitcode
             self._close()
@@ -286,6 +325,9 @@ class KernelClient:
         return ExecResult(**reply)
 
     def _crashed(self) -> ExecResult:
+        # Kill what the dead worker left in its group before reaping it, so
+        # the group id cannot be reused in between.
+        self._signal(signal.SIGKILL)
         self._proc.join(5)
         code = self._proc.exitcode
         self._close()
@@ -321,7 +363,8 @@ class KernelClient:
         if target is None:
             raise ValueError("checkpoint() needs out_dir when the client has "
                              "no checkpoint_dir")
-        if self._blocked is not None and Path(target) == self.checkpoint_dir:
+        if (self._blocked is not None
+                and Path(target).resolve() == self._blocked_dir):
             raise KernelError(f"checkpoint blocked: {self._blocked}")
         if not self._lock.acquire(timeout=-1 if wait is None else wait):
             raise KernelError("busy: a cell is running")
@@ -348,8 +391,8 @@ class KernelClient:
             if checkpoint_dir is not _KEEP:
                 new = (Path(checkpoint_dir)
                        if checkpoint_dir is not None else None)
-                if new != self.checkpoint_dir:
-                    self._blocked = None
+                if new is None or new.resolve() != self._blocked_dir:
+                    self._blocked = self._blocked_dir = None
                 self.checkpoint_dir = new
             self._closing = False
 

@@ -389,6 +389,74 @@ class TestProcessLifetime(unittest.TestCase):
             self.assertTrue(_wait_gone(pid, 5.0),
                             "sleep outlived its crashed worker")
 
+    def test_exit_while_a_cell_is_stuck_in_c_does_not_hang(self):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        started = Path(tmp.name) / "started"
+        cell = Path(tmp.name) / "cell.py"
+        cell.write_text(f"open({str(started)!r}, 'w').close()\n"
+                        "sum(range(10**12))\n")
+        helper, worker, sleeper = self._helper(
+            "import os, threading\n"
+            f"code = open({str(cell)!r}).read()\n"
+            "threading.Thread(target=c.run, daemon=True, args=(code,),\n"
+            "                 kwargs=dict(cell=2, fig_dir=sys.argv[1],\n"
+            "                             timeout=3600)).start()\n"
+            f"while not os.path.exists({str(started)!r}):\n"
+            "    time.sleep(0.05)\n")
+        try:
+            helper.wait(15)
+        except subprocess.TimeoutExpired:
+            self.fail("the parent hung on exit while a cell ran C code")
+        self.assertTrue(_wait_gone(worker, 5.0), "the worker outlived its parent")
+        self.assertTrue(_wait_gone(sleeper, 5.0), "sleep outlived the parent")
+
+    def test_exit_hook_is_removed_by_close_and_by_collection(self):
+        import atexit
+        import gc
+        import weakref
+        import toksearch.llm.kernel.client as client_mod
+        registered, unregistered = [], []
+        real_register, real_unregister = atexit.register, atexit.unregister
+
+        def register(f, *a, **k):
+            registered.append(f)
+            return real_register(f, *a, **k)
+
+        def unregister(f):
+            unregistered.append(f)
+            return real_unregister(f)
+
+        with TemporaryDirectory() as tmp, \
+                mock.patch.object(client_mod.atexit, "register",
+                                  side_effect=register), \
+                mock.patch.object(client_mod.atexit, "unregister",
+                                  side_effect=unregister):
+            c = KernelClient(packages=[])
+            c.run("pass", cell=1, fig_dir=tmp)
+            self.assertEqual(len(registered), 1)
+            c.close()
+            self.assertEqual(unregistered, registered)
+            c2 = KernelClient(packages=[])
+            pid = int(c2.run("import os; print(os.getpid())", cell=1,
+                             fig_dir=tmp).stdout)
+            self.addCleanup(_kill_quietly, pid)
+            self.assertEqual(len(registered), 2)
+            ref = weakref.ref(c2)
+            del c2
+            gc.collect()
+            self.assertIsNone(ref(), "the exit hook kept the client alive")
+            self.assertEqual(unregistered, registered)
+            # The worker ends on pipe EOF; reap it (it is our child).
+            import multiprocessing
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                multiprocessing.active_children()
+                if not _pid_alive(pid):
+                    break
+                time.sleep(0.05)
+            self.assertFalse(_pid_alive(pid))
+
     def test_close_kills_processes_a_cell_started(self):
         with TemporaryDirectory() as tmp:
             for i in range(3):   # the race was on close's pipe EOF
@@ -643,6 +711,9 @@ class TestBlockedCheckpoint(unittest.TestCase):
             with self.assertRaises(KernelError) as cm:
                 c2.checkpoint()
             self.assertIn("checkpoint blocked", str(cm.exception))
+            (root / "sub").mkdir()
+            with self.assertRaises(KernelError):   # same dir, other spelling
+                c2.checkpoint(root / "sub" / ".." / "namespace")
             self.assertEqual({p.name: p.read_bytes() for p in old.iterdir()},
                              before)
             # a crash does not restore the copy left behind either
@@ -677,6 +748,30 @@ class TestWorkerUnits(unittest.TestCase):
         self.assertEqual([f["error"] for f in figures],
                          ["skipped: interrupted"] * 2)
         self.assertFalse(w._pending_interrupt)
+
+    def test_sigint_during_cell_setup_interrupts_before_exec(self):
+        from toksearch.llm.kernel import worker as wmod
+        w = wmod.Worker.__new__(wmod.Worker)
+        w._interruptible = w._in_execute = w._pending_interrupt = False
+        w.ns, w.baseline, w.origins, w.carried, w.captured = (
+            {}, frozenset(), {}, {}, [])
+        w._reinstall_sigint = lambda: None   # keep the runner's handler
+        real_ids = w._ids
+        calls = []
+
+        def ids_then_sigint():
+            calls.append(1)
+            if len(calls) == 1:   # setup, before exec
+                w._on_sigint(signal.SIGINT, None)
+            return real_ids()
+
+        w._ids = ids_then_sigint
+        with mock.patch.object(wmod, "_matplotlib_figures",
+                               return_value=([], lambda: None)):
+            r = w.execute({"code": "ran = 1", "cell": 1,
+                           "fig_dir": "/nonexistent"})
+        self.assertTrue(r["interrupted"])
+        self.assertNotIn("ran", w.ns)
 
     def test_sigint_outside_execute_is_ignored(self):
         from toksearch.llm.kernel import worker as wmod
