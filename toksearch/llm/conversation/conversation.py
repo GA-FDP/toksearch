@@ -254,6 +254,13 @@ class Conversation:
                 "bytes": index["total_bytes"]})
         return index
 
+    def interrupt(self) -> None:
+        """Stop the running cell and ask the model to stop; any thread."""
+        self.executor.interrupt()
+        backend_interrupt = getattr(self.session.backend, "interrupt", None)
+        if backend_interrupt is not None:
+            backend_interrupt()
+
     def close(self) -> None:
         """Stop any running cell, checkpoint, stop the worker, disconnect.
 

@@ -472,6 +472,34 @@ class TestPersistence(unittest.TestCase):
             self._send(backend, client)
         client.disconnect.assert_awaited_once()
 
+    def test_interrupt_awaits_client_interrupt_on_the_loop(self):
+        import threading
+        backend = ClaudeSDKBackend()
+        client = self._client([_result_msg()])
+        threads = []
+
+        async def interrupt():
+            threads.append(threading.current_thread())
+        client.interrupt = mock.AsyncMock(side_effect=interrupt)
+        self._send(backend, client)
+        backend.interrupt()
+        client.interrupt.assert_awaited_once()
+        self.assertIs(threads[0], backend._thread)
+        backend.close()
+
+    def test_interrupt_without_a_client_is_a_no_op(self):
+        backend = ClaudeSDKBackend()
+        backend.interrupt()
+        self.assertIsNone(backend._loop)
+
+    def test_interrupt_swallows_errors(self):
+        backend = ClaudeSDKBackend()
+        client = self._client([_result_msg()])
+        client.interrupt = mock.AsyncMock(side_effect=RuntimeError("x"))
+        self._send(backend, client)
+        backend.interrupt()
+        backend.close()
+
     def test_configure_after_first_send_is_refused(self):
         from toksearch.llm.errors import LLMConfigError
         backend = ClaudeSDKBackend()

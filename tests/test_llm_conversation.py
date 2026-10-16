@@ -367,6 +367,31 @@ class TestClose(_Tmp):
         client.close.assert_called_once_with()
 
 
+class TestInterrupt(_Tmp):
+    def test_interrupt_stops_the_cell_and_the_model(self):
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.return_value = None
+        sess = _session([])
+        sess.backend.interrupt = mock.Mock()
+        conv = Conversation.create(sess, self.root, packages=[],
+                                   client_factory=lambda packages,
+                                   checkpoint_dir: client)
+        self.addCleanup(conv.close)
+        conv.interrupt()
+        client.interrupt.assert_called_once_with()
+        sess.backend.interrupt.assert_called_once_with()
+
+    def test_backend_without_interrupt_is_fine(self):
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.return_value = None
+        conv = Conversation.create(_session([]), self.root, packages=[],
+                                   client_factory=lambda packages,
+                                   checkpoint_dir: client)
+        self.addCleanup(conv.close)
+        conv.interrupt()
+        client.interrupt.assert_called_once_with()
+
+
 class TestList(_Tmp):
     def test_list_conversations_is_reexported(self):
         conv = Conversation.create(_session([]), self.root, packages=[])

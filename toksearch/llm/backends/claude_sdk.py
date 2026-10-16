@@ -113,6 +113,20 @@ class ClaudeSDKBackend(Backend):
         self.session_id = None
         self._stop_loop()
 
+    def interrupt(self) -> None:
+        """Ask the CLI to stop the current turn; safe from any thread.
+
+        Waits up to 5 s; errors are swallowed. No-op before the first send.
+        """
+        client, loop = self._client, self._loop
+        if client is None or loop is None or loop.is_closed():
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(client.interrupt(), loop)
+            future.result(5)
+        except Exception:  # noqa: BLE001 -- interrupting must not fail
+            pass
+
     def _stop_loop(self) -> None:
         """Stop and close the event-loop thread; the next send starts a new one."""
         loop, thread = self._loop, self._thread
