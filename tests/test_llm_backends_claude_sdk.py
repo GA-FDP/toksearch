@@ -382,6 +382,96 @@ class TestPersistence(unittest.TestCase):
                                            max_iterations=5)
         self.assertEqual(out.stop_reason, "end_turn")
 
+    def test_usage_limit_error_while_resuming_is_not_a_resume_error(self):
+        from toksearch.llm.errors import LLMBackendError, LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        msg = _result_msg(is_error=True, result="Claude usage limit reached")
+        with self.assertRaises(LLMBackendError) as cm:
+            self._send(backend, self._client([msg]))
+        self.assertNotIsInstance(cm.exception, LLMResumeError)
+
+    def test_error_result_after_a_tool_call_while_resuming(self):
+        from toksearch.llm.errors import LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        sess = _stub_session()
+
+        async def gen():
+            # The SDK ran our MCP tool before the turn failed.
+            await backend._run_python_handler({"code": "x = 1",
+                                               "thought": "t"})
+            yield _result_msg(is_error=True, result="tool loop failed")
+        client = self._client([])
+        client.receive_response = mock.MagicMock(return_value=gen())
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ):
+            try:
+                backend.run_conversation(sess, "hi", Callbacks(),
+                                         max_iterations=5)
+            except LLMResumeError:
+                self.fail("a turn that already ran a tool was resumed")
+            except Exception:   # noqa: BLE001 -- any other outcome is fine
+                pass
+        self.assertEqual(len(sess._executed), 1)
+
+    def test_sdk_error_after_a_tool_call_while_resuming(self):
+        from claude_agent_sdk import ClaudeSDKError
+        from toksearch.llm.errors import LLMBackendError, LLMResumeError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+
+        async def gen():
+            await backend._lookup_docs_handler({"skill_name": "x"})
+            raise ClaudeSDKError("stream broke")
+            yield  # pragma: no cover
+        client = self._client([])
+        client.receive_response = mock.MagicMock(return_value=gen())
+        with mock.patch(
+            "toksearch.llm.backends.claude_sdk.sdk.ClaudeSDKClient",
+            return_value=client,
+        ), self.assertRaises(LLMBackendError) as cm:
+            backend.run_conversation(_stub_session(), "hi", Callbacks(),
+                                     max_iterations=5)
+        self.assertNotIsInstance(cm.exception, LLMResumeError)
+
+    def test_auth_failure_at_connect_while_resuming_is_an_auth_error(self):
+        from claude_agent_sdk import CLIConnectionError
+        from toksearch.llm.errors import LLMAuthError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        client = self._client([])
+        client.connect = mock.AsyncMock(
+            side_effect=CLIConnectionError("authentication failed"))
+        with self.assertRaises(LLMAuthError):
+            self._send(backend, client)
+
+    def test_auth_runtime_error_at_connect_while_resuming(self):
+        from toksearch.llm.errors import LLMAuthError
+        backend = ClaudeSDKBackend()
+        backend.configure_persistence(store=object(), cwd="/c",
+                                      resume=self.SID)
+        client = self._client([])
+        client.connect = mock.AsyncMock(
+            side_effect=RuntimeError("Please run /login"))
+        with self.assertRaises(LLMAuthError):
+            self._send(backend, client)
+
+    def test_failed_connect_disconnects_the_client(self):
+        from toksearch.llm.errors import LLMBackendError
+        backend = ClaudeSDKBackend()
+        client = self._client([])
+        client.connect = mock.AsyncMock(side_effect=RuntimeError("boom"))
+        with self.assertRaises(LLMBackendError):
+            self._send(backend, client)
+        client.disconnect.assert_awaited_once()
+
     def test_configure_after_first_send_is_refused(self):
         from toksearch.llm.errors import LLMConfigError
         backend = ClaudeSDKBackend()

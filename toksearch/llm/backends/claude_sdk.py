@@ -44,6 +44,23 @@ from .base import Backend, Callbacks
 if TYPE_CHECKING:
     from ..session import Session
 
+# Errors that say nothing about the saved transcript: retrying with a recap
+# would only lose the real context, so they are reported as they are.
+_ACCOUNT_ERROR_MARKERS = ("rate limit", "usage limit", "limit reached",
+                          "overloaded", "authentication", "login",
+                          "unauthorized", "401", "429")
+_AUTH_ERROR_MARKERS = ("authentication", "login", "unauthorized", "401")
+
+
+def _mentions(text: str, markers) -> bool:
+    text = text.lower()
+    return any(m in text for m in markers)
+
+
+def _result_error_text(msg) -> str:
+    parts = [msg.result, msg.subtype, getattr(msg, "errors", None)]
+    return " ".join(str(p) for p in parts if p)
+
 
 class ClaudeSDKBackend(Backend):
     name = "claude-max"
@@ -60,6 +77,7 @@ class ClaudeSDKBackend(Backend):
         self._current_session = None
         self._persist: dict = {}
         self._resuming = False
+        self._tool_called = False   # set by the MCP handlers during a turn
         self.session_id: str | None = None
 
     def configure_persistence(self, *, store, cwd, session_id=None,
@@ -117,6 +135,7 @@ class ClaudeSDKBackend(Backend):
         from ..events import ToolCall, ToolResult
         from ..messages import ToolUseBlock
         import uuid as _uuid
+        self._tool_called = True
         sess = self._current_session
         cbs = self._current_callbacks
         thought = args.get("thought")
@@ -146,6 +165,7 @@ class ClaudeSDKBackend(Backend):
         from ..events import ToolCall, ToolResult
         from ..messages import ToolUseBlock
         import uuid as _uuid
+        self._tool_called = True
         sess = self._current_session
         cbs = self._current_callbacks
         call_id = f"sdk-{_uuid.uuid4().hex[:8]}"
@@ -227,6 +247,12 @@ class ClaudeSDKBackend(Backend):
         assistant_blocks: list = []
         final_text = ""
         stop_reason = "end_turn"
+        self._tool_called = False
+
+        def nothing_happened():
+            # A resume failure can only be told apart from an ordinary
+            # failure before the model has replied or run a tool.
+            return not assistant_blocks and not self._tool_called
         try:
             client = await self._get_or_create_client(session, max_iterations)
             await client.query(prompt)
@@ -247,7 +273,11 @@ class ClaudeSDKBackend(Backend):
                     if msg.session_id:
                         self.session_id = msg.session_id
                     if (self._resuming and msg.is_error
-                            and not assistant_blocks):
+                            and nothing_happened()):
+                        text = _result_error_text(msg)
+                        if _mentions(text, _ACCOUNT_ERROR_MARKERS):
+                            raise LLMBackendError(
+                                f"Claude Agent SDK error: {text}")
                         raise LLMResumeError(
                             "The saved conversation could not be resumed: "
                             f"{msg.result or msg.subtype}")
@@ -261,7 +291,7 @@ class ClaudeSDKBackend(Backend):
                         final_text = msg.result
                     break
         except sdk.ClaudeSDKError as e:
-            if self._resuming:
+            if self._resuming and nothing_happened():
                 raise LLMResumeError(
                     f"The saved conversation could not be resumed: {e}") from e
             raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
@@ -293,28 +323,40 @@ class ClaudeSDKBackend(Backend):
         client = sdk.ClaudeSDKClient(options=options)
         try:
             await client.connect()
-        except sdk.CLINotFoundError as e:
-            raise LLMAuthError(
-                "Could not find the `claude` CLI. Install Claude Code "
-                "(see https://docs.claude.com/en/docs/claude-code) and "
-                "run `claude login` to use the claude-max backend.") from e
-        except sdk.CLIConnectionError as e:
-            if self._resuming:
-                raise LLMResumeError(
-                    f"The saved conversation could not be resumed: {e}") from e
-            raise LLMAuthError(
-                "Failed to connect to the `claude` CLI. Run `claude login` "
-                "or set CLAUDE_CODE_OAUTH_TOKEN. Original error: " + str(e)
-            ) from e
-        except RuntimeError as e:
-            # With a session_store, connect() also loads the saved transcript;
-            # a RuntimeError while resuming means the store could not be read.
-            # Otherwise it is an SDK failure, not a login problem.
-            if self._resuming:
-                raise LLMResumeError(
-                    f"The saved conversation could not be resumed: {e}") from e
-            raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
-        except sdk.ClaudeSDKError as e:
-            raise LLMBackendError(f"Claude Agent SDK error: {e}") from e
+        except Exception as e:
+            try:
+                await client.disconnect()
+            except Exception:  # noqa: BLE001 -- best effort
+                pass
+            translated = self._connect_error(e)
+            if translated is None:
+                raise
+            raise translated from e
         self._client = client
         return client
+
+    def _connect_error(self, e):
+        """The LLM error for a failed connect(), or None to re-raise ``e``."""
+        if isinstance(e, sdk.CLINotFoundError):
+            return LLMAuthError(
+                "Could not find the `claude` CLI. Install Claude Code "
+                "(see https://docs.claude.com/en/docs/claude-code) and "
+                "run `claude login` to use the claude-max backend.")
+        login = LLMAuthError(
+            "Failed to connect to the `claude` CLI. Run `claude login` "
+            "or set CLAUDE_CODE_OAUTH_TOKEN. Original error: " + str(e))
+        if isinstance(e, (sdk.CLIConnectionError, RuntimeError)):
+            # With a session_store, connect() also loads the saved
+            # transcript, so while resuming a failure is a resume failure
+            # unless it says the login is the problem.
+            if self._resuming:
+                if _mentions(str(e), _AUTH_ERROR_MARKERS):
+                    return login
+                return LLMResumeError(
+                    f"The saved conversation could not be resumed: {e}")
+            if isinstance(e, sdk.CLIConnectionError):
+                return login
+            return LLMBackendError(f"Claude Agent SDK error: {e}")
+        if isinstance(e, sdk.ClaudeSDKError):
+            return LLMBackendError(f"Claude Agent SDK error: {e}")
+        return None
