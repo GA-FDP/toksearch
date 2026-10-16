@@ -198,9 +198,10 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
     be loaded last time, ``entry`` holding its ``sha256`` and ``size``. When
     the name is not in ``ns``, its pickle at ``path`` is copied into the
     checkpoint (entry ``carried: true``) if it still matches; otherwise the
-    entry is ``unloadable``. The dict is updated in place: each copied name
-    points at its copy in ``<dir>.new`` as soon as it is written (callers
-    re-point it with ``follow_carried`` once the swap has ended or failed).
+    entry is ``unloadable``. The dict is updated in place: once ``<dir>.new``
+    is complete (index written and fsynced), each copied name points at its
+    copy there (callers re-point it with ``follow_carried`` once the swap has
+    ended or failed).
     """
     import cloudpickle
     out_dir = Path(out_dir)
@@ -258,6 +259,7 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
             total += writer.written
 
     present = set(names)
+    copied = {}
     for name in sorted(carried):
         if name in present:
             continue
@@ -282,14 +284,16 @@ def save_namespace(ns: dict, baseline, origins: dict, out_dir, *,
             continue
         entry.update(status="saved", carried=True, size=size, file=path.name,
                      sha256=digest)
-        carried[name] = (str(path.resolve()), {**old_entry, "size": size,
-                                               "sha256": digest})
+        copied[name] = (str(path.resolve()), {**old_entry, "size": size,
+                                              "sha256": digest})
         total += size
 
     index = {"variables": entries, "total_bytes": total,
              "fdp_core_version": os.environ.get("FDP_CORE_VERSION")}
     _write_index(new, index)
     _fsync_dir(new)
+    # Only now is .new a complete checkpoint: point carried names at it.
+    carried.update(copied)
     _fsync_dir(new.parent)
     _swap(new, out_dir)
     return index

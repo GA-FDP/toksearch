@@ -353,6 +353,34 @@ class TestCarryForward(unittest.TestCase):
             # re-pointing after the failed swap keeps the true value
             self.assertEqual(getattr(dst.get("frag"), "value", None), 99)
 
+    def test_failed_index_write_keeps_carried_variables_restorable(self):
+        import errno
+        from toksearch.llm.kernel.worker import Worker
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp) / "namespace"
+            marker = Path(tmp) / "broken"
+            ck.save_namespace(_ns(a="A", frag=Fragile(marker, 99)),
+                              BASELINE, {}, d)
+            marker.touch()
+            w = Worker.__new__(Worker)
+            w.ns, w.baseline, w.origins, w.carried = {}, BASELINE, {}, {}
+            w.restore({"dir": str(d)})
+            req = {"dir": str(d), "per_var_limit": 1 << 30,
+                   "total_limit": 1 << 32}
+            with mock.patch.object(
+                    ck, "_write_index",
+                    side_effect=OSError(errno.ENOSPC, "No space left")):
+                with self.assertRaises(OSError):
+                    w.checkpoint(req)
+            self.assertTrue(Path(w.carried["frag"][0]).exists())
+            index = w.checkpoint(req)["index"]
+            frag = next(e for e in index["variables"] if e["name"] == "frag")
+            self.assertEqual(frag["status"], "saved", frag.get("error"))
+            marker.unlink()
+            dst = {}
+            ck.load_namespace(dst, d)
+            self.assertEqual(getattr(dst.get("frag"), "value", None), 99)
+
     def test_carried_name_rebound_by_the_user_is_not_copied(self):
         with TemporaryDirectory() as tmp:
             d = Path(tmp) / "namespace"
