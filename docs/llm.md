@@ -304,7 +304,7 @@ does not stop within the grace period, it and any processes it started are
 killed, and a new worker starts from the last checkpoint.
 
 Loading a checkpoint runs code from the pickles: open only conversations your
-own app wrote. Export a notebook to share a session.
+own app wrote, and never send a conversation folder to someone else to open.
 
 ## Contributors
 
