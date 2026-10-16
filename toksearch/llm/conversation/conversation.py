@@ -82,11 +82,17 @@ class Conversation:
                client_factory=KernelClient) -> "Conversation":
         folder = ConversationFolder.create(
             root if root is not None else default_root(), now=now)
-        folder.update_meta(backend=session.backend.name, model=session.model)
-        session.history = []    # a reused Session must not carry another chat
-        conv = cls(session, folder, packages=packages,
-                   client_factory=client_factory)
-        conv._start_backend_fresh()
+        folder.acquire_lock()
+        try:
+            folder.update_meta(backend=session.backend.name,
+                               model=session.model)
+            session.history = []    # a reused Session must not carry another chat
+            conv = cls(session, folder, packages=packages,
+                       client_factory=client_factory)
+            conv._start_backend_fresh()
+        except BaseException:
+            folder.release_lock()
+            raise
         return conv
 
     @classmethod
@@ -94,6 +100,16 @@ class Conversation:
              client_factory=KernelClient) -> "Conversation":
         folder = ConversationFolder(Path(path))
         meta = folder.read_meta()
+        folder.acquire_lock()
+        try:
+            return cls._open_locked(session, folder, meta, packages,
+                                    client_factory)
+        except BaseException:
+            folder.release_lock()
+            raise
+
+    @classmethod
+    def _open_locked(cls, session, folder, meta, packages, client_factory):
         session.history = []    # restored below, or left empty for a recap
         conv = cls(session, folder, packages=packages,
                    client_factory=client_factory)
@@ -278,17 +294,20 @@ class Conversation:
         it is killed without starting a new worker. The checkpoint waits at
         most 30 s, so close() never hangs on a stuck cell. The Session stays
         usable for a new Conversation (its skills server is owned by the
-        caller).
+        caller). Releases the folder lock taken by create() or open().
         """
-        begin_close = getattr(self.client, "begin_close", None)
-        if begin_close is not None:
-            begin_close()
-        self.executor.interrupt()
-        self.checkpoint(wait=30)
-        self.events.sync()
-        self.executor.close()
-        if self.session.executor is self.executor:
-            self.session.executor = None
-        backend_close = getattr(self.session.backend, "close", None)
-        if backend_close is not None:
-            backend_close()
+        try:
+            begin_close = getattr(self.client, "begin_close", None)
+            if begin_close is not None:
+                begin_close()
+            self.executor.interrupt()
+            self.checkpoint(wait=30)
+            self.events.sync()
+            self.executor.close()
+            if self.session.executor is self.executor:
+                self.session.executor = None
+            backend_close = getattr(self.session.backend, "close", None)
+            if backend_close is not None:
+                backend_close()
+        finally:
+            self.folder.release_lock()

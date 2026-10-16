@@ -24,7 +24,7 @@ from unittest import mock
 
 from toksearch.llm.conversation.events import EventLog
 from toksearch.llm.conversation.folder import (
-    ConversationFolder, default_root, list_conversations,
+    ConversationFolder, ConversationInUse, default_root, list_conversations,
 )
 from toksearch.llm.conversation.history import load_history, save_history
 from toksearch.llm.messages import Message, TextBlock, ToolUseBlock
@@ -100,6 +100,74 @@ class TestEventLog(unittest.TestCase):
             with open(p, "a") as f:
                 f.write('{"type": "assist')
             self.assertEqual(len(log.read()), 1)
+
+
+def _dead_pid() -> int:
+    import subprocess
+    p = subprocess.Popen(["true"])
+    p.wait()
+    return p.pid
+
+
+class TestLock(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = ConversationFolder.create(self._tmp.name)
+
+    def _write_lock(self, **info):
+        (self.folder.path / ".lock").write_text(json.dumps(info))
+
+    def test_acquire_writes_owner_and_release_removes_it(self):
+        import socket
+        self.folder.acquire_lock()
+        info = json.loads((self.folder.path / ".lock").read_text())
+        self.assertEqual(info["pid"], os.getpid())
+        self.assertEqual(info["host"], socket.gethostname())
+        self.assertIn("since", info)
+        self.folder.release_lock()
+        self.assertFalse((self.folder.path / ".lock").exists())
+        self.folder.release_lock()      # idempotent
+
+    def test_live_lock_is_in_use(self):
+        self.folder.acquire_lock()
+        other = ConversationFolder(self.folder.path)
+        with self.assertRaises(ConversationInUse) as cm:
+            other.acquire_lock()
+        self.assertIn(str(os.getpid()), str(cm.exception))
+        self.assertIsInstance(cm.exception, RuntimeError)
+        self.folder.release_lock()
+        other.acquire_lock()
+        other.release_lock()
+
+    def test_dead_pid_on_this_host_is_taken_over(self):
+        import socket
+        self._write_lock(pid=_dead_pid(), host=socket.gethostname(),
+                         since="2026-01-01T00:00:00")
+        self.folder.acquire_lock()
+        info = json.loads((self.folder.path / ".lock").read_text())
+        self.assertEqual(info["pid"], os.getpid())
+        self.folder.release_lock()
+
+    def test_lock_from_another_host_is_in_use(self):
+        self._write_lock(pid=_dead_pid(), host="elsewhere.example",
+                         since="2026-01-01T00:00:00")
+        with self.assertRaises(ConversationInUse) as cm:
+            self.folder.acquire_lock()
+        self.assertIn("elsewhere.example", str(cm.exception))
+
+    def test_release_leaves_someone_elses_lock(self):
+        self._write_lock(pid=1, host="elsewhere.example", since="x")
+        self.folder.release_lock()
+        self.assertTrue((self.folder.path / ".lock").exists())
+
+    def test_list_ignores_the_lock(self):
+        before = list_conversations(self._tmp.name)[0]["size_bytes"]
+        self.folder.acquire_lock()
+        items = list_conversations(self._tmp.name)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["size_bytes"], before)
+        self.folder.release_lock()
 
 
 class TestHistory(unittest.TestCase):

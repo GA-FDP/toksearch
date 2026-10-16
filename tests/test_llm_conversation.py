@@ -27,7 +27,9 @@ from unittest import mock
 
 from toksearch.llm.backends.base import AssistantTurn
 from toksearch.llm.backends.fake import FakeBackend
-from toksearch.llm.conversation import Conversation, list_conversations
+from toksearch.llm.conversation import (
+    Conversation, ConversationInUse, list_conversations,
+)
 from toksearch.llm.errors import LLMResumeError
 from toksearch.llm.kernel.client import KernelClient, KernelError
 from toksearch.llm.messages import TextBlock, ToolUseBlock
@@ -437,6 +439,29 @@ class TestInterrupt(_Tmp):
         self.addCleanup(conv.close)
         conv.interrupt()
         client.interrupt.assert_called_once_with()
+
+
+class TestLock(_Tmp):
+    def _mock_factory(self):
+        client = mock.create_autospec(KernelClient, instance=True)
+        client.checkpoint.return_value = None
+        return lambda packages, checkpoint_dir: client
+
+    def test_open_conversation_cannot_be_opened_again(self):
+        conv = Conversation.create(_session([]), self.root, packages=[],
+                                   client_factory=self._mock_factory())
+        self.assertTrue((conv.folder.path / ".lock").exists())
+        with self.assertRaises(ConversationInUse):
+            Conversation.open(_session([]), conv.folder.path, packages=[],
+                              client_factory=self._mock_factory())
+        conv.close()
+        self.assertFalse((conv.folder.path / ".lock").exists())
+        conv.close()        # releasing again is harmless
+        again = Conversation.open(_session([]), conv.folder.path,
+                                  packages=[],
+                                  client_factory=self._mock_factory())
+        self.addCleanup(again.close)
+        self.assertTrue((conv.folder.path / ".lock").exists())
 
 
 class TestList(_Tmp):

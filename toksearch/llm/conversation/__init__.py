@@ -15,7 +15,8 @@
 """Persistent, restorable conversations over a Session."""
 
 from .conversation import Conversation
-from .folder import ConversationFolder, default_root, list_conversations
+from .folder import (ConversationFolder, ConversationInUse, default_root,
+                     list_conversations)
 
-__all__ = ["Conversation", "ConversationFolder", "default_root",
-           "list_conversations"]
+__all__ = ["Conversation", "ConversationFolder", "ConversationInUse",
+           "default_root", "list_conversations"]
