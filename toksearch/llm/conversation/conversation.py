@@ -83,6 +83,7 @@ class Conversation:
         folder = ConversationFolder.create(
             root if root is not None else default_root(), now=now)
         folder.update_meta(backend=session.backend.name, model=session.model)
+        session.history = []    # a reused Session must not carry another chat
         conv = cls(session, folder, packages=packages,
                    client_factory=client_factory)
         conv._start_backend_fresh()
@@ -93,6 +94,7 @@ class Conversation:
              client_factory=KernelClient) -> "Conversation":
         folder = ConversationFolder(Path(path))
         meta = folder.read_meta()
+        session.history = []    # restored below, or left empty for a recap
         conv = cls(session, folder, packages=packages,
                    client_factory=client_factory)
         events = conv.events.read()

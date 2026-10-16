@@ -176,6 +176,42 @@ class TestRestore(_Tmp):
         self.assertEqual(events[-1]["type"], "restore")
 
 
+def _texts(history):
+    return [b.text for m in history for b in m.content
+            if isinstance(b, TextBlock)]
+
+
+class TestReusedSession(_Tmp):
+    """One Session serves several conversations in turn (the chat app)."""
+
+    def _a_then_b(self, record):
+        sess = _session([_text("a1"), _text("b1"), _text("a2")],
+                        record=record)
+        self.addCleanup(sess.close)
+        a = Conversation.create(sess, self.root, packages=[])
+        a.send("alpha")
+        a.close()
+        b = Conversation.create(sess, self.root, packages=[])
+        b.send("bravo")
+        b.close()
+        return sess, a.folder.path
+
+    def test_new_conversation_starts_with_empty_history(self):
+        record = []
+        self._a_then_b(record)
+        self.assertEqual(_texts(record[1]["history"]), ["bravo"])
+
+    def test_reopening_after_another_conversation_has_none_of_it(self):
+        record = []
+        sess, a_path = self._a_then_b(record)
+        (a_path / "history.jsonl").unlink()     # forces the recap path
+        a2 = Conversation.open(sess, a_path, packages=[])
+        self.addCleanup(a2.close)
+        a2.send("again")
+        texts = _texts(record[2]["history"])
+        self.assertFalse(any("bravo" in t or "b1" == t for t in texts), texts)
+
+
 class _ResumeFailingBackend(FakeBackend):
     """Stands in for claude-max: persistence hooks, first send fails to resume."""
 
