@@ -59,6 +59,14 @@ class TestLiveResume(unittest.TestCase):
             restores = [e for e in c2.events.read()
                         if e["type"] == "restore"]
             self.assertFalse(any(e["recap_used"] for e in restores))
+            # The variable came back from the checkpoint, not a re-run.
+            cells = [e for e in c2.events.read() if e["type"] == "cell"
+                     and e["t"] > restores[0]["t"]]
+            self.assertTrue(any(
+                e.get("restore")
+                and "secret_number" in e["restore"].get("restored", [])
+                and "7352" in (e.get("stdout") or "")
+                for e in cells), cells)
 
 
 if __name__ == "__main__":

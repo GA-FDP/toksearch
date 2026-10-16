@@ -529,6 +529,36 @@ class TestTurnBookkeeping(_Tmp):
         self.assertEqual(types_[-3:], ["error", "turn_end", "checkpoint"])
 
 
+class TestCrash(_Tmp):
+    def test_variables_survive_a_killed_worker_and_no_close(self):
+        import signal
+        import socket
+        import subprocess
+        sess = _session([_py("y = 123"), _text("ok")])
+        conv = Conversation.create(sess, self.root, packages=[])
+        conv.send("bind y")
+        os.kill(conv.client._proc.pid, signal.SIGKILL)
+        conv.client._proc.join(10)
+        self.addCleanup(conv.client.close)
+        # The app process "died" too: its lock names a dead pid.
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        (conv.folder.path / ".lock").write_text(json.dumps(
+            {"pid": dead.pid, "host": socket.gethostname(),
+             "since": "2026-10-15T00:00:00"}))
+        del conv
+
+        sess2 = _session([_py("print(y)", id_="t2"), _text("done")])
+        self.addCleanup(sess2.close)
+        path = next(self.root.iterdir())
+        conv2 = Conversation.open(sess2, path, packages=[])
+        self.addCleanup(conv2.close)
+        conv2.send("print y")
+        cells = [e for e in conv2.events.read() if e["type"] == "cell"]
+        self.assertEqual(cells[-1]["stdout"], "123\n")
+        self.assertIn("y", cells[-1]["restore"]["restored"])
+
+
 class TestList(_Tmp):
     def test_list_conversations_is_reexported(self):
         conv = Conversation.create(_session([]), self.root, packages=[])
