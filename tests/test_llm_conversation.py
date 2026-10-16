@@ -500,6 +500,35 @@ class TestSessionSettings(_Tmp):
         self.assertEqual(list(self.root.iterdir()), [])
 
 
+class TestTurnBookkeeping(_Tmp):
+    def test_error_after_a_completed_turn_is_not_an_interrupted_turn(self):
+        sess = _session([_text("hi")])
+        conv = Conversation.create(sess, self.root, packages=[])
+        conv.send("first")
+        conv.close()
+        conv.events.append({"type": "error",
+                            "text": "Checkpoint failed: busy"})
+        conv2 = Conversation.open(_session([]), conv.folder.path,
+                                  packages=[])
+        self.addCleanup(conv2.close)
+        self.assertFalse(any(e.get("status") == "interrupted"
+                             for e in conv2.events.read()))
+
+    def test_failed_turn_still_checkpoints_and_saves_history(self):
+        # The script runs out after the cell: the turn raises.
+        sess = _session([_py("x = 41")])
+        conv = Conversation.create(sess, self.root, packages=[])
+        self.addCleanup(conv.close)
+        with self.assertRaises(RuntimeError):
+            conv.send("set x")
+        index = json.loads((conv.folder.namespace_dir
+                            / "index.json").read_text())
+        self.assertEqual([e["name"] for e in index["variables"]], ["x"])
+        self.assertTrue(conv.folder.history_path.exists())
+        types_ = [e["type"] for e in conv.events.read()]
+        self.assertEqual(types_[-3:], ["error", "turn_end", "checkpoint"])
+
+
 class TestList(_Tmp):
     def test_list_conversations_is_reexported(self):
         conv = Conversation.create(_session([]), self.root, packages=[])

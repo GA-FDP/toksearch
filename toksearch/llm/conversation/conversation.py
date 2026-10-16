@@ -71,6 +71,16 @@ def _worker_packages(session, packages):
     return getattr(session, "packages", None) if packages is None else packages
 
 
+def _turn_left_open(events) -> bool:
+    """True if the last user turn has no turn_end (the app stopped mid-turn)."""
+    for e in reversed(events):
+        if e.get("type") == "turn_end":
+            return False
+        if e.get("type") == "user":
+            return True
+    return False
+
+
 class Conversation:
     def __init__(self, session, folder: ConversationFolder, *, packages=None,
                  client_factory=KernelClient):
@@ -136,8 +146,7 @@ class Conversation:
         conv = cls(session, folder, packages=packages,
                    client_factory=client_factory)
         events = conv.events.read()
-        if events and events[-1].get("type") not in (
-                "turn_end", "checkpoint", "restore"):
+        if _turn_left_open(events):
             conv.events.append({"type": "turn_end", "status": "interrupted"})
         context_restored = conv._restore_model_context(meta)
         recap = (build_recap(events)
@@ -234,6 +243,7 @@ class Conversation:
                         else f"{self._pending_note}\n\n{prompt}")
         mark = len(self.session.history)
         self._text_logged = False
+        completed = False
         try:
             try:
                 result = self.session.send(model_prompt, **callbacks)
@@ -241,11 +251,15 @@ class Conversation:
                 del self.session.history[mark:]
                 model_prompt = self._fall_back_to_recap(prompt, n_before)
                 result = self.session.send(model_prompt, **callbacks)
+            completed = True
         except Exception as e:
             self.events.append({"type": "error",
                                 "text": f"{type(e).__name__}: {e}"})
             self.events.append({"type": "turn_end", "status": "error"})
             raise
+        finally:
+            if not completed:
+                self._after_failed_turn()
         self._pending_note = None
         if not self._text_logged and result.final_text:
             # Backends that do not stream (FakeBackend) never fire on_text.
@@ -267,6 +281,17 @@ class Conversation:
         self.events.append({"type": "restore", "line": line,
                             "recap_used": True})
         return f"{note}\n\n{prompt}"
+
+    def _after_failed_turn(self) -> None:
+        """Best effort after a turn that raised: keep what it computed."""
+        try:
+            save_history(self.folder.history_path, self.session.history)
+        except Exception:  # noqa: BLE001 -- must not hide the turn's error
+            pass
+        try:
+            self.checkpoint(wait=5)
+        except Exception:  # noqa: BLE001 -- checkpoint() logs KernelError
+            pass
 
     def _after_turn(self) -> None:
         self.events.sync()
