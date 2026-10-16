@@ -57,9 +57,24 @@ def _chain(first, second):
     return both
 
 
+def _worker_packages(session, packages):
+    """The worker's packages: ``packages`` if given, else the Session's.
+
+    Raises ValueError for a Session built with extra_namespace: those
+    objects live in this process and cannot be sent to the worker.
+    """
+    if getattr(session, "extra_namespace", None):
+        raise ValueError(
+            "a Conversation runs Python in a separate worker, which cannot "
+            "receive the Session's extra_namespace objects; build the "
+            "Session without extra_namespace")
+    return getattr(session, "packages", None) if packages is None else packages
+
+
 class Conversation:
     def __init__(self, session, folder: ConversationFolder, *, packages=None,
                  client_factory=KernelClient):
+        packages = _worker_packages(session, packages)
         self.session = session
         self.folder = folder
         self.events = EventLog(folder.events_path)
@@ -80,6 +95,11 @@ class Conversation:
     @classmethod
     def create(cls, session, root=None, *, now=None, packages=None,
                client_factory=KernelClient) -> "Conversation":
+        """Start a new conversation folder under ``root``.
+
+        ``packages`` (the worker's) defaults to the Session's.
+        """
+        packages = _worker_packages(session, packages)
         folder = ConversationFolder.create(
             root if root is not None else default_root(), now=now)
         folder.acquire_lock()
@@ -98,6 +118,8 @@ class Conversation:
     @classmethod
     def open(cls, session, path, *, packages=None,
              client_factory=KernelClient) -> "Conversation":
+        """Reopen the conversation at ``path``; packages default as in create."""
+        packages = _worker_packages(session, packages)
         folder = ConversationFolder(Path(path))
         meta = folder.read_meta()
         folder.acquire_lock()

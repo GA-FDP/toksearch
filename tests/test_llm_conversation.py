@@ -464,6 +464,42 @@ class TestLock(_Tmp):
         self.assertTrue((conv.folder.path / ".lock").exists())
 
 
+class TestSessionSettings(_Tmp):
+    def _factory(self, seen):
+        def factory(packages, checkpoint_dir):
+            seen.append(packages)
+            client = mock.create_autospec(KernelClient, instance=True)
+            client.checkpoint.return_value = None
+            return client
+        return factory
+
+    def test_worker_packages_default_to_the_sessions(self):
+        seen = []
+        conv = Conversation.create(_session([]), self.root,
+                                   client_factory=self._factory(seen))
+        path = conv.folder.path
+        conv.close()
+        conv = Conversation.open(_session([]), path,
+                                 client_factory=self._factory(seen))
+        conv.close()
+        self.assertEqual(seen, [[], []])
+
+    def test_explicit_packages_win(self):
+        seen = []
+        conv = Conversation.create(_session([]), self.root, packages=["x"],
+                                   client_factory=self._factory(seen))
+        conv.close()
+        self.assertEqual(seen, [["x"]])
+
+    def test_extra_namespace_is_refused(self):
+        sess = Session(backend=FakeBackend(), packages=[],
+                       extra_namespace={"secret": object()})
+        self.addCleanup(sess.close)
+        with self.assertRaises(ValueError):
+            Conversation.create(sess, self.root, client_factory=mock.Mock())
+        self.assertEqual(list(self.root.iterdir()), [])
+
+
 class TestList(_Tmp):
     def test_list_conversations_is_reexported(self):
         conv = Conversation.create(_session([]), self.root, packages=[])
