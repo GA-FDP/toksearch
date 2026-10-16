@@ -45,6 +45,14 @@ class TestFolderSessionStore(unittest.TestCase):
                               {"type": "assistant", "uuid": "b"}])
             self.assertTrue(s.has_transcript(SID))
 
+    def test_unparseable_transcript_is_not_a_transcript(self):
+        with TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / f"{SID}.jsonl").write_text("garbage\n{\"trunc")
+            self.assertFalse(FolderSessionStore(d).has_transcript(SID))
+            (d / f"{SID}.jsonl").write_text("garbage\n{\"type\": \"user\"}\n")
+            self.assertTrue(FolderSessionStore(d).has_transcript(SID))
+
     def test_project_key_is_ignored(self):
         with TemporaryDirectory() as tmp:
             s = FolderSessionStore(tmp)

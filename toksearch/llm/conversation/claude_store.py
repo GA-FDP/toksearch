@@ -50,8 +50,18 @@ class FolderSessionStore:
         return self.dir.joinpath(sid, *parts[:-1], f"{parts[-1]}.jsonl")
 
     def has_transcript(self, session_id: str) -> bool:
+        """True if the transcript file has at least one readable entry."""
         p = self.dir / f"{_check_session_id(session_id)}.jsonl"
-        return p.is_file() and p.stat().st_size > 0
+        if not p.is_file():
+            return False
+        with open(p) as f:
+            for line in f:
+                try:
+                    json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                return True
+        return False
 
     async def append(self, key, entries) -> None:
         p = self._path(key)
