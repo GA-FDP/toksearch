@@ -181,11 +181,22 @@ class ConversationFolder:
     # other clients. A lock left by a dead process on this host is taken
     # over; one from another host is never presumed stale.
 
-    def _read_lock(self) -> dict:
+    def _read_lock_raw(self) -> str | None:
         try:
-            return json.loads(self.lock_path.read_text())
-        except (OSError, ValueError):
+            return self.lock_path.read_text()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _parse_lock(raw) -> dict:
+        try:
+            held = json.loads(raw) if raw else {}
+        except ValueError:
             return {}
+        return held if isinstance(held, dict) else {}
+
+    def _read_lock(self) -> dict:
+        return self._parse_lock(self._read_lock_raw())
 
     def _lock_info(self) -> dict:
         info = {"pid": os.getpid(), "host": socket.gethostname(),
@@ -212,20 +223,49 @@ class ConversationFolder:
             host=held.get("host"), pid=held.get("pid"),
             since=held.get("since"))
 
+    def _take_over(self, stale_raw: str) -> bool:
+        """Replace the stale lock whose text is ``stale_raw``; False if beaten.
+
+        The new lock is written to a unique temp file and hard-linked into
+        place, which fails if a competitor created the lock first.
+        """
+        tmp = self.path / f"{LOCK_NAME}.{uuid.uuid4().hex}.tmp"
+        try:
+            with open(tmp, "x") as f:
+                json.dump(self._lock_info(), f)
+            # Remove only the lock judged stale, not one that replaced it.
+            if self._read_lock_raw() == stale_raw:
+                try:
+                    os.unlink(self.lock_path)
+                except FileNotFoundError:
+                    pass
+            try:
+                os.link(tmp, self.lock_path)
+            except FileExistsError:
+                return False
+            return True
+        finally:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+
     def acquire_lock(self) -> None:
         """Mark the conversation open here; ConversationInUse if it is elsewhere."""
         if self._create_lock():
             return
-        held = self._read_lock()
-        if _lock_is_stale(held):
-            try:
-                os.unlink(self.lock_path)
-            except FileNotFoundError:
-                pass
-            if self._create_lock():
+        for _ in range(2):      # one retry if another taker wins the race
+            raw = self._read_lock_raw()
+            if raw is None:     # released meanwhile
+                if self._create_lock():
+                    return
+                continue
+            held = self._parse_lock(raw)
+            if not _lock_is_stale(held):
+                raise self._in_use(held)
+            if self._take_over(raw):
                 return
-            held = self._read_lock()    # another process won the race
-        raise self._in_use(held)
+        raise self._in_use(self._read_lock())
 
     def break_lock(self) -> None:
         """Remove the lock whoever holds it ("open anyway"); the caller confirms."""

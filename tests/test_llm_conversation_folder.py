@@ -260,6 +260,32 @@ class TestLock(unittest.TestCase):
         self.folder.acquire_lock()
         self.folder.release_lock()
 
+    def test_two_takers_of_a_stale_lock_never_both_hold_it(self):
+        import socket
+        from toksearch.llm.conversation import folder as folder_mod
+        self._write_lock(pid=_dead_pid(), host=socket.gethostname(),
+                         since="x")
+        competitor = {"pid": 4242, "host": "elsewhere.example",
+                      "machine": "0000000000aa", "since": "y"}
+        real_link = os.link
+
+        def link_after_competitor(src, dst, *a, **kw):
+            # The competitor takes the stale lock between our unlink and link.
+            with open(dst, "x") as f:
+                json.dump(competitor, f)
+            return real_link(src, dst, *a, **kw)
+        with mock.patch.object(folder_mod.os, "link",
+                               side_effect=link_after_competitor) as link:
+            with self.assertRaises(ConversationInUse) as cm:
+                self.folder.acquire_lock()
+        link.assert_called()
+        self.assertEqual(cm.exception.pid, 4242)
+        self.assertEqual(json.loads((self.folder.path / ".lock").read_text()),
+                         competitor)
+        leftovers = [p.name for p in self.folder.path.iterdir()
+                     if p.name.startswith(".lock")]
+        self.assertEqual(leftovers, [".lock"])
+
     def test_list_ignores_the_lock(self):
         before = list_conversations(self._tmp.name)[0]["size_bytes"]
         self.folder.acquire_lock()
