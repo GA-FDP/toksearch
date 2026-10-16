@@ -77,6 +77,10 @@ class Session:
         self.backend = backend
         self.model = model or backend.default_model
         self.max_iterations = max_iterations
+        # Kept so a Conversation can start its worker with the same packages
+        # and refuse objects it cannot send to the worker.
+        self.packages = packages
+        self.extra_namespace = extra_namespace
         # run_python runs here when set (a KernelExecutor); in-process otherwise.
         self.executor = executor
         # ---- Namespace: defaults + discovered + extras ----
@@ -134,11 +138,17 @@ class Session:
         )
 
     def reset(self) -> None:
-        """Clear history and reset the namespace to its initial pre-populated state."""
+        """Clear history and reset the namespace to its initial pre-populated state.
+
+        Not available while a Conversation owns the Session (an executor is
+        attached): start a new Conversation instead.
+        """
+        if self.executor is not None:
+            raise RuntimeError(
+                "reset is not supported while a Conversation owns this "
+                "Session; start a new Conversation")
         self.namespace = _default_namespace()
         self.history = []
-        if self.executor is not None:
-            self.executor.restart()
 
     def close(self) -> None:
         """Tear down the skills MCP server, the executor and the backend."""

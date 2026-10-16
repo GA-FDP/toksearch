@@ -93,6 +93,32 @@ class TestSessionPersistence(unittest.TestCase):
         self.assertIn("toksearch", sess.namespace)
 
 
+class TestSessionWithExecutor(unittest.TestCase):
+    def test_reset_is_refused_while_an_executor_is_attached(self):
+        from unittest import mock
+        executor = mock.Mock()
+        sess = Session(backend=FakeBackend(scripted_turns=[_text("ok")]),
+                       packages=[], executor=executor)
+        self.addCleanup(setattr, sess, "executor", None)
+        self.addCleanup(sess.close)
+        sess.send("hi")
+        with self.assertRaises(RuntimeError) as cm:
+            sess.reset()
+        self.assertIn("Conversation", str(cm.exception))
+        executor.restart.assert_not_called()
+        self.assertGreater(len(sess.history), 0)
+
+    def test_packages_and_extra_namespace_are_kept(self):
+        sess = Session(backend=FakeBackend(), packages=[],
+                       extra_namespace={"a": 1})
+        self.addCleanup(sess.close)
+        self.assertEqual(sess.packages, [])
+        self.assertEqual(sess.extra_namespace, {"a": 1})
+        plain = Session(backend=FakeBackend(), packages=[])
+        self.addCleanup(plain.close)
+        self.assertIsNone(plain.extra_namespace)
+
+
 class TestSessionCallbacks(unittest.TestCase):
     def test_on_tool_call_fires_before_result(self):
         backend = FakeBackend(scripted_turns=[
