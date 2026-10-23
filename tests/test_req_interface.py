@@ -28,6 +28,7 @@ class FakeReq:
     mds_path: str
     shot: int
     treename: str = "ELECTRONS"
+    isolated: bool = False
 
     def as_key(self):
         return (self.mds_path, self.shot, self.treename)
@@ -224,6 +225,58 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         error = result[reqs[0].as_key()]
         self.assertIsInstance(error, MDSplus.mdsExceptions.MdsException)
         self.assertEqual(str(error), "%TREE-E-NODATA")
+
+    def test_isolated_req_fetched_with_get_outside_get_many(self):
+        batched = FakeReq("BT", 12345, "TREE_A")
+        isolated = FakeReq("NAMELISTS:KEQDSKS", 12345, "TREE_A", isolated=True)
+
+        mock_conn = MagicMock()
+        mock_many = MagicMock()
+        mock_conn.getMany.return_value = mock_many
+        mock_many.get.return_value.data.return_value = 1.0
+        mock_conn.get.return_value.data.return_value = ["row 0", "row 1"]
+
+        with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
+            mock_registry_cls.return_value.connect.return_value = mock_conn
+            result = ri._fetch_tree_group_via_server(
+                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [batched, isolated]
+            )
+
+        mock_conn.get.assert_called_once_with("NAMELISTS:KEQDSKS")
+        mock_many.append.assert_called_once_with("BT", "BT")
+        self.assertEqual(result[batched.as_key()], 1.0)
+        self.assertEqual(result[isolated.as_key()], ["row 0", "row 1"])
+
+    def test_only_isolated_reqs_skip_get_many(self):
+        isolated = FakeReq("NAMELISTS:KEQDSKS", 12345, "TREE_A", isolated=True)
+
+        mock_conn = MagicMock()
+        mock_conn.get.return_value.data.return_value = ["row 0", "row 1"]
+
+        with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
+            mock_registry_cls.return_value.connect.return_value = mock_conn
+            result = ri._fetch_tree_group_via_server(
+                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [isolated]
+            )
+
+        mock_conn.getMany.assert_not_called()
+        self.assertEqual(result[isolated.as_key()], ["row 0", "row 1"])
+
+    def test_isolated_req_failure_is_stored_in_band(self):
+        isolated = FakeReq("NAMELISTS:KEQDSKS", 12345, "TREE_A", isolated=True)
+
+        mock_conn = MagicMock()
+        mock_conn.get.side_effect = MDSplus.mdsExceptions.TreeNODATA()
+
+        with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
+            mock_registry_cls.return_value.connect.return_value = mock_conn
+            result = ri._fetch_tree_group_via_server(
+                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [isolated]
+            )
+
+        self.assertIsInstance(
+            result[isolated.as_key()], MDSplus.mdsExceptions.TreeNODATA
+        )
 
 
 class TestFetchPtdataGroupViaServer(unittest.TestCase):
