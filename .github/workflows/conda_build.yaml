@@ -32,7 +32,7 @@ jobs:
           - subdir: linux-64
             os: ubuntu-latest
           - subdir: osx-arm64
-            os: macos-14
+            os: macos-15
     runs-on: ${{ matrix.os }}
     defaults:
       run:
