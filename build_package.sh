@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-export PKG_VERSION=$(pixi run python print_version.py)
+# Plain python3: versioneer needs only git, and a pixi solve would fail on a
+# platform whose dev dependencies are not all published yet.
+export PKG_VERSION=$(python3 print_version.py)
 
 echo "Building version: ${PKG_VERSION}"
 

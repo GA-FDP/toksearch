@@ -93,7 +93,8 @@ class TestTimebaseAligner(unittest.TestCase):
         self._align("s1", "linear", True)
         res = self.pipeline.compute_shot(self.shot)
         ds = res["ds"]
-        self.assertTrue(np.all(ds.s1 == ds.s2))
+        # Interpolated floats: scipy 1.18 rounds differently from 1.17 (~1e-14).
+        np.testing.assert_allclose(ds.s1, ds.s2, rtol=1e-12, atol=0)
         self.assertFalse(res.errors)
 
     def test_with_ndarray_input_linear(self):
@@ -101,7 +102,7 @@ class TestTimebaseAligner(unittest.TestCase):
         self._align(timebase, "linear", True)
         res = self.pipeline.compute_shot(self.shot)
         ds = res["ds"]
-        self.assertTrue(np.all(ds.s1 == ds.s2))
+        np.testing.assert_allclose(ds.s1, ds.s2, rtol=1e-12, atol=0)
         self.assertFalse(res.errors)
 
     def test_with_string_input_pad(self):

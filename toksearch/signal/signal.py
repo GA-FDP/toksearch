@@ -23,6 +23,8 @@ import uuid
 import warnings
 from abc import ABC, abstractmethod
 
+from ..provenance.hashing import callable_spec
+
 
 @contextlib.contextmanager
 def _gc_disabled():
@@ -132,6 +134,64 @@ class Signal(ABC):
         self.data_order: Iterable[str] = self.dims
         self.with_units: bool = True
 
+    # Attributes owned by Signal itself. The reflective fallback skips these
+    # because they are already reported as top-level spec keys; repeating them
+    # inside "fields" would make two spellings of the same fact.
+    _SPEC_BASE_ATTRS = frozenset(
+        {"_callback", "_state", "dims", "data_order", "with_units"}
+    )
+
+    def spec(self) -> dict:
+        """Return a canonical, JSON-serializable description of this signal.
+
+        The description must be *deterministic*: two signals configured
+        identically must produce equal dicts, on any machine. Provenance
+        identity depends on it.
+
+        Subclasses describe themselves by implementing ``_spec_fields``. A
+        subclass that does not is still usable -- it gets a reflective
+        description marked ``spec_incomplete`` rather than an exception,
+        because a weak provenance record beats a crashed pipeline.
+        """
+        fields = self._spec_fields()
+        incomplete = fields is None
+        if incomplete:
+            fields = self._reflective_spec_fields()
+
+        spec = {
+            "class": type(self).__name__,
+            "module": type(self).__module__,
+            "dims": list(self.dims) if self.dims else None,
+            "data_order": list(self.data_order) if self.data_order else None,
+            "with_units": self.with_units,
+            "callback": callable_spec(self._callback),
+            "fields": fields,
+        }
+        if incomplete:
+            spec["spec_incomplete"] = True
+        return spec
+
+    def _spec_fields(self):
+        """Return a dict of the fields that define this signal, or None.
+
+        Returning None selects the reflective fallback. Subclasses should
+        override this and return only the values that change *what data is
+        fetched* -- not caches, connections, or other incidental state.
+        """
+        return None
+
+    def _reflective_spec_fields(self) -> dict:
+        """Best-effort description built from public instance attributes."""
+        fields = {}
+        for key, value in sorted(vars(self).items()):
+            if key.startswith("_") or key in self._SPEC_BASE_ATTRS:
+                continue
+            if callable(value):
+                fields[key] = callable_spec(value)
+            else:
+                fields[key] = value
+        return fields
+
     def set_callback(self, func) -> "Signal":
         """Set a callback function to be called after the data is fetched in the fetch method
 
@@ -202,13 +262,49 @@ class Signal(ABC):
         return self
 
 
-    def fetch(self, shot: int) -> dict:
-        """Fetch the data for a shot
+    @classmethod
+    def _gather_accepts_pin(cls) -> bool:
+        """Whether this signal's gather can be handed a version pin.
 
-        
+        Signals written before pinning declare ``gather(self, shot)``, and
+        calling those with a keyword they do not accept is a TypeError --
+        which is precisely what happened to toksearch_mast when the pin was
+        first threaded through as a record.
+
+        Cached per class in the class's own __dict__, so a subclass never
+        inherits its parent's answer.
+        """
+        cached = cls.__dict__.get("_gather_pin_ok")
+        if cached is None:
+            params = inspect.signature(cls.gather).parameters
+            cached = ("version" in params
+                      or any(p.kind is inspect.Parameter.VAR_KEYWORD
+                             for p in params.values()))
+            cls._gather_pin_ok = cached
+        return cached
+
+    def fetch(self, shot: int, version=None, snapshot=None) -> dict:
+        """Fetch the data for a shot, optionally pinned to a stored version
+
+        ::
+
+            sig.fetch(165920)
+            sig.fetch(165920, version=2)
+            sig.fetch(165920, snapshot="catalog_20260907T232802Z")
+
+        A pin is a *locating* coordinate, like the shot itself: it says which
+        bytes to read, not how to decode them. ``version`` pins one shot;
+        ``snapshot`` resolves through that catalog rather than the newest, so
+        one value reproduces a whole campaign.
+
+        A pin is a guarantee. If it cannot be satisfied the fetch raises
+        rather than quietly answering from another version -- including when
+        the signal itself has no idea what a version is.
 
         Arguments:
             shot (int): The shot number to fetch the data for
+            version (int): Pin this shot to a stored version.
+            snapshot (str): Resolve through this catalog snapshot.
 
         Returns:
             dict: A dictionary containing the data fetched for the signal. The dictionary
@@ -221,8 +317,21 @@ class Signal(ABC):
         SignalRegistry().register(self)
 
         with _gc_disabled():
-            results = self.gather(shot)
-
+            if self._gather_accepts_pin():
+                results = self.gather(shot, version=version, snapshot=snapshot)
+            else:
+                # A signal predating version pinning. Fetching is fine; being
+                # ASKED to pin is not, because silently ignoring the pin is
+                # exactly the failure pinning exists to prevent.
+                if version is not None or snapshot is not None:
+                    raise ValueError(
+                        "{}.gather does not accept a version pin, so "
+                        "version={!r} snapshot={!r} cannot be honoured for "
+                        "shot {}. Its signature is gather(self, shot, "
+                        "version=None, snapshot=None).".format(
+                            type(self).__name__, version, snapshot, shot)
+                    )
+                results = self.gather(shot)
 
         if results and (self._callback is not None):
             results = self._callback(results)
@@ -230,11 +339,11 @@ class Signal(ABC):
         return results
 
     @abstractmethod
-    def gather(self, shot: int) -> dict:
+    def gather(self, shot: int, version=None, snapshot=None) -> dict:
         """Collect the data for a shot"""
         pass
 
-    def fetch_as_xarray(self, shot: int) -> xr.DataArray:
+    def fetch_as_xarray(self, shot: int, version=None, snapshot=None) -> xr.DataArray:
         """Fetch the data for a shot as an xarray DataArray object
 
         Returns a DataArray object with dimensions specified in the
@@ -248,7 +357,7 @@ class Signal(ABC):
                 with dimensions specified in the dims attribute of the Signal object.
         """
 
-        signal_as_dict = self.fetch(shot)
+        signal_as_dict = self.fetch(shot, version=version, snapshot=snapshot)
         d = signal_as_dict["data"]
         coords = {}
         units = signal_as_dict.get("units", {})

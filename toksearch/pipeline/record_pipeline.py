@@ -22,6 +22,7 @@ user-defined functions.
 
 from __future__ import annotations
 
+import warnings
 import os
 import copy
 import importlib
@@ -55,6 +56,7 @@ from .pipeline_funcs import (
     _PipelineKeep,
     _PipelineAlign,
     _PipelineWhere,
+    _SafeWrite,
 )
 
 from .align import XarrayAligner
@@ -81,6 +83,18 @@ if TYPE_CHECKING:
 
 from .pipeline_source import PipelineSource
 
+from ..provenance.base import safe_call
+from ..provenance.code import capture_code
+from ..provenance.context import RunContext, SourceSpec, BackendSpec
+from ..provenance.hashing import sha256_of
+from ..signal.store_catalog import (
+    load_snapshot,
+    pin_run,
+    pin_shards,
+    pin_sql_snapshots,
+    settle_sql_snapshots,
+)
+
 
 class MissingColumnName(Exception):
     pass
@@ -100,6 +114,8 @@ class Pipeline:
 
     Methods:
         from_sql: Initialize a Pipeline using the results of an sql query
+        from_catalog: Initialize a Pipeline pinned to a published catalog
+        from_snapshot: Initialize a Pipeline replaying a saved snapshot file
         __init__: Initialize a Pipeline object
         fetch: Add a signal to be fetched by the pipeline
         fetch_dataset: Create an xarray dataset field in the record
@@ -108,6 +124,7 @@ class Pipeline:
         keep: Keep only the fields specified in the list
         align: Align an xarray dataset with a specified set of coordinates
             (typically times)
+        write: Write one file per record from within the pipeline
         where: Apply a function to the records of the previous step in the pipeline,
             and keep the record if the result is truthy, remove it otherwise
         compute_shot: Run the pipeline for a single shot, returning a record object
@@ -119,6 +136,95 @@ class Pipeline:
         compute_multiprocessing: Apply the pipeline using multiprocessing
 
     """
+
+    @classmethod
+    def from_snapshot(cls, path) -> "Pipeline":
+        """Initialize a Pipeline replaying a saved snapshot file.
+
+        A saved snapshot names the exact version of every shot and shard a
+        run read, with the hashes that let a third party check them. This
+        replays it: one record per shot, each carrying its `version`, with
+        the file's catalog and shard versions pinned for the run.
+
+        It needs no new resolution path. The whole mapping is known before
+        the run starts, so the shots become ordinary per-record `version`
+        pins -- B5's path, which already works on both transports and every
+        compute backend.
+
+        Arguments:
+            path: a file written by `fdp snapshot save`, or lifted out of a
+                CMF-recorded run's `inputs.json`.
+
+        Raises:
+            SnapshotFileError: the file is missing, is not a snapshot, or
+                names no shots. Refused rather than partially honoured --
+                replaying half a snapshot reads data the citation does not
+                describe.
+            ValueError: `path` looks like a published catalog. That is
+                `Pipeline.from_catalog`.
+
+        Examples:
+            ```python
+            recs = Pipeline.from_snapshot("betan-2024.json").compute_ray()
+            ```
+        """
+        doc = load_snapshot(path)
+        pipe = cls([{"shot": e["shot"], "version": e["version"]}
+                    for e in doc["shots"]])
+        pipe._catalog = doc["catalog"]
+        # Held on the pipeline and exported at compute time, beside the
+        # catalog: a shard is resolved in the worker.
+        pipe._shards = doc.get("shared", [])
+        # fdp-snapshot/2: the SQL snapshots the run read, pinned at compute
+        # time in place of settling the newest.
+        pipe._sql_snapshots = dict(doc.get("sql_snapshots") or {})
+        return pipe
+
+    @classmethod
+    def from_catalog(cls, catalog: Optional[str], parent) -> "Pipeline":
+        """Initialize a Pipeline pinned to a published catalog
+
+        Every store read the pipeline performs resolves through `snapshot`,
+        on every backend, and the pin outranks FDP_STORE_CATALOG.
+
+        Arguments:
+            catalog: A published catalog, e.g. "catalog_20260907T232802Z".
+
+                "latest" (or None) names nothing: the pipeline resolves and
+                freezes the newest snapshot when it computes, and an ambient
+                FDP_STORE_CATALOG still wins. That is so a script can take
+                the snapshot as an argument and default it to the word,
+                without special-casing it and without losing the pin.
+            parent: As Pipeline.__init__ — shot numbers, dicts, Records, a
+                RecordSet, or another Pipeline. The last of those is what
+                lets this compose with from_sql.
+
+        Raises:
+            CatalogConflict: at compute time, if FDP_STORE_CATALOG names a
+                different catalog. A run cannot honour two pins.
+
+        Examples:
+            ```python
+            pipe = Pipeline.from_catalog(
+                "catalog_20260907T232802Z",
+                Pipeline.from_sql(conn, query))
+            ```
+
+            Taking it from the command line, where the default is the word
+            and `fdp run --snapshot X` still overrides it:
+
+            ```python
+            parser.add_argument("--catalog", default="latest")
+            args = parser.parse_args()
+            pipe = Pipeline.from_catalog(args.catalog, shots)
+            ```
+        """
+        pipe = cls(parent)
+        # Consumed at the boundary: the word is never carried, so it cannot
+        # reach the environment as a pin value.
+        if catalog and catalog.strip().lower() != "latest":
+            pipe._catalog = catalog
+        return pipe
 
     @classmethod
     def from_sql(
@@ -181,7 +287,9 @@ class Pipeline:
 
         results = [dict(zip(column_names, row)) for row in cursor.fetchall()]
 
-        return cls(results)
+        pipeline = cls(results)
+        pipeline._sql_source = {"query": query, "params": tuple(query_params)}
+        return pipeline
 
     def __init__(
         self,
@@ -226,6 +334,33 @@ class Pipeline:
             self.do_shot_cleanups = False
             self.do_cleanups = False
             self._operations = []
+
+        # Propagate through pipeline chaining; a RecordSet or shot-list parent
+        # has no query behind it.
+        self._sql_source = (
+            getattr(parent, "_sql_source", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
+
+        # Same shape, and for a sharper reason: a pin that quietly stopped
+        # applying when a pipeline was extended would be a guarantee silently
+        # withdrawn. Assigned outside the branch so neither arm can forget it.
+        self._catalog = (
+            getattr(parent, "_catalog", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
+        self._shards = (
+            getattr(parent, "_shards", None)
+            if isinstance(parent, Pipeline)
+            else None
+        )
+        self._sql_snapshots = dict(
+            getattr(parent, "_sql_snapshots", None) or {}
+            if isinstance(parent, Pipeline)
+            else {}
+        )
 
     def fetch(self, name: str, signal: "Signal"):
         """Add a signal to be fetched by the pipeline
@@ -316,6 +451,124 @@ class Pipeline:
 
         self.map(_PipelineAlign(ds_name, aligner))
 
+    def write(
+        self,
+        directory: str,
+        field: Optional[str] = None,
+        fields: Optional[List[str]] = None,
+        fmt: Optional[str] = None,
+        name: Optional[Callable] = None,
+        track: str = "directory",
+        exist_ok: bool = False,
+        path_field: str = "output_path",
+        on_error: str = "skip",
+    ):
+        """Write one file per record, in the worker that produced it.
+
+        This is the recommended way to get data out of a pipeline. Writing per
+        shot in the workers is both faster and more honest than concatenating
+        on the driver: concatenation is a transformation, and it deserves its
+        own stage rather than hiding inside a writer.
+
+        Read the results back with ``xarray.open_mfdataset(directory +
+        '/*.nc')`` where ``dask`` is installed. Without it, open per file::
+
+            import glob, xarray as xr
+            ds = xr.concat(
+                [xr.open_dataset(f) for f in sorted(glob.glob('out/*.nc'))],
+                dim='shot',
+            )
+
+        Without ``netCDF4``/``h5netcdf``, xarray writes NetCDF3 via scipy,
+        which has no int64 -- integer coordinates read back as int32.
+
+        Two forms:
+
+        **Declarative** -- pass ``field`` or ``fields``. The operation is
+        appended immediately and None is returned::
+
+            pipeline.write('out/peaks', field='ds', fmt='netcdf')
+
+        **Decorator** -- pass neither. A decorator is returned; applying it to
+        a function appends the operation and gives the function back
+        unchanged::
+
+            @pipeline.write('out/peaks', fmt='netcdf')
+            def shot_file(rec):
+                return rec['ds']
+
+        A two-argument function takes ``(record, path)``, writes the file
+        itself, and returns the path it wrote.
+
+        Arguments:
+            directory: Output directory. Created if absent.
+            field: Single record field to write.
+            fields: Several record fields, merged with ``xarray.merge``.
+            fmt: Format name ('netcdf', 'parquet', 'npy', 'npz', 'json').
+                Inferred from the object's type when omitted.
+            name: Callable ``(record) -> str`` producing the basename without
+                extension. Defaults to the shot number.
+            track: Provenance granularity. 'directory' (default) records the
+                whole directory as one artifact; 'file' records one artifact
+                per shot.
+            exist_ok: Allow writing into a non-empty directory. Off by
+                default: two runs interleaving into one directory silently
+                corrupt the directory's content hash, and ``flock`` is not
+                cross-client on BeeGFS so nothing else prevents it.
+            path_field: Record field that receives the written path.
+            on_error: What to do with a record that already carries an error
+                from an earlier operation. 'skip' (default) writes no file for
+                it, so the output directory -- and the provenance hash over it
+                -- covers exactly the shots that completed. 'write' writes
+                anyway, which means the file may be missing whatever a failed
+                stage was supposed to add.
+
+        Returns:
+            None in declarative form, a decorator in decorator form.
+        """
+        if track not in ("directory", "file"):
+            raise ValueError(
+                f"track must be 'directory' or 'file', got {track!r}"
+            )
+
+        if on_error not in ("skip", "write"):
+            raise ValueError(
+                f"on_error must be 'skip' or 'write', got {on_error!r}"
+            )
+
+        if not exist_ok and os.path.isdir(directory) and os.listdir(directory):
+            raise ValueError(
+                f"Output directory {directory!r} is not empty. Writing into "
+                f"it would mix this run's output with existing files and "
+                f"corrupt the directory's provenance hash. Use a fresh "
+                f"directory, or pass exist_ok=True if you are certain."
+            )
+
+        def _append(func=None):
+            self._append_operation(
+                _SafeWrite(
+                    directory,
+                    field=field,
+                    fields=fields,
+                    fmt=fmt,
+                    func=func,
+                    name=name,
+                    track=track,
+                    path_field=path_field,
+                    on_error=on_error,
+                )
+            )
+
+        if field is not None or fields:
+            _append()
+            return None
+
+        def decorator(func):
+            _append(func)
+            return func
+
+        return decorator
+
     def where(self, func):
         """
         Apply a func to result in the previous step in the pipeline. If
@@ -343,7 +596,10 @@ class Pipeline:
         # return self._map_single_shot(record)
 
     def compute(
-        self, recordset_cls: Type[RecordSet], config: Optional[object] = None
+        self,
+        recordset_cls: Type[RecordSet],
+        config: Optional[object] = None,
+        provenance: Optional[object] = None,
     ) -> RecordSet:
         """Apply the pipeline using a backend defined by recordset_cls
 
@@ -352,26 +608,59 @@ class Pipeline:
                 of RecordSet.
             config: Configuration object for the backend RecordSet (e.g. RayConfig if
                 using Ray, MultiprocessingConfig if using multiprocessing, etc.)
+            provenance: Optional Provenance backend. When given, the run is
+                described and recorded. Backend failures are warnings, never
+                exceptions -- see toksearch.provenance.safe_call.
 
         Returns:
             RecordSet: The record set
         """
+        # Unconditional, and before create_recordset: the correctness fix
+        # cannot be contingent on opting into provenance recording, and the
+        # worker disagreement can only be fixed before any worker exists.
+        catalog = pin_run(self._catalog)
+        pin_shards(self._shards)
+        # A replay pins the SQL snapshots its file names; any other run
+        # settles what is in force now, so workers that connect agree and
+        # the provenance record names it even if the driver never connected.
+        # If pin_sql_snapshots raises, FDP_STORE_CATALOG stays exported from
+        # pin_run above; the run fails anyway, and one catalog per process
+        # is the rule regardless.
+        sql = (pin_sql_snapshots(self._sql_snapshots) if self._sql_snapshots
+               else settle_sql_snapshots())
+        self._warn_uncovered_trees()
+
+        ctx = None
+        if provenance is not None:
+            ctx = self._run_context(recordset_cls, config, catalog,
+                                    sql_snapshots=sql)
+            safe_call(provenance, "on_compute_start", ctx)
 
         if isinstance(self.parent, RecordSet):
             initial_result = self.parent
         else:
             initial_result = self.parent.create_recordset(recordset_cls, config=config)
 
-        return initial_result.map(*self._operations)
+        result = initial_result.map(*self._operations)
+
+        if provenance is not None:
+            result.provenance = provenance
+            result.run_id = getattr(provenance, "run_id", None)
+            safe_call(provenance, "on_compute_end", ctx, result)
+
+        return result
 
     ####################### SERIAL ######################
 
-    def compute_serial(self):
+    def compute_serial(self, provenance: Optional[object] = None):
         """Apply the pipeline serially on the local host
+
+        Arguments:
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns a SerialRecordSet object
         """
-        return self.compute(SerialRecordSet)
+        return self.compute(SerialRecordSet, provenance=provenance)
 
     ####################### RAY  ######################
 
@@ -382,6 +671,7 @@ class Pipeline:
         verbose: bool = True,
         placement_group_func: Optional[Callable] = None,
         memory_per_shot: Optional[int] = None,
+        provenance: Optional[object] = None,
         **ray_init_kwargs,
     ) -> RayRecordSet:
         """Apply the pipeline using Ray
@@ -396,6 +686,7 @@ class Pipeline:
                 for more information on placement groups.
             memory_per_shot: Memory to allocate to each shot in bytes. If not provided, there
                 is no limit.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Other Arguments:
             **ray_init_kwargs: Keyword arguments to pass to ray.init
@@ -412,7 +703,7 @@ class Pipeline:
             **ray_init_kwargs,
         )
 
-        return self.compute(RayRecordSet, config=config)
+        return self.compute(RayRecordSet, config=config, provenance=provenance)
 
     ####################### SPARK  ######################
     def compute_spark(
@@ -420,6 +711,7 @@ class Pipeline:
         sc: Optional[SparkContext] = None,
         numparts: Optional[int] = None,
         cache: bool = False,
+        provenance: Optional[object] = None,
     ) -> SparkRecordSet:
         """Apply the pipeline using Spark
 
@@ -428,6 +720,7 @@ class Pipeline:
         numparts: Number of partitions to use. If not provided, defaults to the number of records.
                 will be used.
             cache: Whether to cache the RDD. Default is False.
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             SparkRecordSet: The record set
@@ -435,13 +728,14 @@ class Pipeline:
         from ..backend.spark import SparkRecordSet, ToksearchSparkConfig
 
         config = ToksearchSparkConfig(sc=sc, numparts=numparts, cache=cache)
-        return self.compute(SparkRecordSet, config=config)
+        return self.compute(SparkRecordSet, config=config, provenance=provenance)
 
     ####################### MULTIPROCESSING  ######################
     def compute_multiprocessing(
         self,
         num_workers: Optional[int] = None,
         batch_size: Union[str, int] = "auto",
+        provenance: Optional[object] = None,
     ) -> MultiprocessingRecordSet:
         """Apply the pipeline using multiprocessing
 
@@ -450,12 +744,13 @@ class Pipeline:
                 If set to None (the default), half the number of CPUs on the machine will be used.
             batch_size: The batch size to use for parallel processing, passed to joblib.Parallel.
                 Defaults to "auto".
+            provenance: Optional Provenance backend. See Pipeline.compute.
 
         Returns:
             MultiprocessingRecordSet: The record set
         """
         config = MultiprocessingConfig(num_workers=num_workers, batch_size=batch_size)
-        return self.compute(MultiprocessingRecordSet, config=config)
+        return self.compute(MultiprocessingRecordSet, config=config, provenance=provenance)
 
     ####################### Private methods ######################
 
@@ -467,3 +762,139 @@ class Pipeline:
 
     def _append_operation(self, func):
         self._operations.append(func)
+
+    def _source_spec(self) -> SourceSpec:
+        """Describe where this pipeline's records come from."""
+        if self._sql_source is not None:
+            return SourceSpec(
+                kind="sql",
+                query=self._sql_source["query"],
+                params=self._sql_source["params"],
+                hash=sha256_of(self._sql_source),
+            )
+
+        if isinstance(self.parent, RecordSet):
+            return SourceSpec(kind="recordset", count=len(self.parent))
+
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return SourceSpec(kind="unknown")
+
+        shots = sorted(rec.shot for rec in records)
+        return SourceSpec(kind="shotlist", count=len(shots), hash=sha256_of(shots))
+
+    def _warn_uncovered_trees(self) -> None:
+        """Say which trees this replay is NOT pinning.
+
+        A saved snapshot naming some shards looks better protected than one
+        naming none, and `fdp snapshot save` cannot know which trees a later
+        run will open. Here, at compute time, both are known: the snapshot's
+        shards and the trees the pipeline's signals will read.
+
+        An uncovered tree still resolves -- through whatever catalog is
+        current -- so this is a warning and not an error. What it must not be
+        is silence: the run is then reproducible for the measurement and not
+        for what it means, and nothing says so.
+        """
+        if self._shards is None:
+            return                      # not replaying a snapshot
+
+        try:
+            from ..signal.store_path import shard_key
+        except ImportError:
+            return
+
+        shots = self._shots()
+        if not shots:
+            return
+
+        trees = set()
+        for op in self._operations:
+            spec = op.spec() if hasattr(op, "spec") else None
+            if spec is None or spec.op not in ("fetch", "fetch_dataset"):
+                continue
+            fields = (spec.detail.get("signal") or {}).get("fields") or {}
+            if fields.get("treename"):
+                trees.add(fields["treename"])
+        if not trees:
+            return
+
+        covered = {e["shard"] for e in self._shards}
+        uncovered = sorted({t for t in trees
+                            if any(shard_key(t, s) not in covered
+                                   for s in shots)})
+        if not uncovered:
+            return
+
+        warnings.warn(
+            "this saved snapshot does not name the shared shards for "
+            "{}. Those trees' model data will resolve through the catalog "
+            "the snapshot names ({}), not through the snapshot -- so this "
+            "replay is pinned for the measurements and not for the "
+            "instrument description, and stops being reproducible when that "
+            "catalog is pruned. Rebuild with `--tree {}`.".format(
+                ", ".join(uncovered), self._catalog or "unset",
+                ",".join(uncovered)),
+            stacklevel=3)
+
+    def _shots(self):
+        """The shots this run will read, sorted, or None if not knowable.
+
+        `_source_spec` already computes this and keeps only its hash, which
+        cannot be turned back into a list.
+        """
+        records = getattr(self.parent, "_records", None)
+        if records is None:
+            return None
+        try:
+            return tuple(sorted(rec.shot for rec in records))
+        except (AttributeError, TypeError):
+            return None
+
+    def _run_context(
+        self, recordset_cls, config, catalog=None, sql_snapshots=None
+    ) -> RunContext:
+        """Derive the full description of the run about to happen."""
+        op_specs = tuple(
+            op.spec() for op in self._operations if hasattr(op, "spec")
+        )
+
+        signals = {}
+        for spec in op_specs:
+            if spec.op == "fetch":
+                signals[spec.detail["name"]] = spec.detail["signal"]
+            elif spec.op == "fetch_dataset":
+                key = f"{spec.detail['ds_name']}.{spec.detail['signame']}"
+                signals[key] = spec.detail["signal"]
+
+        config_dict = {}
+        if config is not None:
+            config_dict = {
+                k: v for k, v in vars(config).items() if not k.startswith("_")
+            }
+
+        store = {"catalog": catalog} if catalog else None
+        if sql_snapshots:
+            store = dict(store or {}, sql_snapshots=dict(sql_snapshots))
+
+        return RunContext(
+            source=self._source_spec(),
+            ops=op_specs,
+            signals=signals,
+            backend=BackendSpec(kind=recordset_cls.__name__, config=config_dict),
+            code=capture_code(),
+            device=self._device_hint(signals),
+            parent_run=getattr(self.parent, "run_id", None),
+            store=store,
+            shots=self._shots(),
+        )
+
+    @staticmethod
+    def _device_hint(signals) -> Optional[str]:
+        """Best-effort device name, from the modules the signals came from."""
+        modules = {s.get("module", "") or "" for s in signals.values()}
+        if any(m.startswith("toksearch_d3d") for m in modules):
+            return "d3d"
+        if any(m.startswith("toksearch_mast") for m in modules):
+            return "mast"
+        return None

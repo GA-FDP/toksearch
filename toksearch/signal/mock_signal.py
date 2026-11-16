@@ -31,7 +31,13 @@ class MockSignal(Signal):
         self.data = data if data is not None else self.default_d
         self.times = times if times is not None else self.default_t
 
-    def gather(self, shot):
+    def _spec_fields(self):
+        return {
+            "data": list(self.data),
+            "times": list(self.times),
+        }
+
+    def gather(self, shot, version=None, snapshot=None):
         results = {}
 
         results["data"] = self.data

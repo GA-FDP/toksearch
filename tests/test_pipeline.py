@@ -71,7 +71,9 @@ def idempotent_ray_init():
 
         warnings.simplefilter("ignore")
     if not ray.is_initialized():
-        temp_dir = tempfile.mkdtemp()
+        # Ray's session socket must fit AF_UNIX's 103 bytes; macOS's
+        # per-user $TMPDIR (/var/folders/...) is too long for it.
+        temp_dir = tempfile.mkdtemp(dir="/tmp" if sys.platform == "darwin" else None)
         ray.init(num_cpus=5, _temp_dir=temp_dir)
 
 
