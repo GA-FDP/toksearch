@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import unittest
 from dataclasses import dataclass
 from unittest.mock import patch, call, MagicMock
@@ -34,68 +33,42 @@ class FakeReq:
         return (self.mds_path, self.shot, self.treename)
 
 
-class TestAtlasReachable(unittest.TestCase):
-    def setUp(self):
-        # Snapshots os.environ and restores it wholesale on cleanup, so a test
-        # that sets the no-atlas var cannot leak it into the rest of the run.
-        self.enterContext(patch.dict(os.environ))
-        os.environ.pop(ri._NO_ATLAS_ENV_VAR, None)
-        ri._atlas_reachable_cache = None
-        self.addCleanup(setattr, ri, "_atlas_reachable_cache", None)
-
-    def test_no_atlas_env_var_short_circuits(self):
-        os.environ[ri._NO_ATLAS_ENV_VAR] = "1"
-        with patch.object(ri.socket, "create_connection") as mock_connect:
-            self.assertFalse(ri._atlas_reachable())
-        mock_connect.assert_not_called()
-
-    def test_reachable_when_socket_connects(self):
-        with patch.object(ri.socket, "create_connection") as mock_connect:
-            self.assertTrue(ri._atlas_reachable())
-        mock_connect.assert_called_once_with(
-            (ri._FALLBACK_MDS_SERVER, ri._ATLAS_PORT), timeout=2.0
-        )
-
-    def test_unreachable_when_socket_raises(self):
-        with patch.object(ri.socket, "create_connection", side_effect=OSError):
-            self.assertFalse(ri._atlas_reachable())
-
-    def test_result_is_cached(self):
-        with patch.object(ri.socket, "create_connection") as mock_connect:
-            ri._atlas_reachable()
-            ri._atlas_reachable()
-        mock_connect.assert_called_once()
+_SERVER_A = "server-a"
+_SERVER_B = "server-b"
+_TREELESS = "__treeless__"
 
 
 class TestFetchManyFromReq(unittest.TestCase):
     """Grouping and server-fallback logic, with both group fetchers stubbed out."""
 
     def setUp(self):
-        self.mock_atlas_reachable = self.enterContext(
-            patch.object(ri, "_atlas_reachable", return_value=True)
+        self.mock_servers = self.enterContext(
+            patch.object(ri, "_servers", return_value=[_SERVER_A, _SERVER_B])
         )
-        self.mock_ptdata = self.enterContext(
-            patch.object(ri, "_fetch_ptdata_group_via_server")
+        self.mock_treeless = MagicMock()
+        self.enterContext(
+            patch.dict(ri._TREELESS_GROUP_FETCHERS, {_TREELESS: self.mock_treeless})
         )
         self.mock_tree = self.enterContext(
             patch.object(ri, "_fetch_tree_group_via_server")
         )
+        self.mock_disconnect = self.enterContext(
+            patch.object(ri, "MdsConnectionRegistry")
+        ).return_value.disconnect
 
-    def test_ptdata_reqs_batched_in_one_ptdata_group(self):
-        reqs = [FakeReq("BT", 12345, "__ptdata__"), FakeReq("IP", 200000, "__ptdata__")]
-        self.mock_ptdata.side_effect = lambda server, group: {
-            r.as_key(): f"{server}-ptdata" for r in group
+    def test_treeless_reqs_batched_in_one_group_across_shots(self):
+        reqs = [FakeReq("BT", 12345, _TREELESS), FakeReq("IP", 200000, _TREELESS)]
+        self.mock_treeless.side_effect = lambda server, group: {
+            r.as_key(): f"{server}-treeless" for r in group
         }
 
         result = ri.fetch_many_from_req(reqs)
 
-        self.mock_ptdata.assert_called_once_with(ri._FDP_THINCLIENT_SERVER, reqs)
+        self.mock_treeless.assert_called_once_with(_SERVER_A, reqs)
         self.mock_tree.assert_not_called()
-        self.assertEqual(
-            result[reqs[0].as_key()], f"{ri._FDP_THINCLIENT_SERVER}-ptdata"
-        )
+        self.assertEqual(result[reqs[0].as_key()], f"{_SERVER_A}-treeless")
 
-    def test_tree_reqs_batched_per_group_fdp_first(self):
+    def test_tree_reqs_batched_per_group_first_server_first(self):
         reqs = [
             FakeReq("BT", 12345, "TREE_A"),
             FakeReq("IP", 12345, "TREE_A"),
@@ -110,25 +83,25 @@ class TestFetchManyFromReq(unittest.TestCase):
         self.assertEqual(
             self.mock_tree.call_args_list,
             [
-                call(ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [reqs[0], reqs[1]]),
-                call(ri._FDP_THINCLIENT_SERVER, "TREE_B", 12345, [reqs[2]]),
+                call(_SERVER_A, "TREE_A", 12345, [reqs[0], reqs[1]]),
+                call(_SERVER_A, "TREE_B", 12345, [reqs[2]]),
             ],
         )
-        self.mock_ptdata.assert_not_called()
-        self.assertEqual(
-            result[reqs[0].as_key()], f"{ri._FDP_THINCLIENT_SERVER}-TREE_A-12345"
-        )
+        self.mock_treeless.assert_not_called()
+        self.assertEqual(result[reqs[0].as_key()], f"{_SERVER_A}-TREE_A-12345")
 
-    def test_fdp_failure_falls_back_to_atlas(self):
+    def test_first_server_failure_falls_back_to_next(self):
         reqs = [FakeReq("BT", 12345, "TREE_A")]
 
-        # One entry per expected attempt: the FDP thin client is down, the
-        # follow-up atlas attempt returns data. Sequenced rather than dispatched
-        # on the server argument so the raise happens inside mock rather than in
-        # a test-local function, which debuggers flag as user-unhandled.
+        # One entry per expected attempt: the first server is down for both of
+        # its attempts, the next server returns data. Sequenced rather than
+        # dispatched on the server argument so the raise happens inside mock
+        # rather than in a test-local function, which debuggers flag as
+        # user-unhandled.
         self.mock_tree.side_effect = [
-            RuntimeError("fdp down"),
-            {reqs[0].as_key(): "atlas-batch"},
+            RuntimeError("server-a down"),
+            RuntimeError("server-a down"),
+            {reqs[0].as_key(): "server-b-batch"},
         ]
 
         # assertLogs both captures the expected "trying next server" warning --
@@ -137,31 +110,31 @@ class TestFetchManyFromReq(unittest.TestCase):
         with self.assertLogs(ri._log, "WARNING") as logs:
             result = ri.fetch_many_from_req(reqs)
 
-        self.assertIn("fdp down", "\n".join(logs.output))
+        self.assertIn("server-a down", "\n".join(logs.output))
         self.assertEqual(
             self.mock_tree.call_args_list,
             [
-                call(ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, reqs),
-                call(ri._FALLBACK_MDS_SERVER, "TREE_A", 12345, reqs),
+                call(_SERVER_A, "TREE_A", 12345, reqs),
+                call(_SERVER_A, "TREE_A", 12345, reqs),
+                call(_SERVER_B, "TREE_A", 12345, reqs),
             ],
         )
-        self.assertEqual(result[reqs[0].as_key()], "atlas-batch")
+        self.assertEqual(result[reqs[0].as_key()], "server-b-batch")
 
-    def test_atlas_skipped_when_unreachable(self):
+    def test_single_server_failure_stores_exception_in_band(self):
         reqs = [FakeReq("BT", 12345, "TREE_A")]
-        boom = RuntimeError("fdp down")
-        self.mock_atlas_reachable.return_value = False
+        boom = RuntimeError("server-a down")
+        self.mock_servers.return_value = [_SERVER_A]
         self.mock_tree.side_effect = boom
 
         with self.assertLogs(ri._log, "WARNING"):
             result = ri.fetch_many_from_req(reqs)
 
-        self.mock_tree.assert_called_once_with(
-            ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, reqs
-        )
+        self.assertEqual(self.mock_tree.call_count, ri._ATTEMPTS_PER_SERVER)
+        self.mock_tree.assert_called_with(_SERVER_A, "TREE_A", 12345, reqs)
         self.assertIs(result[reqs[0].as_key()], boom)
 
-    def test_both_servers_fail_stores_exception_in_band(self):
+    def test_all_servers_fail_stores_exception_in_band(self):
         reqs = [FakeReq("BT", 12345, "TREE_A"), FakeReq("IP", 12345, "TREE_A")]
         boom = RuntimeError("all down")
         self.mock_tree.side_effect = boom
@@ -169,9 +142,85 @@ class TestFetchManyFromReq(unittest.TestCase):
         with self.assertLogs(ri._log, "WARNING"):
             result = ri.fetch_many_from_req(reqs)
 
-        self.assertEqual(self.mock_tree.call_count, 2)
+        self.assertEqual(self.mock_tree.call_count, 2 * ri._ATTEMPTS_PER_SERVER)
         self.assertIs(result[reqs[0].as_key()], boom)
         self.assertIs(result[reqs[1].as_key()], boom)
+
+    def test_a_failed_batch_is_retried_on_a_fresh_connection(self):
+        """The bug this exists for: over fdp:// a failed batch can leave the
+        relay session retired, and MdsConnectionRegistry caches that dead
+        MDSplus.Connection for the life of the process. Without dropping it,
+        every later group fails identically -- 26 test failures from one slow
+        call in GA-FDP/imas_composer CI run 33033220932.
+        """
+        reqs = [FakeReq("BT", 12345, _TREELESS)]
+        self.mock_treeless.side_effect = [
+            RuntimeError("%MDSPLUS-E-ERROR, Error"),
+            {reqs[0].as_key(): "second-try"},
+        ]
+
+        with self.assertLogs(ri._log, "WARNING"):
+            result = ri.fetch_many_from_req(reqs)
+
+        # Retried against the same server, not handed straight to the next.
+        self.assertEqual(
+            self.mock_treeless.call_args_list,
+            [call(_SERVER_A, reqs), call(_SERVER_A, reqs)],
+        )
+        self.mock_disconnect.assert_called_once_with(_SERVER_A)
+        self.assertEqual(result[reqs[0].as_key()], "second-try")
+
+    def test_a_poisoned_connection_is_dropped_even_when_the_retry_fails(self):
+        """Leaving it cached would carry the dead session into the next group,
+        which is precisely the cascade being fixed."""
+        reqs = [FakeReq("BT", 12345, _TREELESS)]
+        boom = RuntimeError("%MDSPLUS-E-ERROR, Error")
+        self.mock_servers.return_value = [_SERVER_A]
+        self.mock_treeless.side_effect = boom
+
+        with self.assertLogs(ri._log, "WARNING"):
+            result = ri.fetch_many_from_req(reqs)
+
+        self.assertEqual(
+            self.mock_disconnect.call_args_list,
+            [call(_SERVER_A)] * ri._ATTEMPTS_PER_SERVER,
+        )
+        self.assertIs(result[reqs[0].as_key()], boom)
+
+    def test_a_succeeding_batch_keeps_its_connection(self):
+        """The retry must not cost a redial on the happy path -- that is the
+        workload the cached connection exists for."""
+        reqs = [FakeReq("BT", 12345, _TREELESS)]
+        self.mock_treeless.side_effect = lambda server, group: {
+            r.as_key(): "ok" for r in group
+        }
+
+        ri.fetch_many_from_req(reqs)
+
+        self.mock_treeless.assert_called_once()
+        self.mock_disconnect.assert_not_called()
+
+    def test_dropping_a_connection_never_masks_the_real_failure(self):
+        """disconnect() talks to the network too. If it raises, the caller must
+        still see why the fetch failed, not why the cleanup did."""
+        reqs = [FakeReq("BT", 12345, "TREE_A")]
+        boom = RuntimeError("the real failure")
+        self.mock_servers.return_value = [_SERVER_A]
+        self.mock_tree.side_effect = boom
+        self.mock_disconnect.side_effect = OSError("cleanup failed")
+
+        with self.assertLogs(ri._log, "WARNING"):
+            result = ri.fetch_many_from_req(reqs)
+
+        self.assertIs(result[reqs[0].as_key()], boom)
+
+
+class TestNoServersConfigured(unittest.TestCase):
+    def test_fetch_raises_without_device_package(self):
+        # No device package is imported in toksearch's own tests, so _servers
+        # is still the generic default.
+        with self.assertRaisesRegex(RuntimeError, "No MDSplus servers configured"):
+            ri.fetch_many_from_req([FakeReq("BT", 12345, "TREE_A")])
 
 
 class TestFetchTreeGroupViaServer(unittest.TestCase):
@@ -193,11 +242,11 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
             mock_registry_cls.return_value.connect.return_value = mock_conn
             result = ri._fetch_tree_group_via_server(
-                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, reqs
+                _SERVER_A, "TREE_A", 12345, reqs
             )
 
         mock_registry_cls.return_value.connect.assert_called_once_with(
-            ri._FDP_THINCLIENT_SERVER
+            _SERVER_A
         )
         mock_conn.openTree.assert_called_once_with("TREE_A", 12345)
         self.assertEqual(mock_many.append.call_count, 2)
@@ -219,7 +268,7 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
             mock_registry_cls.return_value.connect.return_value = mock_conn
             result = ri._fetch_tree_group_via_server(
-                ri._FALLBACK_MDS_SERVER, "TREE_A", 12345, reqs
+                _SERVER_B, "TREE_A", 12345, reqs
             )
 
         error = result[reqs[0].as_key()]
@@ -239,7 +288,7 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
             mock_registry_cls.return_value.connect.return_value = mock_conn
             result = ri._fetch_tree_group_via_server(
-                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [batched, isolated]
+                _SERVER_A, "TREE_A", 12345, [batched, isolated]
             )
 
         mock_conn.get.assert_called_once_with("NAMELISTS:KEQDSKS")
@@ -256,7 +305,7 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
             mock_registry_cls.return_value.connect.return_value = mock_conn
             result = ri._fetch_tree_group_via_server(
-                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [isolated]
+                _SERVER_A, "TREE_A", 12345, [isolated]
             )
 
         mock_conn.getMany.assert_not_called()
@@ -271,76 +320,12 @@ class TestFetchTreeGroupViaServer(unittest.TestCase):
         with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
             mock_registry_cls.return_value.connect.return_value = mock_conn
             result = ri._fetch_tree_group_via_server(
-                ri._FDP_THINCLIENT_SERVER, "TREE_A", 12345, [isolated]
+                _SERVER_A, "TREE_A", 12345, [isolated]
             )
 
         self.assertIsInstance(
             result[isolated.as_key()], MDSplus.mdsExceptions.TreeNODATA
         )
-
-
-class TestFetchPtdataGroupViaServer(unittest.TestCase):
-    def test_batches_ptdata_without_opening_a_tree(self):
-        # Differing shots still share a single getMany, since ptdata2() needs no
-        # open tree.
-        reqs = [FakeReq("BT", 12345, "__ptdata__"), FakeReq("IP", 200000, "__ptdata__")]
-
-        mock_conn = MagicMock()
-        mock_many = MagicMock()
-        mock_conn.getMany.return_value = mock_many
-
-        values = {
-            "d0": 1.0, "t0": 10.0, "r0": [1, 2, 3, 4, 5],
-            "d1": 2.0, "t1": 20.0, "r1": [6, 7, 8, 9, 10],
-        }
-
-        def _get(name):
-            node = MagicMock()
-            node.data.return_value = values[name]
-            return node
-
-        mock_many.get.side_effect = _get
-
-        with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
-            mock_registry_cls.return_value.connect.return_value = mock_conn
-            result = ri._fetch_ptdata_group_via_server(
-                ri._FDP_THINCLIENT_SERVER, reqs
-            )
-
-        mock_registry_cls.return_value.connect.assert_called_once_with(
-            ri._FDP_THINCLIENT_SERVER
-        )
-        mock_conn.openTree.assert_not_called()
-        mock_conn.getMany.assert_called_once()
-        # Three TDI forms per req, all in one getMany.
-        self.assertEqual(mock_many.append.call_count, 6)
-        mock_many.append.assert_any_call("d0", 'ptdata2("BT", 12345)')
-        mock_many.append.assert_any_call("t0", 'dim_of(ptdata2("BT", 12345), 0)')
-        mock_many.append.assert_any_call("r0", 'pthead2("BT", 12345), __rarray')
-        mock_many.append.assert_any_call("d1", 'ptdata2("IP", 200000)')
-        mock_many.execute.assert_called_once()
-        self.assertEqual(
-            result[reqs[0].as_key()],
-            {"data": 1.0, "times": 10.0, "rarray": [1, 2, 3, 4, 5]},
-        )
-        self.assertEqual(
-            result[reqs[1].as_key()],
-            {"data": 2.0, "times": 20.0, "rarray": [6, 7, 8, 9, 10]},
-        )
-
-    def test_per_req_failure_is_stored_in_band(self):
-        reqs = [FakeReq("NOSUCHPOINT", 12345, "__ptdata__")]
-
-        mock_conn = MagicMock()
-        mock_many = MagicMock()
-        mock_conn.getMany.return_value = mock_many
-        mock_many.get.side_effect = ValueError("%TREE-E-NODATA")
-
-        with patch.object(ri, "MdsConnectionRegistry") as mock_registry_cls:
-            mock_registry_cls.return_value.connect.return_value = mock_conn
-            result = ri._fetch_ptdata_group_via_server(ri._FALLBACK_MDS_SERVER, reqs)
-
-        self.assertIsInstance(result[reqs[0].as_key()], ValueError)
 
 
 if __name__ == "__main__":
