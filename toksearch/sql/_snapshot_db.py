@@ -25,6 +25,7 @@ import re
 import ssl
 import sys
 import threading
+import time
 import warnings
 
 from .snapshot import (
@@ -359,6 +360,13 @@ class SnapshotConnection:
 
 #: an HTTP auth refusal in a DuckDB error, as httpfs words it
 _AUTH_FAILURE = re.compile(r"HTTP (401|403)\b")
+#: a TLS verification failure, as httpfs words it. The director picks a cache
+#: per request, so it is retried: one cache in the rotation has failed TLS
+#: intermittently (2026-11) while every other verified.
+_TLS_FAILURE = re.compile(r"SSL peer certificate or SSH remote key was not OK")
+#: retries after a TLS failure, and the pause before each
+TLS_RETRIES = 2
+TLS_RETRY_PAUSE = 1.0
 
 
 class SnapshotCursor:
@@ -377,6 +385,7 @@ class SnapshotCursor:
         conn = self._conn
         started_with = conn._token_seen
         reauthorized = False
+        tls_retries = 0
         bound = 0
         pending_bind = None    # a table DuckDB reported missing, bound in the try
         while True:
@@ -395,6 +404,14 @@ class SnapshotCursor:
                 auth_failure = _AUTH_FAILURE.search(text)
                 if auth_failure and not reauthorized and conn._refresh_token(started_with):
                     reauthorized = True        # one re-read of the token, one retry
+                    continue
+                if _TLS_FAILURE.search(text) and tls_retries < TLS_RETRIES:
+                    tls_retries += 1
+                    warnings.warn(
+                        "[snapshot {}] TLS verification failed reading the "
+                        "snapshot; retrying through another cache ({}/{})".format(
+                            conn.snapshot, tls_retries, TLS_RETRIES), RuntimeWarning)
+                    time.sleep(TLS_RETRY_PAUSE)
                     continue
                 missing = (None if auth_failure
                            or not isinstance(exc, duckdb.CatalogException)
