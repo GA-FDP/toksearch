@@ -361,8 +361,9 @@ class SnapshotConnection:
 #: an HTTP auth refusal in a DuckDB error, as httpfs words it
 _AUTH_FAILURE = re.compile(r"HTTP (401|403)\b")
 #: a TLS verification failure, as httpfs words it. The director picks a cache
-#: per request, so it is retried: one cache in the rotation has failed TLS
-#: intermittently (2026-11) while every other verified.
+#: per request, so it is retried: in 2026-11 snapshot reads failed TLS
+#: intermittently even with a current CA bundle, while every cache probed
+#: verified, and httpfs never names the cache it was redirected to.
 _TLS_FAILURE = re.compile(r"SSL peer certificate or SSH remote key was not OK")
 #: retries after a TLS failure, and the pause before each
 TLS_RETRIES = 2
