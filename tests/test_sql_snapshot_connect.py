@@ -249,6 +249,17 @@ class TestConnection(unittest.TestCase):
         sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
         self.assertEqual(sqls[:2], ["INSTALL httpfs", "LOAD httpfs"])
 
+    def test_tls_verifies_against_the_environments_ca_bundle(self):
+        fake = mock.Mock(Error=duckdb.Error)
+        paths = mock.Mock(cafile="/env/ssl/cert.pem")
+        for platform in ("linux", "darwin"):
+            fake.reset_mock()
+            with mock.patch("sys.platform", platform), \
+                    mock.patch("ssl.get_default_verify_paths", return_value=paths):
+                snapshot._open_duckdb(fake, None)
+            sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
+            self.assertIn("SET ca_cert_file = '/env/ssl/cert.pem'", sqls, platform)
+
     def test_macos_install_failure_names_the_repository(self):
         fake = mock.Mock(Error=duckdb.Error)
         fake.connect.return_value.execute.side_effect = duckdb.IOException("offline")
@@ -352,7 +363,7 @@ class TestSecretRedaction(unittest.TestCase):
             def execute(self, sql):
                 if "SECRET" in sql:
                     raise duckdb.ParserException("syntax error at or near: " + sql)
-                if sql == "LOAD httpfs":
+                if sql == "LOAD httpfs" or sql.startswith("SET ca_cert_file"):
                     return None
                 return real.execute(sql)
 

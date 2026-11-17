@@ -22,6 +22,7 @@ its module `__getattr__`, so either module may be imported first.
 
 import os
 import re
+import ssl
 import sys
 import threading
 import warnings
@@ -114,6 +115,12 @@ def _open_duckdb(duckdb, token, base=None):
                 "duckdb-extension-httpfs from conda-forge; it is not fetched "
                 "from the network at first use.".format(
                     str(exc).splitlines()[0])) from exc
+    # httpfs otherwise verifies TLS against the host's system bundle, which
+    # can predate a root the OSDF caches use (RHEL 8's 2022 bundle lacks
+    # SSL.com TLS RSA Root CA 2022); the environment's own bundle is current.
+    cafile = ssl.get_default_verify_paths().cafile
+    if cafile:
+        con.execute("SET ca_cert_file = " + _sql_literal(cafile))
     if token:
         _set_secret(duckdb, con, token, base)
     con.execute("SET enable_object_cache = true")
