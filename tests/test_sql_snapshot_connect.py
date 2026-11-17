@@ -21,7 +21,7 @@ except ImportError:
 from fdp_schema import SqlSnapshotLocator
 
 import sql_fixture
-from toksearch.sql import snapshot
+from toksearch.sql import snapshot, _snapshot_db
 
 
 @contextlib.contextmanager
@@ -353,6 +353,62 @@ class TestConnection(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (conda-forge: python-duckdb duckdb-extension-httpfs sqlglot)")
+class TestTlsRetry(unittest.TestCase):
+    """The director picks a cache per request, so a TLS failure is retried."""
+
+    TLS = ("IO Error: SSL peer certificate or SSH remote key was not OK error "
+           "for HTTP HEAD to 'https://director/x.parquet'")
+
+    def cursor_failing(self, times):
+        calls = []
+
+        class Cur:
+            def execute(self, sql, *params):
+                calls.append(sql)
+                if len(calls) <= times:
+                    raise duckdb.IOException(TestTlsRetry.TLS)
+
+        conn = mock.Mock(_nocase=False, _token_seen=None, snapshot="d3drdb_x")
+        conn._ensure_tables.return_value = None
+        return snapshot.SnapshotCursor(conn, Cur()), calls
+
+    def test_a_tls_failure_is_retried_and_warns(self):
+        cur, calls = self.cursor_failing(times=1)
+        with mock.patch.object(_snapshot_db, "TLS_RETRY_PAUSE", 0), \
+                warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cur.execute("SELECT 1")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(caught), 1)
+        self.assertIn("retrying", str(caught[0].message))
+
+    def test_retries_are_bounded_and_the_error_surfaces(self):
+        cur, calls = self.cursor_failing(times=99)
+        with mock.patch.object(_snapshot_db, "TLS_RETRY_PAUSE", 0), \
+                warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            conn = cur._conn
+            conn._explain.side_effect = lambda exc, note: snapshot.SnapshotError(str(exc))
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                cur.execute("SELECT 1")
+        self.assertEqual(len(calls), 1 + _snapshot_db.TLS_RETRIES)
+        self.assertIn("SSL peer certificate", str(cm.exception))
+
+    def test_control_other_io_errors_are_not_retried(self):
+        calls = []
+
+        class Cur:
+            def execute(self, sql, *params):
+                calls.append(sql)
+                raise duckdb.IOException("IO Error: Connection refused")
+
+        conn = mock.Mock(_nocase=False, _token_seen=None, snapshot="d3drdb_x")
+        conn._explain.side_effect = lambda exc, note: snapshot.SnapshotError(str(exc))
+        with self.assertRaises(snapshot.SnapshotError):
+            snapshot.SnapshotCursor(conn, Cur()).execute("SELECT 1")
+        self.assertEqual(len(calls), 1)
+
+
 class TestSecretRedaction(unittest.TestCase):
     TOKEN = "s3cret-token-value-0123"
 
