@@ -42,11 +42,31 @@ set the environment variables for the MDSplus trees.
 """
 
 import logging
+import os
+import sys
+
+# MDSplus locates its DCL command tables (e.g. mdsdcl_commands.xml) via
+# $MDSPLUS_DIR/xml/, falling back to the cwd if unset. Conda/mamba/pixi
+# don't export this, and users often invoke the interpreter directly
+# without activating the environment, so set it from sys.prefix before
+# MDSplus loads its shared libraries. An explicit user setting wins.
+if "MDSPLUS_DIR" not in os.environ and os.path.exists(
+    os.path.join(sys.prefix, "xml", "mdsdcl_commands.xml")
+):
+    os.environ["MDSPLUS_DIR"] = sys.prefix
+
+# On macOS, importing MDSplus copies $MDSPLUS_DIR/lib into DYLD_LIBRARY_PATH,
+# which subprocesses inherit: non-conda binaries such as Homebrew git then
+# load conda's libiconv and abort. Conda's rpaths already find MDSplus's
+# libraries, so undo it unless the user set the variable themselves.
+_dyld_library_path_preset = "DYLD_LIBRARY_PATH" in os.environ
 
 import MDSplus as mds
 from MDSplus.mdsExceptions import MDSplusERROR
+
+if sys.platform == "darwin" and not _dyld_library_path_preset:
+    os.environ.pop("DYLD_LIBRARY_PATH", None)
 import pdb
-import os
 import contextlib
 from urllib.parse import urlparse
 import numpy as np
