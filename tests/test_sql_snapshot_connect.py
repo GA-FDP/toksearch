@@ -21,7 +21,7 @@ except ImportError:
 from fdp_schema import SqlSnapshotLocator
 
 import sql_fixture
-from toksearch.sql import snapshot
+from toksearch.sql import snapshot, _snapshot_db
 
 
 @contextlib.contextmanager
@@ -77,6 +77,18 @@ class TestConnection(unittest.TestCase):
             self.assertEqual(conn.snapshot, "d3drdb_20261005T120000Z")
             self.assertEqual(conn.manifest["id"], "d3drdb_20261005T120000Z")
             self.assertEqual(os.environ["FDP_SQL_SNAPSHOT_D3DRDB"], "d3drdb_20261005T120000Z")
+
+    def test_cursors_verify_tls_against_the_environments_ca_bundle(self):
+        # Every query runs on a cursor, a new DuckDB connection: a plain SET on
+        # the parent does not reach it, and httpfs falls back to the host's
+        # bundle (macOS's lacks SSL.com TLS RSA Root CA 2022).
+        paths = mock.Mock(cafile="/env/ssl/cert.pem")
+        with mock.patch("ssl.get_default_verify_paths", return_value=paths):
+            conn = self.connect()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT current_setting('ca_cert_file')")
+            self.assertEqual(cur.fetchone(), ("/env/ssl/cert.pem",))
 
     def test_tsql_runs_unchanged(self):
         with self.connect() as conn:
@@ -249,6 +261,17 @@ class TestConnection(unittest.TestCase):
         sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
         self.assertEqual(sqls[:2], ["INSTALL httpfs", "LOAD httpfs"])
 
+    def test_tls_verifies_against_the_environments_ca_bundle(self):
+        fake = mock.Mock(Error=duckdb.Error)
+        paths = mock.Mock(cafile="/env/ssl/cert.pem")
+        for platform in ("linux", "darwin"):
+            fake.reset_mock()
+            with mock.patch("sys.platform", platform), \
+                    mock.patch("ssl.get_default_verify_paths", return_value=paths):
+                snapshot._open_duckdb(fake, None)
+            sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
+            self.assertIn("SET GLOBAL ca_cert_file = '/env/ssl/cert.pem'", sqls, platform)
+
     def test_macos_install_failure_names_the_repository(self):
         fake = mock.Mock(Error=duckdb.Error)
         fake.connect.return_value.execute.side_effect = duckdb.IOException("offline")
@@ -342,6 +365,62 @@ class TestConnection(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_DUCKDB, "duckdb/sqlglot not installed (conda-forge: python-duckdb duckdb-extension-httpfs sqlglot)")
+class TestTlsRetry(unittest.TestCase):
+    """The director picks a cache per request, so a TLS failure is retried."""
+
+    TLS = ("IO Error: SSL peer certificate or SSH remote key was not OK error "
+           "for HTTP HEAD to 'https://director/x.parquet'")
+
+    def cursor_failing(self, times):
+        calls = []
+
+        class Cur:
+            def execute(self, sql, *params):
+                calls.append(sql)
+                if len(calls) <= times:
+                    raise duckdb.IOException(TestTlsRetry.TLS)
+
+        conn = mock.Mock(_nocase=False, _token_seen=None, snapshot="d3drdb_x")
+        conn._ensure_tables.return_value = None
+        return snapshot.SnapshotCursor(conn, Cur()), calls
+
+    def test_a_tls_failure_is_retried_and_warns(self):
+        cur, calls = self.cursor_failing(times=1)
+        with mock.patch.object(_snapshot_db, "TLS_RETRY_PAUSE", 0), \
+                warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            cur.execute("SELECT 1")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(caught), 1)
+        self.assertIn("retrying", str(caught[0].message))
+
+    def test_retries_are_bounded_and_the_error_surfaces(self):
+        cur, calls = self.cursor_failing(times=99)
+        with mock.patch.object(_snapshot_db, "TLS_RETRY_PAUSE", 0), \
+                warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            conn = cur._conn
+            conn._explain.side_effect = lambda exc, note: snapshot.SnapshotError(str(exc))
+            with self.assertRaises(snapshot.SnapshotError) as cm:
+                cur.execute("SELECT 1")
+        self.assertEqual(len(calls), 1 + _snapshot_db.TLS_RETRIES)
+        self.assertIn("SSL peer certificate", str(cm.exception))
+
+    def test_control_other_io_errors_are_not_retried(self):
+        calls = []
+
+        class Cur:
+            def execute(self, sql, *params):
+                calls.append(sql)
+                raise duckdb.IOException("IO Error: Connection refused")
+
+        conn = mock.Mock(_nocase=False, _token_seen=None, snapshot="d3drdb_x")
+        conn._explain.side_effect = lambda exc, note: snapshot.SnapshotError(str(exc))
+        with self.assertRaises(snapshot.SnapshotError):
+            snapshot.SnapshotCursor(conn, Cur()).execute("SELECT 1")
+        self.assertEqual(len(calls), 1)
+
+
 class TestSecretRedaction(unittest.TestCase):
     TOKEN = "s3cret-token-value-0123"
 
@@ -352,7 +431,7 @@ class TestSecretRedaction(unittest.TestCase):
             def execute(self, sql):
                 if "SECRET" in sql:
                     raise duckdb.ParserException("syntax error at or near: " + sql)
-                if sql == "LOAD httpfs":
+                if sql == "LOAD httpfs" or sql.startswith("SET GLOBAL ca_cert_file"):
                     return None
                 return real.execute(sql)
 
