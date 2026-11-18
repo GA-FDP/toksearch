@@ -78,6 +78,18 @@ class TestConnection(unittest.TestCase):
             self.assertEqual(conn.manifest["id"], "d3drdb_20261005T120000Z")
             self.assertEqual(os.environ["FDP_SQL_SNAPSHOT_D3DRDB"], "d3drdb_20261005T120000Z")
 
+    def test_cursors_verify_tls_against_the_environments_ca_bundle(self):
+        # Every query runs on a cursor, a new DuckDB connection: a plain SET on
+        # the parent does not reach it, and httpfs falls back to the host's
+        # bundle (macOS's lacks SSL.com TLS RSA Root CA 2022).
+        paths = mock.Mock(cafile="/env/ssl/cert.pem")
+        with mock.patch("ssl.get_default_verify_paths", return_value=paths):
+            conn = self.connect()
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT current_setting('ca_cert_file')")
+            self.assertEqual(cur.fetchone(), ("/env/ssl/cert.pem",))
+
     def test_tsql_runs_unchanged(self):
         with self.connect() as conn:
             cur = conn.cursor()
@@ -258,7 +270,7 @@ class TestConnection(unittest.TestCase):
                     mock.patch("ssl.get_default_verify_paths", return_value=paths):
                 snapshot._open_duckdb(fake, None)
             sqls = [c.args[0] for c in fake.connect.return_value.execute.call_args_list]
-            self.assertIn("SET ca_cert_file = '/env/ssl/cert.pem'", sqls, platform)
+            self.assertIn("SET GLOBAL ca_cert_file = '/env/ssl/cert.pem'", sqls, platform)
 
     def test_macos_install_failure_names_the_repository(self):
         fake = mock.Mock(Error=duckdb.Error)
@@ -419,7 +431,7 @@ class TestSecretRedaction(unittest.TestCase):
             def execute(self, sql):
                 if "SECRET" in sql:
                     raise duckdb.ParserException("syntax error at or near: " + sql)
-                if sql == "LOAD httpfs" or sql.startswith("SET ca_cert_file"):
+                if sql == "LOAD httpfs" or sql.startswith("SET GLOBAL ca_cert_file"):
                     return None
                 return real.execute(sql)
 
