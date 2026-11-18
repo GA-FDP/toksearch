@@ -74,6 +74,9 @@ _RUN_PYTHON_DESCRIPTION = (
 
 
 def _run_python_handler(args: dict, session) -> ToolOutput:
+    executor = getattr(session, "executor", None)
+    if executor is not None:
+        return executor.run(args["code"], thought=args.get("thought"))
     code = args["code"]
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()

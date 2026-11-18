@@ -27,6 +27,7 @@ llm = [
     "matplotlib",
     "claude-agent-sdk>=0.2",
     "mcp>=1.23,<2",
+    "cloudpickle>=3",
 ]
 
 [project.entry-points."toksearch.llm.namespace"]

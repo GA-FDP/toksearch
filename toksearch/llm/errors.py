@@ -35,6 +35,10 @@ class LLMBackendError(LLMError):
     """Backend returned an unrecoverable error: 5xx, network failure after retries."""
 
 
+class LLMResumeError(LLMBackendError):
+    """A saved conversation could not be resumed; start fresh with a recap."""
+
+
 class LLMRateLimitError(LLMError):
     """Rate-limited by the provider; ``Retry-After`` exhausted."""
 

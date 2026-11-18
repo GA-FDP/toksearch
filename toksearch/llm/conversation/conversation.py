@@ -1,0 +1,371 @@
+# Copyright 2024 General Atomics
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Conversation: a Session whose chat, model context and variables survive a stop.
+
+Every event is appended to events.jsonl as it happens. After each turn the
+history is saved and the worker's namespace is checkpointed. open() restores
+the model's context (SDK resume from the folder's transcript for claude-max,
+history.jsonl otherwise), falling back to a recap built from events.jsonl,
+and prefixes the next prompt with a note saying what was and was not
+restored. Variables are loaded by the worker when Python next runs.
+"""
+
+import json
+import os
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from ..errors import LLMResumeError
+from ..kernel.checkpoint import read_index
+from ..kernel.client import KernelClient, KernelError
+from ..kernel.executor import KernelExecutor
+from ..messages import message_to_dict
+from .claude_store import FolderSessionStore
+from .events import EventLog
+from .folder import ConversationFolder, default_root
+from .history import load_history, save_history
+from .recap import build_recap
+from .restore_note import restore_messages
+
+HISTORY_CHAR_BUDGET = 400_000
+TITLE_LENGTH = 80
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _chain(first, second):
+    if second is None:
+        return first
+    def both(x):
+        first(x)
+        second(x)
+    return both
+
+
+def _worker_packages(session, packages):
+    """The worker's packages: ``packages`` if given, else the Session's.
+
+    Raises ValueError for a Session built with extra_namespace: those
+    objects live in this process and cannot be sent to the worker.
+    """
+    if getattr(session, "extra_namespace", None):
+        raise ValueError(
+            "a Conversation runs Python in a separate worker, which cannot "
+            "receive the Session's extra_namespace objects; build the "
+            "Session without extra_namespace")
+    return getattr(session, "packages", None) if packages is None else packages
+
+
+def _turn_left_open(events) -> bool:
+    """True if the last user turn has no turn_end (the app stopped mid-turn)."""
+    for e in reversed(events):
+        if e.get("type") == "turn_end":
+            return False
+        if e.get("type") == "user":
+            return True
+    return False
+
+
+class Conversation:
+    def __init__(self, session, folder: ConversationFolder, *, packages=None,
+                 client_factory=KernelClient):
+        packages = _worker_packages(session, packages)
+        self.session = session
+        self.folder = folder
+        self.events = EventLog(folder.events_path)
+        self.restore_line: str | None = None
+        self._pending_note: str | None = None
+        self._restore_parts: tuple | None = None
+        self.client = client_factory(packages,
+                                     checkpoint_dir=folder.namespace_dir)
+        next_cell = 1 + max((e["cell"] for e in self.events.read()
+                             if e.get("type") == "cell"), default=0)
+        self.executor = KernelExecutor(self.client, folder.figures_dir,
+                                       first_cell=next_cell,
+                                       on_cell=self._on_cell)
+        session.executor = self.executor
+
+    # ---- construction ----
+
+    @classmethod
+    def create(cls, session, root=None, *, now=None, packages=None,
+               client_factory=KernelClient) -> "Conversation":
+        """Start a new conversation folder under ``root``.
+
+        ``packages`` (the worker's) defaults to the Session's.
+        """
+        packages = _worker_packages(session, packages)
+        folder = ConversationFolder.create(
+            root if root is not None else default_root(), now=now)
+        folder.acquire_lock()
+        try:
+            folder.update_meta(backend=session.backend.name,
+                               model=session.model)
+            session.history = []    # a reused Session must not carry another chat
+            conv = cls(session, folder, packages=packages,
+                       client_factory=client_factory)
+            conv._start_backend_fresh()
+        except BaseException:
+            folder.release_lock()
+            raise
+        return conv
+
+    @classmethod
+    def open(cls, session, path, *, packages=None, force=False,
+             client_factory=KernelClient) -> "Conversation":
+        """Reopen the conversation at ``path``; packages default as in create.
+
+        Raises ConversationInUse if another process has it open. With
+        ``force=True`` the lock is broken first ("open anyway"); the caller
+        should confirm with the user, since two processes writing one
+        folder corrupt it.
+        """
+        packages = _worker_packages(session, packages)
+        folder = ConversationFolder(Path(path))
+        meta = folder.read_meta()
+        if force:
+            folder.break_lock()
+        folder.acquire_lock()
+        try:
+            return cls._open_locked(session, folder, meta, packages,
+                                    client_factory)
+        except BaseException:
+            folder.release_lock()
+            raise
+
+    @classmethod
+    def _open_locked(cls, session, folder, meta, packages, client_factory):
+        session.history = []    # restored below, or left empty for a recap
+        conv = cls(session, folder, packages=packages,
+                   client_factory=client_factory)
+        events = conv.events.read()
+        if _turn_left_open(events):
+            conv.events.append({"type": "turn_end", "status": "interrupted"})
+        context_restored = conv._restore_model_context(meta)
+        recap = (build_recap(events)
+                 if events and not context_restored else None)
+        index = read_index(folder.namespace_dir)
+        saved_version = (index or {}).get("fdp_core_version",
+                                          meta.get("fdp_core_version"))
+        conv._restore_parts = (index, saved_version,
+                               os.environ.get("FDP_CORE_VERSION"))
+        note, line = restore_messages(*conv._restore_parts, recap=recap)
+        conv._pending_note, conv.restore_line = note, line
+        conv.events.append({"type": "restore", "line": line,
+                            "recap_used": recap is not None})
+        folder.update_meta(backend=session.backend.name, model=session.model,
+                           last_active=_now())
+        return conv
+
+    # ---- backend context ----
+
+    def _is_persistent_backend(self) -> bool:
+        return hasattr(self.session.backend, "configure_persistence")
+
+    def _start_backend_fresh(self, *, record: bool = True) -> None:
+        """Start a new SDK conversation; ``record`` writes its id to meta.
+
+        The recap fallback passes record=False: the id is recorded only
+        after a turn succeeds, so a failed retry leaves the old transcript
+        to be tried again on the next open.
+        """
+        if not self._is_persistent_backend():
+            return
+        sid = str(uuid.uuid4())
+        self.session.backend.configure_persistence(
+            store=FolderSessionStore(self.folder.claude_dir),
+            cwd=self.folder.path, session_id=sid)
+        if record:
+            self.folder.update_meta(claude_session_id=sid)
+
+    def _restore_model_context(self, meta: dict) -> bool:
+        """Restore what the model remembers; False means a recap is needed."""
+        same_backend = meta.get("backend") == self.session.backend.name
+        history = load_history(self.folder.history_path) if same_backend else None
+        if self._is_persistent_backend():
+            if history is not None:
+                self.session.history = history
+            store = FolderSessionStore(self.folder.claude_dir)
+            sid = meta.get("claude_session_id")
+            if same_backend and sid and store.has_transcript(sid):
+                self.session.backend.configure_persistence(
+                    store=store, cwd=self.folder.path, resume=sid)
+                return True
+            self._start_backend_fresh()
+            return False
+        if history is None:
+            return False
+        size = sum(len(json.dumps(message_to_dict(m))) for m in history)
+        if size > HISTORY_CHAR_BUDGET:
+            return False
+        self.session.history = history
+        return True
+
+    # ---- event logging ----
+
+    def _on_cell(self, record: dict) -> None:
+        self.events.append({"type": "cell", **record})
+
+    def _log_text(self, text: str) -> None:
+        self._text_logged = True
+        self.events.append({"type": "assistant_text", "text": text})
+
+    def _log_tool_call(self, call) -> None:
+        self.events.append({"type": "tool_call", "id": call.id,
+                            "name": call.name, "args": call.args})
+
+    def _log_tool_result(self, result) -> None:
+        self.events.append({"type": "tool_result", "id": result.id,
+                            "output": result.output,
+                            "is_error": result.is_error})
+
+    # ---- turns ----
+
+    def send(self, prompt: str, *, on_text=None, on_tool_call=None,
+             on_tool_result=None, on_event=None, confirm=None):
+        if not self.folder.read_meta().get("title"):
+            self.folder.update_meta(title=prompt[:TITLE_LENGTH])
+        n_before = len(self.events.read())
+        self.events.append({"type": "user", "text": prompt})
+        callbacks = dict(
+            on_text=_chain(self._log_text, on_text),
+            on_tool_call=_chain(self._log_tool_call, on_tool_call),
+            on_tool_result=_chain(self._log_tool_result, on_tool_result),
+            on_event=on_event, confirm=confirm)
+        model_prompt = (prompt if self._pending_note is None
+                        else f"{self._pending_note}\n\n{prompt}")
+        mark = len(self.session.history)
+        self._text_logged = False
+        completed = False
+        try:
+            try:
+                result = self.session.send(model_prompt, **callbacks)
+            except LLMResumeError:
+                del self.session.history[mark:]
+                model_prompt = self._fall_back_to_recap(prompt, n_before)
+                result = self.session.send(model_prompt, **callbacks)
+            completed = True
+        except Exception as e:
+            self.events.append({"type": "error",
+                                "text": f"{type(e).__name__}: {e}"})
+            self.events.append({"type": "turn_end", "status": "error"})
+            raise
+        finally:
+            if not completed:
+                self._after_failed_turn()
+        self._pending_note = None
+        if not self._text_logged and result.final_text:
+            # Backends that do not stream (FakeBackend) never fire on_text.
+            self._log_text(result.final_text)
+        self.events.append({"type": "turn_end", "status": result.stop_reason})
+        self._after_turn()
+        return result
+
+    def _fall_back_to_recap(self, prompt: str, n_before: int) -> str:
+        self.session.backend.close()
+        self._start_backend_fresh(record=False)
+        # Only events before this turn: not the prompt, nor anything the
+        # failed attempt logged.
+        earlier = self.events.read()[:n_before]
+        index, saved, current = self._restore_parts or (None, None, None)
+        note, line = restore_messages(index, saved, current,
+                                      recap=build_recap(earlier))
+        self.restore_line = line
+        # Kept until a turn succeeds: if this retry fails too, the next
+        # send still gives the fresh SDK conversation the recap.
+        self._pending_note = note
+        self.events.append({"type": "restore", "line": line,
+                            "recap_used": True})
+        return f"{note}\n\n{prompt}"
+
+    def _after_failed_turn(self) -> None:
+        """Best effort after a turn that raised: keep what it computed."""
+        try:
+            save_history(self.folder.history_path, self.session.history)
+        except Exception:  # noqa: BLE001 -- must not hide the turn's error
+            pass
+        try:
+            self.checkpoint(wait=5)
+        except Exception:  # noqa: BLE001 -- checkpoint() logs KernelError
+            pass
+
+    def _after_turn(self) -> None:
+        self.events.sync()
+        save_history(self.folder.history_path, self.session.history)
+        changes = {"last_active": _now()}
+        sid = getattr(self.session.backend, "session_id", None)
+        if sid:
+            changes["claude_session_id"] = sid
+        self.folder.update_meta(**changes)
+        self.checkpoint()
+
+    # ---- checkpoints and shutdown ----
+
+    def checkpoint(self, wait: float | None = None) -> dict | None:
+        """Checkpoint the variables; logs and returns the index (None if no worker).
+
+        ``wait`` bounds how long to wait for a running cell; a cell still
+        running then is logged as a failed checkpoint.
+        """
+        try:
+            index = self.client.checkpoint(wait=wait)
+        except KernelError as e:
+            self.events.append({"type": "error",
+                                "text": f"Checkpoint failed: {e}"})
+            return None
+        if index is not None:
+            self.events.append({
+                "type": "checkpoint",
+                "saved": [v["name"] for v in index["variables"]
+                          if v["status"] == "saved"],
+                "not_saved": [v["name"] for v in index["variables"]
+                              if v["status"] != "saved"],
+                "bytes": index["total_bytes"]})
+        return index
+
+    def interrupt(self) -> None:
+        """Stop the running cell and ask the model to stop; any thread."""
+        self.executor.interrupt()
+        backend_interrupt = getattr(self.session.backend, "interrupt", None)
+        if backend_interrupt is not None:
+            backend_interrupt()
+
+    def close(self) -> None:
+        """Stop any running cell, checkpoint, stop the worker, disconnect.
+
+        A cell that stops on SIGINT is still checkpointed; one that ignores
+        it is killed without starting a new worker. The checkpoint waits at
+        most 30 s, so close() never hangs on a stuck cell. The Session stays
+        usable for a new Conversation (its skills server is owned by the
+        caller). Releases the folder lock taken by create() or open().
+        """
+        try:
+            begin_close = getattr(self.client, "begin_close", None)
+            if begin_close is not None:
+                begin_close()
+            self.executor.interrupt()
+            self.checkpoint(wait=30)
+            self.events.sync()
+            self.executor.close()
+            if self.session.executor is self.executor:
+                self.session.executor = None
+            backend_close = getattr(self.session.backend, "close", None)
+            if backend_close is not None:
+                backend_close()
+        finally:
+            self.folder.release_lock()
