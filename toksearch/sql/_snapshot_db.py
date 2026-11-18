@@ -22,8 +22,10 @@ its module `__getattr__`, so either module may be imported first.
 
 import os
 import re
+import ssl
 import sys
 import threading
+import time
 import warnings
 
 from .snapshot import (
@@ -114,6 +116,14 @@ def _open_duckdb(duckdb, token, base=None):
                 "duckdb-extension-httpfs from conda-forge; it is not fetched "
                 "from the network at first use.".format(
                     str(exc).splitlines()[0])) from exc
+    # httpfs otherwise verifies TLS against the host's system bundle, which
+    # can predate a root the OSDF caches use (RHEL 8's 2022 bundle lacks
+    # SSL.com TLS RSA Root CA 2022); the environment's own bundle is current.
+    # GLOBAL: queries run on cursors, which are new connections and do not
+    # inherit a plain SET.
+    cafile = ssl.get_default_verify_paths().cafile
+    if cafile:
+        con.execute("SET GLOBAL ca_cert_file = " + _sql_literal(cafile))
     if token:
         _set_secret(duckdb, con, token, base)
     con.execute("SET enable_object_cache = true")
@@ -352,6 +362,14 @@ class SnapshotConnection:
 
 #: an HTTP auth refusal in a DuckDB error, as httpfs words it
 _AUTH_FAILURE = re.compile(r"HTTP (401|403)\b")
+#: a TLS verification failure, as httpfs words it. The director picks a cache
+#: per request, so it is retried: in 2026-11 snapshot reads failed TLS
+#: intermittently even with a current CA bundle, while every cache probed
+#: verified, and httpfs never names the cache it was redirected to.
+_TLS_FAILURE = re.compile(r"SSL peer certificate or SSH remote key was not OK")
+#: retries after a TLS failure, and the pause before each
+TLS_RETRIES = 2
+TLS_RETRY_PAUSE = 1.0
 
 
 class SnapshotCursor:
@@ -370,6 +388,7 @@ class SnapshotCursor:
         conn = self._conn
         started_with = conn._token_seen
         reauthorized = False
+        tls_retries = 0
         bound = 0
         pending_bind = None    # a table DuckDB reported missing, bound in the try
         while True:
@@ -388,6 +407,14 @@ class SnapshotCursor:
                 auth_failure = _AUTH_FAILURE.search(text)
                 if auth_failure and not reauthorized and conn._refresh_token(started_with):
                     reauthorized = True        # one re-read of the token, one retry
+                    continue
+                if _TLS_FAILURE.search(text) and tls_retries < TLS_RETRIES:
+                    tls_retries += 1
+                    warnings.warn(
+                        "[snapshot {}] TLS verification failed reading the "
+                        "snapshot; retrying through another cache ({}/{})".format(
+                            conn.snapshot, tls_retries, TLS_RETRIES), RuntimeWarning)
+                    time.sleep(TLS_RETRY_PAUSE)
                     continue
                 missing = (None if auth_failure
                            or not isinstance(exc, duckdb.CatalogException)
