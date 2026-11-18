@@ -60,15 +60,32 @@ def _req_key(req):
 
 
 def _fetch_tree_group_via_server(server, treename, shot, reqs):
-    """Fetch all reqs sharing (treename, shot) in one getMany() round trip against server."""
+    """Fetch all reqs sharing (treename, shot) against server.
+
+    getMany() truncates multi-dimensional string arrays (e.g. EFIT's
+    NAMELISTS:KEQDSKS) to their first row, so reqs with isolated=True are
+    fetched one by one with get(). The rest share one getMany() round trip.
+    """
     conn = MdsConnectionRegistry().connect(server)
     conn.openTree(treename, shot)
-    many = conn.getMany()
+    results = {}
+    batched_reqs = []
     for req in reqs:
+        if not getattr(req, "isolated", False):
+            batched_reqs.append(req)
+            continue
+        try:
+            results[_req_key(req)] = conn.get(req.mds_path).data()
+        except MDSplus.mdsExceptions.MdsException as e:
+            results[_req_key(req)] = e
+    if not batched_reqs:
+        return results
+
+    many = conn.getMany()
+    for req in batched_reqs:
         many.append(req.mds_path, req.mds_path)
     fetched_data = many.execute()
-    results = {}
-    for req in reqs:
+    for req in batched_reqs:
         try:
             results[_req_key(req)] = many.get(req.mds_path).data()
         except MdsIpException:
@@ -138,7 +155,9 @@ def fetch_many_from_req(reqs):
     group per treename; the rest batch per (treename, shot). Each group is tried
     against the servers from _servers() in order.
 
-    A req only needs mds_path, shot and treename attributes.
+    A req only needs mds_path, shot and treename attributes. An optional
+    isolated=True attribute fetches a tree req with get() instead of in the
+    getMany() batch.
 
     :return: dict mapping each (mds_path, shot, treename) to its fetched value,
         or to the Exception if fetching failed.
