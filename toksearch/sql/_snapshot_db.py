@@ -119,9 +119,11 @@ def _open_duckdb(duckdb, token, base=None):
     # httpfs otherwise verifies TLS against the host's system bundle, which
     # can predate a root the OSDF caches use (RHEL 8's 2022 bundle lacks
     # SSL.com TLS RSA Root CA 2022); the environment's own bundle is current.
+    # GLOBAL: queries run on cursors, which are new connections and do not
+    # inherit a plain SET.
     cafile = ssl.get_default_verify_paths().cafile
     if cafile:
-        con.execute("SET ca_cert_file = " + _sql_literal(cafile))
+        con.execute("SET GLOBAL ca_cert_file = " + _sql_literal(cafile))
     if token:
         _set_secret(duckdb, con, token, base)
     con.execute("SET enable_object_cache = true")
