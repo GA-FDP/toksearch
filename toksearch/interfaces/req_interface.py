@@ -22,7 +22,7 @@ _log = logging.getLogger(__name__)
 
 # Maps a pseudo-treename to fetch(server, reqs). Reqs carrying such a treename
 # need no open tree, so they batch into a single group regardless of shot.
-# Empty here; device packages (e.g. toksearch_d3d) patch in their own.
+# Empty here; device packages (e.g. toksearch_d3d) add theirs via register_device.
 _TREELESS_GROUP_FETCHERS = {}
 
 # Attempts per server, with the cached connection dropped between them.
@@ -44,17 +44,30 @@ _ATTEMPTS_PER_SERVER = 2
 
 
 def _servers() -> list[str]:
-    """Ordered list of MDSplus servers to try for each batched group.
-
-    Device packages (e.g. toksearch_d3d) patch this on import.
-    """
+    """Default ordered list of MDSplus servers, replaced by register_device()."""
     raise RuntimeError(
         "No MDSplus servers configured for toksearch.interfaces.req_interface; "
-        "import a device package (e.g. toksearch_d3d) that sets them."
+        "pass servers= to fetch_many_from_req, or import a device package "
+        "(e.g. toksearch_d3d) that calls register_device()."
     )
 
 
-def _req_key(req):
+def register_device(servers=None, treeless_fetchers=None):
+    """Set the process-wide defaults that fetch_many_from_req falls back on.
+
+    :param servers: callable returning the ordered server list, called once per
+        fetch_many_from_req call. Replaces any earlier registration.
+    :param treeless_fetchers: {pseudo-treename: fetch(server, reqs)}, added to
+        those already registered.
+    """
+    global _servers
+    if servers is not None:
+        _servers = servers
+    if treeless_fetchers:
+        _TREELESS_GROUP_FETCHERS.update(treeless_fetchers)
+
+
+def req_key(req):
     """Identity of a req: (mds_path, shot, treename). Matches Requirement.as_key()."""
     return (req.mds_path, req.shot, req.treename)
 
@@ -75,9 +88,9 @@ def _fetch_tree_group_via_server(server, treename, shot, reqs):
             batched_reqs.append(req)
             continue
         try:
-            results[_req_key(req)] = conn.get(req.mds_path).data()
+            results[req_key(req)] = conn.get(req.mds_path).data()
         except MDSplus.mdsExceptions.MdsException as e:
-            results[_req_key(req)] = e
+            results[req_key(req)] = e
     if not batched_reqs:
         return results
 
@@ -87,10 +100,10 @@ def _fetch_tree_group_via_server(server, treename, shot, reqs):
     fetched_data = many.execute()
     for req in batched_reqs:
         try:
-            results[_req_key(req)] = many.get(req.mds_path).data()
+            results[req_key(req)] = many.get(req.mds_path).data()
         except MdsIpException:
             # This is needed to propagate the %TREE-E-NODATA exception which is not properly raised if many.get fails
-            results[_req_key(req)] = MDSplus.mdsExceptions.MdsException(MDSplus.Data.data(fetched_data[req.mds_path]["error"]))
+            results[req_key(req)] = MDSplus.mdsExceptions.MdsException(MDSplus.Data.data(fetched_data[req.mds_path]["error"]))
     return results
 
 
@@ -108,8 +121,8 @@ def _drop_connection(server):
         _log.debug("Could not cleanly drop the connection to %s (%s)", server, e)
 
 
-def _fetch_group_with_fallback(fetch, group):
-    """Run fetch(server, group) against each of _servers() in turn.
+def _fetch_group_with_fallback(fetch, group, servers):
+    """Run fetch(server, group) against each of servers in turn.
 
     fetch performs one batched round trip against the given server, storing any
     per-node failure in-band. Only a whole-group failure (connect, openTree or
@@ -120,10 +133,8 @@ def _fetch_group_with_fallback(fetch, group):
     dropped in between and after -- see that constant for why a failed batch
     means the connection is suspect and not just the call.
     """
-    servers = _servers()
-
     last_exc = None
-    for server in servers:
+    for i, server in enumerate(servers):
         for attempt in range(_ATTEMPTS_PER_SERVER):
             try:
                 return fetch(server, group)
@@ -134,46 +145,61 @@ def _fetch_group_with_fallback(fetch, group):
                 # failure into every later group, which is the whole point.
                 _drop_connection(server)
                 if attempt + 1 < _ATTEMPTS_PER_SERVER:
-                    _log.warning(
+                    _log.info(
                         "Batched fetch via %s failed (%s); dropping the cached "
                         "connection and retrying once",
                         server, e,
                     )
                 else:
+                    remaining = len(servers) - i - 1
                     _log.warning(
-                        "Batched fetch via %s failed again (%s); trying next server",
-                        server, e,
+                        "Batched fetch of %d reqs (treename=%s, shot=%s, e.g. %s) "
+                        "via %s failed %d times (%s); %s",
+                        len(group), group[0].treename, group[0].shot,
+                        ", ".join(str(r.mds_path) for r in group[:3]),
+                        server, _ATTEMPTS_PER_SERVER, e,
+                        f"trying {remaining} more server(s)" if remaining else "giving up",
                     )
-                    _log.warning("Attempted to fetch %s", group)
-    return {_req_key(req): last_exc for req in group}
+                    _log.debug("Full group: %s", group)
+    return {req_key(req): last_exc for req in group}
 
 
-def fetch_many_from_req(reqs):
+def fetch_many_from_req(reqs, servers=None, treeless_fetchers=None):
     """Fetch many reqs at once as batched getMany() round trips.
 
-    Reqs whose treename is registered in _TREELESS_GROUP_FETCHERS batch into one
-    group per treename; the rest batch per (treename, shot). Each group is tried
-    against the servers from _servers() in order.
+    Reqs whose treename has a tree-less fetcher batch into one group per
+    treename; the rest batch per (treename, shot). Each group is tried against
+    the servers in order.
 
     A req only needs mds_path, shot and treename attributes. An optional
     isolated=True attribute fetches a tree req with get() instead of in the
     getMany() batch.
 
+    :param servers: ordered servers to try; defaults to the registered ones
+        (see register_device).
+    :param treeless_fetchers: extra {pseudo-treename: fetch(server, reqs)},
+        overriding registered ones of the same name.
+
     :return: dict mapping each (mds_path, shot, treename) to its fetched value,
         or to the Exception if fetching failed.
     """
+    fetchers = {**_TREELESS_GROUP_FETCHERS, **(treeless_fetchers or {})}
     treeless_groups = {}
     tree_groups = {}
     for req in reqs:
-        if req.treename in _TREELESS_GROUP_FETCHERS:
+        if req.treename in fetchers:
             treeless_groups.setdefault(req.treename, []).append(req)
         else:
             tree_groups.setdefault((req.treename, req.shot), []).append(req)
 
     results = {}
+    if not (treeless_groups or tree_groups):
+        return results
+    servers = list(servers) if servers is not None else list(_servers())
+
     for treename, group in treeless_groups.items():
         results.update(
-            _fetch_group_with_fallback(_TREELESS_GROUP_FETCHERS[treename], group)
+            _fetch_group_with_fallback(fetchers[treename], group, servers)
         )
     for (treename, shot), group in tree_groups.items():
         results.update(
@@ -182,6 +208,7 @@ def fetch_many_from_req(reqs):
                     server, tn, sh, g
                 ),
                 group,
+                servers,
             )
         )
 
