@@ -158,9 +158,11 @@ class TestFetchManyFromReq(unittest.TestCase):
             {reqs[0].as_key(): "second-try"},
         ]
 
-        with self.assertLogs(ri._log, "WARNING"):
+        with self.assertLogs(ri._log, "INFO") as logs:
             result = ri.fetch_many_from_req(reqs)
 
+        # A retry that succeeds is not worth a warning.
+        self.assertEqual([r.levelname for r in logs.records], ["INFO"])
         # Retried against the same server, not handed straight to the next.
         self.assertEqual(
             self.mock_treeless.call_args_list,
@@ -214,12 +216,75 @@ class TestFetchManyFromReq(unittest.TestCase):
         self.assertIs(result[reqs[0].as_key()], boom)
 
 
+class TestOverridesAndLogging(unittest.TestCase):
+    setUp = TestFetchManyFromReq.setUp
+
+    def test_exhausting_a_server_logs_one_warning_without_the_group(self):
+        reqs = [FakeReq(f"P{i}", 12345, "TREE_A") for i in range(50)]
+        self.mock_servers.return_value = [_SERVER_A]
+        self.mock_tree.side_effect = RuntimeError("down")
+
+        with self.assertLogs(ri._log, "WARNING") as logs:
+            ri.fetch_many_from_req(reqs)
+
+        self.assertEqual(len(logs.records), 1)
+        msg = logs.records[0].getMessage()
+        self.assertIn("50 reqs", msg)
+        self.assertIn("giving up", msg)
+        self.assertNotIn("P49", msg)
+
+    def test_servers_argument_overrides_registered_servers(self):
+        reqs = [FakeReq("BT", 12345, "TREE_A")]
+        self.mock_tree.side_effect = lambda server, tn, sh, group: {
+            r.as_key(): server for r in group
+        }
+
+        result = ri.fetch_many_from_req(reqs, servers=["explicit"])
+
+        self.assertEqual(result[reqs[0].as_key()], "explicit")
+        self.mock_servers.assert_not_called()
+
+    def test_treeless_fetchers_argument_adds_a_group_fetcher(self):
+        reqs = [FakeReq("BT", 12345, "__mine__"), FakeReq("IP", 1, "__mine__")]
+        mine = MagicMock(side_effect=lambda server, group: {
+            r.as_key(): "mine" for r in group
+        })
+
+        result = ri.fetch_many_from_req(reqs, treeless_fetchers={"__mine__": mine})
+
+        mine.assert_called_once_with(_SERVER_A, reqs)
+        self.mock_tree.assert_not_called()
+        self.assertEqual(set(result.values()), {"mine"})
+
+
+class TestRegisterDevice(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(ri, "_servers", ri._servers))
+        self.enterContext(patch.dict(ri._TREELESS_GROUP_FETCHERS, clear=True))
+
+    def test_registered_servers_and_fetchers_become_the_defaults(self):
+        fetcher = MagicMock(side_effect=lambda server, group: {
+            r.as_key(): server for r in group
+        })
+        ri.register_device(
+            servers=lambda: ["registered"], treeless_fetchers={_TREELESS: fetcher}
+        )
+
+        reqs = [FakeReq("BT", 12345, _TREELESS)]
+        result = ri.fetch_many_from_req(reqs)
+
+        self.assertEqual(result[reqs[0].as_key()], "registered")
+
+
 class TestNoServersConfigured(unittest.TestCase):
     def test_fetch_raises_without_device_package(self):
         # No device package is imported in toksearch's own tests, so _servers
         # is still the generic default.
         with self.assertRaisesRegex(RuntimeError, "No MDSplus servers configured"):
             ri.fetch_many_from_req([FakeReq("BT", 12345, "TREE_A")])
+
+    def test_no_reqs_needs_no_servers(self):
+        self.assertEqual(ri.fetch_many_from_req([]), {})
 
 
 class TestFetchTreeGroupViaServer(unittest.TestCase):
